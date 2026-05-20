@@ -66,6 +66,14 @@ Selected at run time, not baked in. RFC §14.
 more `ui://` UI resources. A plain MCP server and an MCP App are the same artifact
 at different levels of completeness. RFC §4.1.
 
+**Drift cross-check** — the `internal/codegen` library check that hard-fails when
+the generated JSON Schema and the generated TypeScript for a contract desync (a
+property present in one artifact and absent or differently-optional in the
+other), or when generated output is stale versus its Go source. Because Design A
+generates schema and TypeScript independently (RFC §6.2), the cross-check is what
+makes a generator bug a loud build failure rather than silent server↔UI drift.
+Phase 18's `dockyard validate` command calls it. RFC §6.2. D-034.
+
 **Forward-only migration** — an append-only, ordered, idempotent schema or data step
 applied through the `Store` seam's migration runner. Once a migration has merged it
 is never edited; the runner rejects reordering, removal, or post-merge mutation.
@@ -78,6 +86,12 @@ RFC §13, AGENTS.md §9. D-027.
 is marshalled deterministically and pinned by golden tests so any drift is a
 visible diff. The typed tool builder registers the generated schema on the tool,
 so the schema a host sees is provably the contract. RFC §6.1, §6.2. D-030, D-031.
+
+**Generated TypeScript** — `web/src/generated/contracts.ts`: the TypeScript
+contract types produced from the Go contract structs by `internal/codegen` via
+`gzuidhof/tygo`. The UI-facing half of the Design A codegen pipeline; never
+hand-authored (P1), deterministic, headered with the `Code generated … DO NOT
+EDIT.` marker, and pinned by golden tests. RFC §6.2. D-032, D-033.
 
 ## H
 
@@ -155,6 +169,12 @@ a future Postgres driver addable without a rewrite. RFC §13. D-007, D-025.
 `init()` blank-import. V1 ships two: `inmem` (in-memory, for single-user stdio apps)
 and `sqlite` (durable, `modernc.org/sqlite`). Every driver must pass the conformance
 suite. RFC §13. D-026.
+
+**Stale generated output** — a generated artifact (a JSON Schema or
+`contracts.ts`) whose on-disk content no longer matches a fresh regeneration
+from its Go contract source — i.e. the source changed without `dockyard
+generate` being rerun. Detected by the drift cross-check (`codegen.CheckStale`);
+a build blocker, never a warning. RFC §6.2. D-034.
 
 ## T
 
