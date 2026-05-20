@@ -5,8 +5,10 @@ on:
     branches: [main]
   pull_request:
 
-env:
-  CGO_ENABLED: "0"
+# Note: CGO_ENABLED is set per-target in the Makefile, not globally — `make build`
+# pins CGO_ENABLED=0 (the shipped binary is CGo-free) while `make test` needs
+# CGO_ENABLED=1 for the -race detector. A global override here would break one or
+# the other.
 
 jobs:
   mirror:

@@ -193,8 +193,11 @@ MCP host profiles (RFC §7.5). Drivers register via `init()` blank-import.
 
 ## 5. Code conventions (Go)
 
-- **Toolchain.** Go 1.26, pinned in every `go.mod`. **No CGo** — `CGO_ENABLED=0` is
-  enforced by CI; a dependency that needs CGo is rejected.
+- **Toolchain.** Go 1.26, pinned in every `go.mod`. **No CGo in the shipped
+  artifact** — `make build` pins `CGO_ENABLED=0`; a runtime dependency that needs
+  CGo is rejected. Test binaries are the one exception: `make test` runs with
+  `CGO_ENABLED=1` because the `-race` detector requires CGo — tests are not
+  shipped, so this does not weaken the CGo-free guarantee.
 - **Style.** `gofmt -s`; `go vet` and `golangci-lint run` clean. Generated code is
   marked with a `// Code generated … DO NOT EDIT.` header and stays boring and
   readable (RFC: "generated code teams are happy to own").
@@ -320,7 +323,8 @@ These enforce P1–P4 (§1). They are binding on every phase.
 
 - Hardcoded secrets, including in tests.
 - `panic` for control flow; panicking across the MCP boundary.
-- A CGo dependency, or building with `CGO_ENABLED=1`.
+- A CGo runtime dependency, or building the shipped artifact with `CGO_ENABLED=1`
+  (`-race` test runs use `CGO_ENABLED=1` and are exempt — §5).
 - Hand-written JSON Schema or TypeScript for a tool contract (violates P1).
 - Reading runtime internals to observe instead of emitting an `obs/v1` event
   (violates P2).

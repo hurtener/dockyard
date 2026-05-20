@@ -24,10 +24,12 @@ build:
 
 test:
 	@if [ -n "$(GO_SOURCES)" ]; then \
-		CGO_ENABLED=0 go test -race ./...; \
+		CGO_ENABLED=1 go test -race ./...; \
 	else \
 		echo "skip test: no Go sources yet"; \
 	fi
+# CGO_ENABLED=1 is required by the -race detector. This is test-only; the
+# shipped binary is still CGo-free — `make build` pins CGO_ENABLED=0.
 
 vet:
 	@if [ -n "$(GO_SOURCES)" ]; then \
