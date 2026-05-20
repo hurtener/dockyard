@@ -248,6 +248,62 @@ spec→mockup→build) is mandatory hygiene.
 
 ---
 
+## D-022 — `protocolcodec` exposes versioned codecs behind a `Codec` interface
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §5.4, §16, `internal/protocolcodec`, phase plan 02
+**Why:** RFC §16 mandates codecs keyed on the negotiated `protocolVersion`.
+Phase 02 makes that concrete: `protocolcodec` exposes a `Codec` interface and a
+registry, with `CodecFor(version)` selecting an implementation and falling back
+to the default codec for an empty or unrecognised version (graceful
+degradation, RFC §16 item 7), plus `CodecForStrict` for tooling that must flag
+an unknown version. V1 registers one `v1Codec` for every supported version
+because the Apps (2026-01-26) and Tasks (experimental) wire shapes are stable
+across them; the registry is the seam at which a future spec bump registers a
+*new* codec for a *new* version, leaving old peers on their old codec. Encoders
+emit only current spec shapes; decoders are tolerant (ignore unknown keys,
+accept deprecated forms).
+
+---
+
+## D-023 — The deprecated flat `_meta["ui/resourceUri"]` form is read-tolerated, never emitted
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §16 item 3, RFC §7.1, brief 01 §2.3,
+`internal/protocolcodec`
+**Why:** The MCP Apps spec (revision 2026-01-26) marks the flat
+`_meta["ui/resourceUri"]` form deprecated and slated for removal before GA,
+replaced by the nested `_meta.ui` object. Per RFC §16 item 3 deprecated shapes
+are tolerated on read and never emitted. `protocolcodec` implements exactly
+that: `DecodeAppsToolMeta` reads the nested form and, if absent, falls back to
+the flat form (so a tool authored against an older host still links its UI);
+`EncodeAppsToolMeta` emits only the nested form and actively strips the flat
+key from any base `_meta` it is given. A round-trip test (decode-flat →
+re-encode → assert flat key absent) makes the guarantee binding.
+
+---
+
+## D-024 — Phase 02 hand-writes the Tasks wire types; the schema→Go generator is deferred
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §8.2, §16 item 4, brief 02 §3/§5, phase plan 02
+("Findings I'm departing from")
+**Why:** RFC §16 item 4 and brief 02 §5 describe the Tasks wire layer as
+"code-generated from the vendored schema." Phase 02's scope is the isolation
+seam and the `_meta`-borne / capability surface — a small, stable subset of the
+Tasks schema. Standing up a TypeScript-schema → Go code generator now would be
+premature: the generator is a contracts-pipeline concern (Wave 2, Phase 04,
+RFC §6.2) and the full `tasks/*` method-envelope wire layer is needed only when
+the V1 Tasks runtime lands (Wave 5). Phase 02 therefore vendors the
+authoritative schema (`mcp-tasks-experimental.schema.ts`, pinned by SHA) and
+hand-writes the Go wire types this phase needs, guarded by golden tests so a
+spec change is a visible diff. The forward-compatibility property is preserved
+(one seam, pinned snapshot, regenerate-and-diff discipline); only the *means*
+of regeneration is deferred. When the generated layer lands it replaces the
+hand-written types behind the unchanged `Codec` interface.
 ## D-019 — Pin the Go MCP SDK to v1.6.0
 
 **Date:** 2026-05-20
