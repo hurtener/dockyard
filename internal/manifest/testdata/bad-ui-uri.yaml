@@ -1,0 +1,15 @@
+name: bad-uri
+title: Bad URI
+version: 1.0.0
+runtime:
+  transports: [stdio]
+tools:
+  - name: echo
+    description: Echo.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput
+apps:
+  - id: widget
+    uri: http://example.com/main
+    entry: web/src/apps/widget.svelte
+    display_modes: [inline]

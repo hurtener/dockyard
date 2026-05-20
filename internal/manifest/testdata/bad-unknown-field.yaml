@@ -1,0 +1,11 @@
+name: unknown-field
+title: Unknown Field
+version: 1.0.0
+mascot: dolphin
+runtime:
+  transports: [stdio]
+tools:
+  - name: echo
+    description: Echo.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput

@@ -1,0 +1,10 @@
+name: bad-contract
+title: Bad Contract
+version: 1.0.0
+runtime:
+  transports: [stdio]
+tools:
+  - name: echo
+    description: Echo.
+    input: NotAGoTypeReference
+    output: internal/contracts.EchoOutput

@@ -1,0 +1,6 @@
+name: no-tools
+title: No Tools
+version: 1.0.0
+runtime:
+  transports: [stdio]
+tools: []

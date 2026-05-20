@@ -1,0 +1,15 @@
+name: bad-display
+title: Bad Display
+version: 1.0.0
+runtime:
+  transports: [stdio]
+tools:
+  - name: echo
+    description: Echo.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput
+apps:
+  - id: widget
+    uri: ui://bad-display/main
+    entry: web/src/apps/widget.svelte
+    display_modes: [hologram]

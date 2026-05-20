@@ -1,0 +1,10 @@
+name: blank-server
+title: Blank Server
+version: 1.0.0
+runtime:
+  transports: [stdio]
+tools:
+  - name: echo
+    description: Echo the input back.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput

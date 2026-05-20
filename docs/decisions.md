@@ -570,3 +570,78 @@ value-type divergence would be a generator bug already caught by the
 independent golden tests (D-031, D-033). Full type-graph equality is left as a
 possible later hardening if a generator-divergence class ever escapes the golden
 tests.
+
+---
+
+## D-035 — The manifest is parsed and validated structurally; quality gates are parsed but enforced later
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** `internal/manifest` (`load.go`, `validate.go`), RFC §4.2, §9.4
+**Why:** RFC §4.2 makes `dockyard.app.yaml` the control plane every Wave 7
+command reads. Phase 06's scope is the schema + loader + structural validation
+only — not the commands that consume it. The boundary is drawn deliberately:
+`internal/manifest` checks everything that is *structural* — required identity
+fields, a well-formed semantic version, known enum values, unique tool and app
+names, well-formed `ui://` URIs, and the `tools[].ui` → `apps[].id`
+cross-reference — and rejects an invalid manifest with a source-located error.
+It does **not** touch the filesystem or Go source: the `quality.*` block
+(RFC §9.4) is parsed and shape-checked into the typed `Quality` struct but its
+gates (loading/empty/error states present, fixtures present, contract tests
+present) are *enforced* by `dockyard validate` (Phase 18), which is the
+component with the project tree in hand. This keeps the manifest package a pure,
+fast, side-effect-free library that any later command can call, and concentrates
+all filesystem-aware checks in the CLI where they belong. Folding gate
+enforcement into the loader was rejected: it would make every manifest load a
+filesystem walk and couple `internal/manifest` to the generated-project layout.
+
+---
+
+## D-036 — Manifest errors are source-located; YAML positions come from a node-walk index
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** `internal/manifest` (`errors.go`, `position.go`,
+`load.go`), RFC §4.2
+**Why:** The RFC §4.2 acceptance criterion is that an invalid manifest "fails
+with source-located errors (`file:line` where possible)". A typed Go struct
+decoded from YAML has, by itself, no line information, so structural validation
+running on the struct cannot point at a line. Phase 06 solves this by decoding
+the document **twice**: once into a `yaml.Node` tree, from which a
+`positionIndex` records the line of every node keyed by its dotted path
+(`tools[0].input`); and once into the typed `Manifest`. Validation then looks up
+each fault's field path in the index, so a struct-level rejection still renders
+as `dockyard.app.yaml:7: tools[0].input: required`. Where a position is genuinely
+unavailable — a missing field has no node, and `Manifest.Validate()` on a
+hand-built struct has no YAML at all — the error degrades cleanly to naming the
+source without a line, never failing to report. `yaml.v3`'s `KnownFields(true)`
+is enabled so an unknown manifest key is a hard error, not a silent drop, and
+faults are accumulated into an `ErrorList` so one load reports every problem.
+A regex-only single-pass validator was rejected: it cannot give typed access to
+the manifest or precise per-node positions.
+
+---
+
+## D-037 — Tool contract references resolve through a one-method ContractResolver seam
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** `internal/manifest` (`resolve.go`), `internal/codegen`
+(`SchemaForType`), RFC §4.2, §6.1
+**Why:** RFC §4.2 settles that `tools[].input` / `tools[].output` are **Go type
+references**, not inline schema — "the codegen pipeline resolves them; the
+manifest never duplicates schema". The reference's wire form is
+`"<package/path>.TypeName"`. Phase 06 must prove these references *resolve*
+(an acceptance criterion) without owning the mechanism that locates a Go type
+from a string — that mechanism is `dockyard generate`'s (Phase 18), and it will
+scan Go source. So Phase 06 defines a minimal seam: `ContractResolver`, a single
+`Resolve(ref string) (*jsonschema.Schema, error)` method, and ships
+`RegistryResolver` — an explicit `reference → reflect.Type` registry whose
+`Resolve` runs the type through `internal/codegen.SchemaForType`, the
+reflect-based entry point Phase 04 shaped for exactly this caller. Phase 18's
+source-scanning resolver satisfies the same one-method interface, so the
+manifest package never depends on *how* a type is found. The reference parser
+(`ParseContractReference`) is also exported, since `dockyard generate` needs the
+split package path and type name. Embedding type resolution inside the manifest
+loader was rejected: it would couple `internal/manifest` to Go source scanning
+and to the generated-project layout, the same coupling D-035 avoids.

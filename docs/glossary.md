@@ -47,6 +47,11 @@ map). RFC §6.1. D-029, D-030.
 structs (the single source of truth) from which JSON Schema, TypeScript types, and
 fixtures are generated. RFC §6. D-004.
 
+**Contract reference** — the `"<package/path>.TypeName"` string a manifest's
+`tools[].input` / `tools[].output` field holds: a reference to a Go contract
+struct, not inline schema. Resolved to a JSON Schema through the manifest's
+`ContractResolver` seam (the codegen pipeline). RFC §4.2, §6.1. D-037.
+
 ## D
 
 **Deployment mode** — one of the three run-time modes a single Dockyard app binary
@@ -112,7 +117,9 @@ RFC §13. D-025.
 
 **Manifest** — `dockyard.app.yaml`, an app's control plane: it declares tools,
 `ui://` apps, transports, and quality requirements, and drives `validate`,
-`generate`, `dev`, `test`, `build`, and `install`. RFC §4.2.
+`generate`, `dev`, `test`, `build`, and `install`. Loaded and structurally
+validated by `internal/manifest` into a typed `Manifest` Go struct; invalid
+manifests fail with source-located (`file:line`) errors. RFC §4.2. D-035, D-036.
 
 **MCP server core** — the `runtime/server` package: the part of the app runtime
 that wraps the official Go MCP SDK and exposes Dockyard's server construction,
@@ -140,6 +147,13 @@ compatibility (P3). RFC §5.4. D-009.
 **P1 / P2 / P3 / P4** — Dockyard's four binding properties: contract-first;
 observability is a protocol; forward-compatibility by isolation; server-side only.
 RFC §1.
+
+## Q
+
+**Quality gate** — a `quality.*` knob in the manifest (`require_loading_state`,
+`require_fixtures`, `require_contract_tests`, …) declaring a quality requirement
+the app opts into. `internal/manifest` parses and shape-checks the `quality`
+block; the gates are *enforced* by `dockyard validate`. RFC §4.2, §9.4. D-035.
 
 ## S
 
