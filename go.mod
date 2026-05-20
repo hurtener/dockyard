@@ -1,3 +1,3 @@
-module github.com/hurtener/Dockyard
+module github.com/hurtener/dockyard
 
 go 1.26.2

@@ -15,5 +15,5 @@ go run .
 ## Build
 
 ```sh
-go build -o Dockyard .
+go build -o dockyard .
 ```
