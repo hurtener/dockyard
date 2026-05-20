@@ -73,16 +73,16 @@ None. Phase 05 implements Design A as the RFC and brief 06 settle it.
 
 ## Acceptance criteria
 
-- [ ] A Go contract struct generates correct, compilable TypeScript
+- [x] A Go contract struct generates correct, compilable TypeScript
       (`web/src/generated/contracts.ts`-shaped output) via `tygo`.
-- [ ] Generated TypeScript is deterministic (identical input → byte-identical
+- [x] Generated TypeScript is deterministic (identical input → byte-identical
       output) and carries the `Code generated … DO NOT EDIT.` header.
-- [ ] The drift cross-check detects a schema↔TS desync (a property present in one
+- [x] The drift cross-check detects a schema↔TS desync (a property present in one
       artifact and absent or differently-optional in the other) and fails.
-- [ ] The drift cross-check detects stale generated output (on-disk bytes differ
+- [x] The drift cross-check detects stale generated output (on-disk bytes differ
       from a fresh regeneration) and fails.
-- [ ] Golden tests cover the generated TypeScript output.
-- [ ] The codegen path is pure-Go and builds with `CGO_ENABLED=0`.
+- [x] Golden tests cover the generated TypeScript output.
+- [x] The codegen path is pure-Go and builds with `CGO_ENABLED=0`.
 
 ## Files added or changed
 

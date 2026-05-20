@@ -1,11 +1,21 @@
 package manifest
 
-import "fmt"
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
 
 // The manifest's enumerated fields. Each enum type is a string so it round-trips
 // through YAML verbatim, and each provides an UnmarshalYAML that rejects an
 // unknown value at decode time with a source-located error — so a typo in the
 // manifest fails in Dockyard's own tooling, not inside a host.
+//
+// The enums implement yaml.v3's node-based Unmarshaler — UnmarshalYAML(*yaml.Node)
+// — rather than the obsolete yaml.v2-style UnmarshalYAML(func(any) error). The
+// node form gives the decode-time rejection the precise source position
+// (yaml.Node.Line) of the offending scalar, which load.go's decodeError threads
+// into the "file:line" the RFC §4.2 acceptance criterion requires.
 
 // Transport is a deployment mode the app supports (RFC §5.2).
 type Transport string
@@ -112,45 +122,47 @@ func joinEnum[T ~string](valid []T) string {
 }
 
 // UnmarshalYAML decodes and validates a Transport.
-func (t *Transport) UnmarshalYAML(unmarshal func(any) error) error {
-	return unmarshalEnum(unmarshal, t, validTransports())
+func (t *Transport) UnmarshalYAML(node *yaml.Node) error {
+	return unmarshalEnum(node, t, validTransports())
 }
 
 // UnmarshalYAML decodes and validates a UIFramework.
-func (f *UIFramework) UnmarshalYAML(unmarshal func(any) error) error {
-	return unmarshalEnum(unmarshal, f, validUIFrameworks())
+func (f *UIFramework) UnmarshalYAML(node *yaml.Node) error {
+	return unmarshalEnum(node, f, validUIFrameworks())
 }
 
 // UnmarshalYAML decodes and validates a BundleStrategy.
-func (b *BundleStrategy) UnmarshalYAML(unmarshal func(any) error) error {
-	return unmarshalEnum(unmarshal, b, validBundleStrategies())
+func (b *BundleStrategy) UnmarshalYAML(node *yaml.Node) error {
+	return unmarshalEnum(node, b, validBundleStrategies())
 }
 
 // UnmarshalYAML decodes and validates a TaskSupport.
-func (ts *TaskSupport) UnmarshalYAML(unmarshal func(any) error) error {
-	return unmarshalEnum(unmarshal, ts, validTaskSupports())
+func (ts *TaskSupport) UnmarshalYAML(node *yaml.Node) error {
+	return unmarshalEnum(node, ts, validTaskSupports())
 }
 
 // UnmarshalYAML decodes and validates a DisplayMode.
-func (d *DisplayMode) UnmarshalYAML(unmarshal func(any) error) error {
-	return unmarshalEnum(unmarshal, d, validDisplayModes())
+func (d *DisplayMode) UnmarshalYAML(node *yaml.Node) error {
+	return unmarshalEnum(node, d, validDisplayModes())
 }
 
 // UnmarshalYAML decodes and validates a Visibility.
-func (v *Visibility) UnmarshalYAML(unmarshal func(any) error) error {
-	return unmarshalEnum(unmarshal, v, validVisibilities())
+func (v *Visibility) UnmarshalYAML(node *yaml.Node) error {
+	return unmarshalEnum(node, v, validVisibilities())
 }
 
 // unmarshalEnum is the shared body of every enum UnmarshalYAML: decode the
-// scalar as a string, then map it through decodeEnum.
-func unmarshalEnum[T ~string](unmarshal func(any) error, dst *T, valid []T) error {
+// scalar node as a string, then map it through decodeEnum. A rejection carries
+// the node's 1-based source line — yaml.v3 surfaces it in the wrapped
+// TypeError, and load.go's decodeError recovers it into the "file:line" form.
+func unmarshalEnum[T ~string](node *yaml.Node, dst *T, valid []T) error {
 	var raw string
-	if err := unmarshal(&raw); err != nil {
+	if err := node.Decode(&raw); err != nil {
 		return err
 	}
 	v, err := decodeEnum(raw, valid)
 	if err != nil {
-		return err
+		return fmt.Errorf("line %d: %w", node.Line, err)
 	}
 	*dst = v
 	return nil

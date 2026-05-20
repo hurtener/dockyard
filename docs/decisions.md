@@ -645,3 +645,71 @@ manifest package never depends on *how* a type is found. The reference parser
 split package path and type name. Embedding type resolution inside the manifest
 loader was rejected: it would couple `internal/manifest` to Go source scanning
 and to the generated-project layout, the same coupling D-035 avoids.
+
+---
+
+## D-038 — Wave 2 ships a wave-end E2E test of the integrated contract-first pipeline
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** AGENTS.md §17 / §17.7, `test/integration/wave2_test.go`
+**Why:** Wave 2 shipped the contract-first pipeline (RFC §4.2, §6) across three
+phases — `internal/codegen` (Phases 04/05: Go struct → JSON Schema, Go → TypeScript,
+the schema↔TS drift cross-check), `runtime/tool` (Phase 04: the contract-first
+typed builder), and `internal/manifest` (Phase 06: the manifest loader and the
+`ContractResolver` seam). Unlike Wave 1's independent foundations (D-028), these
+phases are genuinely integrated: `internal/manifest.ResolveContracts` resolves a
+manifest's `tools[].input`/`output` Go type references *through* `internal/codegen`,
+and `runtime/tool.Builder.Register` generates a tool's schema with `internal/codegen`
+and installs it on a `runtime/server`. AGENTS.md §17 requires a wave-boundary gate;
+because Wave 2 is a real integrated flow, that gate is a genuine end-to-end test.
+`test/integration/wave2_test.go` drives the pipeline with real components and no
+mocks at the seams: it loads the shipped example manifest, resolves its tool
+contract references via a `RegistryResolver` → `internal/codegen`, runs both halves
+of Design A on the contract and cross-checks them, builds the tool from the
+contract and invokes it over the SDK in-memory transport (asserting the registered
+schema is the generated/resolved schema and typed output lands in
+`structuredContent`), covers ≥1 failure mode per seam (a located manifest error,
+an unresolved contract reference, `ErrSchemaTSDrift`, `ErrStaleGenerated`, a
+rejected non-object contract), and runs an N≥10 concurrency stress under `-race`
+against shared components with a goroutine-leak assertion after teardown. It reuses
+the `integration`-package helpers established by `wave1_test.go` and
+`phase04_codegen_test.go` (`quietLogger`, `stableGoroutineCount`,
+`assertNoGoroutineLeak`, `canonical`) rather than duplicating them, and does not
+re-cover what the existing per-phase integration tests (`phase04_codegen_test.go`,
+`phase05_drift_test.go`) already pin — it is the cross-phase pipeline test. The
+§17 checkpoint audit of Wave 2 folds in alongside it as one `chore(checkpoint)` PR.
+
+---
+
+## D-039 — The drift-check golden tests double-define each contract, by deliberate scope choice
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** `internal/codegen` (`drift_test.go`, `golden_ts_test.go`),
+`test/integration/phase05_drift_test.go`, AGENTS.md §17.5 (Wave 2 checkpoint audit)
+**Why:** The Wave 2 checkpoint audit observed that the schema↔TypeScript
+drift-check tests carry each contract *twice*: once as real Go contract structs
+(the input to `codegen.SchemaFor[...]`) and once as a hand-kept Go-source string
+constant (the input to `codegen.TypeScriptForSource`) — e.g. `driftRevenueSource`
+beside `showRevenueOutput`, and `driftContractTS` beside `driftContractInput` /
+`driftContractOutput`. The TypeScript generator (`tygo`, D-032) reads Go *source
+text*, not reflection or a live type; the schema generator (`google/jsonschema-go`,
+D-030) reads a reflected Go *type*. The two halves of Design A therefore consume
+two different representations of the same contract, and a test exercising both
+must supply both. The duplicated string is hand-kept in lockstep with the struct,
+so a careless edit to one and not the other could mask a real drift — the very
+desync class `CrossCheck` exists to catch (D-034).
+
+This is recorded as an **accepted, deliberate scope boundary** of the drift-check
+golden tests, not a defect to fix in this checkpoint. The duplication is small,
+local to the test files, and visible; the contracts are trivial fixtures; and the
+golden tests pin each generator's output independently, so a divergence between
+the struct and the string surfaces as a golden diff rather than silently. A future
+hardening — single-sourcing the fixture, e.g. by deriving the Go-source string
+from the struct via `go/ast` printing, or generating the struct from a shared
+fixture file — is possible and would remove the hand-kept copy; it is left as
+optional later work, deliberately out of scope for the Wave 2 checkpoint per its
+read-only-audit-plus-punch-list charter (AGENTS.md §17.5). References D-034 (the
+drift cross-check is a hard-failing library seam) and D-032 (tygo reads Go
+source).

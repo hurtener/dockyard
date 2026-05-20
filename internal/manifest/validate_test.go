@@ -20,6 +20,8 @@ func TestValidate_InvalidFixtures(t *testing.T) {
 		wantLine   bool // true when the fault should carry a file:line position
 	}{
 		{"bad-missing-name.yaml", "name: required", false},
+		{"bad-missing-title.yaml", "title: required", false},
+		{"bad-missing-version.yaml", "version: required", false},
 		{"bad-version.yaml", "not a semantic version", true},
 		{"bad-transport.yaml", "unknown value \"carrier-pigeon\"", true},
 		{"bad-task-support.yaml", "unknown value \"maybe\"", true},
