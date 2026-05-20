@@ -5,6 +5,14 @@ same PR that introduces it. When in doubt, the RFC wins (AGENTS.md §15).
 
 ---
 
+## A
+
+**App runtime** — the Dockyard runtime library (`runtime/`): the importable Go
+package tree — `runtime/server` (the MCP server core), and later
+`runtime/apps`, `runtime/tasks`, `runtime/obs`, `runtime/store` — vendored into
+every generated Dockyard app. A generated app's `main.go` stays thin and
+delegates the protocol weight to the app runtime. RFC §3. D-020.
+
 ## B
 
 **Bridge shell library** — the Svelte library (`web/bridge/`) vendored into every
@@ -23,6 +31,11 @@ time and adapts; it never hardcodes a per-host capability matrix. RFC §7.5. D-0
 **Conformance suite** — the shared `runtime/store/storetest` test battery every
 `Store` driver must pass. A new persistence guarantee is added to the suite once and
 proven against every driver, never bolted onto one driver. RFC §13. D-025, D-026.
+**Codec** — a `protocolcodec` encoder/decoder pair for one negotiated MCP
+`protocolVersion`. A codec encodes Dockyard domain types into MCP extension wire
+formats and decodes wire formats back; it is obtained with `CodecFor` /
+`CodecForStrict`. Encoders emit only current spec shapes; decoders tolerate
+unknown keys and deprecated forms. RFC §5.4, §16. D-022.
 
 **Contract-first** — the property (P1) that a tool's input and output are typed Go
 structs (the single source of truth) from which JSON Schema, TypeScript types, and
@@ -73,6 +86,12 @@ RFC §13. D-025.
 `ui://` apps, transports, and quality requirements, and drives `validate`,
 `generate`, `dev`, `test`, `build`, and `install`. RFC §4.2.
 
+**MCP server core** — the `runtime/server` package: the part of the app runtime
+that wraps the official Go MCP SDK and exposes Dockyard's server construction,
+typed tool registration, and transport serve loop. The settled foundation
+(RFC §5.1, D-002); Dockyard layers Apps, Tasks, and `obs/v1` on top and never
+forks the SDK. RFC §5. D-019, D-020.
+
 **MCP App** — at the protocol level, an MCP tool carrying `_meta.ui` metadata that
 links it to a `ui://` resource the host renders as a sandboxed iframe. Not a new
 wire primitive — a convention over tools + resources. RFC §7.1.
@@ -119,3 +138,15 @@ in `tools/list`). RFC §8.4.
 
 **UI resource** — a resource served under the `ui://` scheme with MIME type
 `text/html;profile=mcp-app`, containing the App's HTML bundle. RFC §7.1.
+
+## V
+
+**Vendored spec** — an external MCP specification mirrored into
+`docs/specifications/`, pinned by upstream commit SHA + date, so Dockyard's
+build is reproducible and the source of truth is searchable in-repo. A spec bump
+is a deliberate, reviewed update of the vendored file. RFC §16. AGENTS.md §10.
+
+**Versioned codec** — the forward-compatibility mechanism of `protocolcodec`:
+codecs are keyed on the negotiated MCP `protocolVersion`, so a spec revision
+registers a *new* codec for the *new* version while older peers keep theirs — a
+spec bump is localized, never a refactor. RFC §16. D-009, D-022.
