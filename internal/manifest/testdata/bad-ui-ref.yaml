@@ -1,0 +1,11 @@
+name: bad-ui-ref
+title: Bad UI Ref
+version: 1.0.0
+runtime:
+  transports: [stdio]
+tools:
+  - name: echo
+    description: Echo.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput
+    ui: nonexistent

@@ -1,0 +1,6 @@
+name: bad-syntax
+title: Bad Syntax
+version: 1.0.0
+runtime:
+  transports: [stdio
+tools: []

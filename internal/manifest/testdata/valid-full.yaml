@@ -1,0 +1,31 @@
+name: customer-health
+title: Customer Health
+version: 0.1.0
+runtime:
+  transports: [stdio, http]
+  ui:
+    framework: svelte
+    bundle: single-file
+tools:
+  - name: show_customer_health
+    description: Show an interactive customer health dashboard.
+    input: internal/contracts.ShowCustomerHealthInput
+    output: internal/contracts.ShowCustomerHealthOutput
+    ui: customer_health
+    task_support: optional
+apps:
+  - id: customer_health
+    uri: ui://customer-health/main
+    entry: web/src/apps/customer-health.svelte
+    display_modes: [inline, fullscreen]
+    csp:
+      connect: [https://api.company.com]
+    visibility: [model, app]
+quality:
+  require_loading_state: true
+  require_empty_state: true
+  require_error_state: true
+  require_permission_state: true
+  require_fixtures: true
+  require_contract_tests: true
+  require_spec_compliance: true

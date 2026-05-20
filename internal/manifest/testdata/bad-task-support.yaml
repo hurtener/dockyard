@@ -1,0 +1,11 @@
+name: bad-task
+title: Bad Task
+version: 1.0.0
+runtime:
+  transports: [stdio]
+tools:
+  - name: echo
+    description: Echo.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput
+    task_support: maybe

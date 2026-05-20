@@ -1,0 +1,10 @@
+name: bad-version
+title: Bad Version
+version: v1
+runtime:
+  transports: [stdio]
+tools:
+  - name: echo
+    description: Echo.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput
