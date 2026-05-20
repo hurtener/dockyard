@@ -3,7 +3,6 @@ package server_test
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"sync"
 	"testing"
@@ -28,7 +27,7 @@ func echoHandler(_ context.Context, in echoIn) (echoOut, error) {
 }
 
 func quietLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func newTestServer(t *testing.T) *server.Server {

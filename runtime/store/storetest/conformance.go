@@ -98,7 +98,7 @@ func testGetMissing(t *testing.T, open func() store.Store) {
 	if err := s.View(ctx(), func(tx store.Tx) error {
 		_, err := tx.Get("ns", "absent")
 		if !errors.Is(err, store.ErrNotFound) {
-			return fmt.Errorf("got %v want ErrNotFound", err)
+			return fmt.Errorf("got %w want ErrNotFound", err)
 		}
 		return nil
 	}); err != nil {
@@ -133,7 +133,7 @@ func testDelete(t *testing.T, open func() store.Store) {
 	if err := s.View(ctx(), func(tx store.Tx) error {
 		_, err := tx.Get("ns", "k")
 		if !errors.Is(err, store.ErrNotFound) {
-			return fmt.Errorf("got %v want ErrNotFound after Delete", err)
+			return fmt.Errorf("got %w want ErrNotFound after Delete", err)
 		}
 		return nil
 	}); err != nil {

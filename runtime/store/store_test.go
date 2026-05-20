@@ -23,7 +23,7 @@ func newFake() *fakeStore {
 
 func (s *fakeStore) Migrate(ctx context.Context) error { return RunMigrations(ctx, s) }
 
-func (s *fakeStore) View(ctx context.Context, fn func(Tx) error) error {
+func (s *fakeStore) View(_ context.Context, fn func(Tx) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -32,7 +32,7 @@ func (s *fakeStore) View(ctx context.Context, fn func(Tx) error) error {
 	return fn(&fakeTx{store: s, writable: false})
 }
 
-func (s *fakeStore) Update(ctx context.Context, fn func(Tx) error) error {
+func (s *fakeStore) Update(_ context.Context, fn func(Tx) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -311,7 +311,7 @@ func TestMigrateFailureLeavesCleanPrefix(t *testing.T) {
 	// apply only 0002.
 	resetMigrationsForTest()
 	rerun := false
-	AddMigration(Migration{ID: "0001_ok", Up: func(_ context.Context, tx Tx) error {
+	AddMigration(Migration{ID: "0001_ok", Up: func(_ context.Context, _ Tx) error {
 		t.Fatal("0001_ok should not re-run — it already committed")
 		return nil
 	}})
