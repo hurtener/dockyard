@@ -21,35 +21,43 @@ import (
 	"github.com/hurtener/dockyard/runtime/store"
 )
 
+// conformanceCase is one named guarantee in the Store-driver conformance suite.
+type conformanceCase struct {
+	name string
+	fn   func(*testing.T, func() store.Store)
+}
+
+// conformanceCases is the full conformance suite. It is a package-level slice
+// so the harness self-guard (TestConformanceHarnessRuns) can assert the suite
+// is non-empty and runs every case — a silently-broken harness must not pass
+// every driver vacuously.
+var conformanceCases = []conformanceCase{
+	{"PutGet", testPutGet},
+	{"GetMissing", testGetMissing},
+	{"Overwrite", testOverwrite},
+	{"Delete", testDelete},
+	{"DeleteMissing", testDeleteMissing},
+	{"EmptyValueRoundTrips", testEmptyValue},
+	{"NamespaceIsolation", testNamespaceIsolation},
+	{"ScanOrderedAndPrefixed", testScan},
+	{"ScanWithWildcardPrefix", testScanWildcard},
+	{"UpdateRollback", testUpdateRollback},
+	{"ReadOwnWrites", testReadOwnWrites},
+	{"ViewIsReadOnly", testViewReadOnly},
+	{"ValueIsolation", testValueIsolation},
+	{"Ping", testPing},
+	{"MigrateIdempotent", testMigrateIdempotent},
+	{"MigrationRunner", testMigrationRunner},
+	{"ClosedStore", testClosedStore},
+	{"Concurrency", testConcurrency},
+}
+
 // RunConformance exercises every guarantee of the Store seam against a driver.
 // open must return a freshly-constructed, empty Store on each call; the suite
 // closes each Store it opens.
 func RunConformance(t *testing.T, open func() store.Store) {
 	t.Helper()
-
-	tests := []struct {
-		name string
-		fn   func(*testing.T, func() store.Store)
-	}{
-		{"PutGet", testPutGet},
-		{"GetMissing", testGetMissing},
-		{"Overwrite", testOverwrite},
-		{"Delete", testDelete},
-		{"DeleteMissing", testDeleteMissing},
-		{"EmptyValueRoundTrips", testEmptyValue},
-		{"NamespaceIsolation", testNamespaceIsolation},
-		{"ScanOrderedAndPrefixed", testScan},
-		{"ScanWithWildcardPrefix", testScanWildcard},
-		{"UpdateRollback", testUpdateRollback},
-		{"ReadOwnWrites", testReadOwnWrites},
-		{"ViewIsReadOnly", testViewReadOnly},
-		{"ValueIsolation", testValueIsolation},
-		{"Ping", testPing},
-		{"MigrateIdempotent", testMigrateIdempotent},
-		{"ClosedStore", testClosedStore},
-		{"Concurrency", testConcurrency},
-	}
-	for _, tc := range tests {
+	for _, tc := range conformanceCases {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.fn(t, open)
 		})
@@ -342,18 +350,19 @@ func testReadOwnWrites(t *testing.T, open func() store.Store) {
 func testViewReadOnly(t *testing.T, open func() store.Store) {
 	s := open()
 	defer mustClose(t, s)
-	// A write attempt inside View must error; the keyspace must stay empty.
+	// A write attempt inside View must fail with ErrReadOnly; the keyspace
+	// must stay empty.
 	err := s.View(ctx(), func(tx store.Tx) error {
 		return tx.Put("ns", "k", []byte("v"))
 	})
-	if err == nil {
-		t.Fatal("Put inside View should fail")
+	if !errors.Is(err, store.ErrReadOnly) {
+		t.Fatalf("Put inside View: got %v want ErrReadOnly", err)
 	}
-	// Delete inside View must also fail.
+	// Delete inside View must also fail with ErrReadOnly.
 	if err := s.View(ctx(), func(tx store.Tx) error {
 		return tx.Delete("ns", "k")
-	}); err == nil {
-		t.Fatal("Delete inside View should fail")
+	}); !errors.Is(err, store.ErrReadOnly) {
+		t.Fatalf("Delete inside View: got %v want ErrReadOnly", err)
 	}
 	if err := s.View(ctx(), func(tx store.Tx) error {
 		if _, err := tx.Get("ns", "k"); !errors.Is(err, store.ErrNotFound) {
@@ -417,6 +426,99 @@ func testMigrateIdempotent(t *testing.T, open func() store.Store) {
 	}
 	if err := s.Migrate(ctx()); err != nil {
 		t.Fatalf("third Migrate: %v", err)
+	}
+}
+
+// migrationsNamespace is the reserved KV namespace store.RunMigrations records
+// applied migrations in. It mirrors the unexported store.migrationNamespace
+// constant; the suite asserts the record lands here.
+const migrationsNamespace = "__store_migrations__"
+
+// testMigrationRunner exercises the real migration runner end-to-end against
+// the driver under test — not an in-package fake. It registers a real
+// migration through store.AddMigration, applies it via Store.Migrate, asserts
+// it ran exactly once, is idempotent on re-run, and is recorded in the
+// __store_migrations__ namespace. It runs against every driver, so the runner
+// is proven on inmem AND sqlitestore (AGENTS.md §9, §17).
+func testMigrationRunner(t *testing.T, open func() store.Store) {
+	// Isolate the global migration registry: this test owns it for its
+	// duration and clears it afterwards so other suites stay unaffected.
+	store.ResetMigrationsForTest()
+	t.Cleanup(store.ResetMigrationsForTest)
+
+	const migrationID = "0001_storetest_seed"
+	var runCount int
+	store.AddMigration(store.Migration{
+		ID: migrationID,
+		Up: func(_ context.Context, tx store.Tx) error {
+			runCount++
+			return tx.Put("storetest_migrated", "marker", []byte("applied"))
+		},
+	})
+
+	s := open()
+	defer mustClose(t, s)
+
+	// First Migrate: the migration must apply exactly once.
+	if err := s.Migrate(ctx()); err != nil {
+		t.Fatalf("first Migrate: %v", err)
+	}
+	if runCount != 1 {
+		t.Fatalf("migration Up ran %d times on first Migrate, want 1", runCount)
+	}
+
+	// The migration's effect must be visible.
+	if err := s.View(ctx(), func(tx store.Tx) error {
+		got, err := tx.Get("storetest_migrated", "marker")
+		if err != nil {
+			return fmt.Errorf("migration effect missing: %w", err)
+		}
+		if !bytes.Equal(got, []byte("applied")) {
+			return fmt.Errorf("migration marker = %q, want %q", got, "applied")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The runner must have recorded the migration in its reserved namespace.
+	if err := s.View(ctx(), func(tx store.Tx) error {
+		kvs, err := tx.Scan(migrationsNamespace, "")
+		if err != nil {
+			return err
+		}
+		if len(kvs) != 1 {
+			return fmt.Errorf("%s has %d records, want 1", migrationsNamespace, len(kvs))
+		}
+		if kvs[0].Key != migrationID {
+			return fmt.Errorf("recorded migration key %q, want %q", kvs[0].Key, migrationID)
+		}
+		if len(kvs[0].Value) == 0 {
+			return fmt.Errorf("migration record for %q has an empty value", migrationID)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-run: idempotent — the migration must not run again.
+	if err := s.Migrate(ctx()); err != nil {
+		t.Fatalf("re-run Migrate: %v", err)
+	}
+	if runCount != 1 {
+		t.Fatalf("migration Up ran %d times after re-run, want 1 (not idempotent)", runCount)
+	}
+	if err := s.View(ctx(), func(tx store.Tx) error {
+		kvs, err := tx.Scan(migrationsNamespace, "")
+		if err != nil {
+			return err
+		}
+		if len(kvs) != 1 {
+			return fmt.Errorf("re-run left %d migration records, want 1", len(kvs))
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

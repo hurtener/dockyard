@@ -368,11 +368,11 @@ func (v1Codec) DecodeRelatedTaskMeta(meta Meta) (string, bool, error) {
 
 func (v1Codec) EncodeCreateTaskResultMeta(base Meta, m CreateTaskResultMeta) (Meta, error) {
 	out := base.clone()
-	if m.isZero() {
-		return out, nil
-	}
 	if out == nil {
 		out = Meta{}
+	}
+	if m.isZero() {
+		return out, nil
 	}
 	out[metaKeyModelImmediateResponse] = m.ModelImmediateResponse
 	return out, nil

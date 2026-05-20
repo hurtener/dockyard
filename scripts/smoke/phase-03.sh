@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Smoke script for Phase 03 — Store seam + sqlite/inmem drivers + conformance.
 # One assertion per acceptance criterion (docs/plans/phase-03-store-seam.md).
-# A check against an unbuilt surface skipsrather than fails — see common.sh.
+# A check against an unbuilt surface skips rather than fails — see common.sh.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 . scripts/smoke/common.sh
@@ -45,12 +45,14 @@ else
   skip "CGo-free build: runtime/store not built"
 fi
 
-# 5. Conformance + concurrency tests pass (both drivers, under the seam).
+# 5. Conformance tests pass (both drivers, under the seam). This run is
+# CGo-free, so it does not exercise the race detector — the concurrency
+# guarantee is proven only under `make test` (CGO_ENABLED=1 go test -race).
 if [ -f runtime/store/storetest/conformance.go ]; then
   if CGO_ENABLED=0 go test ./runtime/store/... >/dev/null 2>&1; then
     ok "CGO_ENABLED=0 go test ./runtime/store/... passes"
   else
-    fail "store conformance/concurrency tests failed"
+    fail "store conformance tests failed"
   fi
 else
   skip "store tests: runtime/store not built"

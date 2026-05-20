@@ -172,8 +172,8 @@ func TestOpenFactoryError(t *testing.T) {
 // --- Migration runner tests -------------------------------------------------
 
 func TestMigrateAppliesInOrderAndIsIdempotent(t *testing.T) {
-	resetMigrationsForTest()
-	t.Cleanup(resetMigrationsForTest)
+	ResetMigrationsForTest()
+	t.Cleanup(ResetMigrationsForTest)
 
 	var order []string
 	AddMigration(Migration{ID: "0001_a", Up: func(_ context.Context, tx Tx) error {
@@ -222,8 +222,8 @@ func TestMigrateAppliesInOrderAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrateAppendOnlyExtension(t *testing.T) {
-	resetMigrationsForTest()
-	t.Cleanup(resetMigrationsForTest)
+	ResetMigrationsForTest()
+	t.Cleanup(ResetMigrationsForTest)
 
 	AddMigration(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
 
@@ -247,7 +247,7 @@ func TestMigrateAppendOnlyExtension(t *testing.T) {
 }
 
 func TestMigrateRejectsRemovedMigration(t *testing.T) {
-	resetMigrationsForTest()
+	ResetMigrationsForTest()
 
 	AddMigration(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
 	AddMigration(Migration{ID: "0002_b", Up: func(_ context.Context, _ Tx) error { return nil }})
@@ -257,8 +257,8 @@ func TestMigrateRejectsRemovedMigration(t *testing.T) {
 	}
 
 	// Simulate a migration being removed after merge: re-register only 0001.
-	resetMigrationsForTest()
-	t.Cleanup(resetMigrationsForTest)
+	ResetMigrationsForTest()
+	t.Cleanup(ResetMigrationsForTest)
 	AddMigration(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
 
 	err := s.Migrate(context.Background())
@@ -268,7 +268,7 @@ func TestMigrateRejectsRemovedMigration(t *testing.T) {
 }
 
 func TestMigrateRejectsReordering(t *testing.T) {
-	resetMigrationsForTest()
+	ResetMigrationsForTest()
 
 	AddMigration(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
 	AddMigration(Migration{ID: "0002_b", Up: func(_ context.Context, _ Tx) error { return nil }})
@@ -278,8 +278,8 @@ func TestMigrateRejectsReordering(t *testing.T) {
 	}
 
 	// Re-register in swapped order: ordinals no longer match what was applied.
-	resetMigrationsForTest()
-	t.Cleanup(resetMigrationsForTest)
+	ResetMigrationsForTest()
+	t.Cleanup(ResetMigrationsForTest)
 	AddMigration(Migration{ID: "0002_b", Up: func(_ context.Context, _ Tx) error { return nil }})
 	AddMigration(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
 
@@ -290,8 +290,8 @@ func TestMigrateRejectsReordering(t *testing.T) {
 }
 
 func TestMigrateFailureLeavesCleanPrefix(t *testing.T) {
-	resetMigrationsForTest()
-	t.Cleanup(resetMigrationsForTest)
+	ResetMigrationsForTest()
+	t.Cleanup(ResetMigrationsForTest)
 
 	sentinel := errors.New("migration failed")
 	AddMigration(Migration{ID: "0001_ok", Up: func(_ context.Context, tx Tx) error {
@@ -309,7 +309,7 @@ func TestMigrateFailureLeavesCleanPrefix(t *testing.T) {
 
 	// 0001 committed; 0002 did not. A subsequent run with 0002 fixed must
 	// apply only 0002.
-	resetMigrationsForTest()
+	ResetMigrationsForTest()
 	rerun := false
 	AddMigration(Migration{ID: "0001_ok", Up: func(_ context.Context, _ Tx) error {
 		t.Fatal("0001_ok should not re-run — it already committed")
@@ -328,8 +328,8 @@ func TestMigrateFailureLeavesCleanPrefix(t *testing.T) {
 }
 
 func TestMigrateNoMigrationsIsNoop(t *testing.T) {
-	resetMigrationsForTest()
-	t.Cleanup(resetMigrationsForTest)
+	ResetMigrationsForTest()
+	t.Cleanup(ResetMigrationsForTest)
 	s := newFake()
 	if err := s.Migrate(context.Background()); err != nil {
 		t.Fatalf("Migrate with no registered migrations: %v", err)
@@ -337,8 +337,8 @@ func TestMigrateNoMigrationsIsNoop(t *testing.T) {
 }
 
 func TestAddMigrationDuplicatePanics(t *testing.T) {
-	resetMigrationsForTest()
-	t.Cleanup(resetMigrationsForTest)
+	ResetMigrationsForTest()
+	t.Cleanup(ResetMigrationsForTest)
 	AddMigration(Migration{ID: "dup", Up: func(_ context.Context, _ Tx) error { return nil }})
 	defer func() {
 		r := recover()
@@ -353,8 +353,8 @@ func TestAddMigrationDuplicatePanics(t *testing.T) {
 }
 
 func TestAddMigrationEmptyIDPanics(t *testing.T) {
-	resetMigrationsForTest()
-	t.Cleanup(resetMigrationsForTest)
+	ResetMigrationsForTest()
+	t.Cleanup(ResetMigrationsForTest)
 	defer func() {
 		if recover() == nil {
 			t.Fatal("AddMigration with an empty ID should panic")
@@ -364,8 +364,8 @@ func TestAddMigrationEmptyIDPanics(t *testing.T) {
 }
 
 func TestAddMigrationNilUpPanics(t *testing.T) {
-	resetMigrationsForTest()
-	t.Cleanup(resetMigrationsForTest)
+	ResetMigrationsForTest()
+	t.Cleanup(ResetMigrationsForTest)
 	defer func() {
 		if recover() == nil {
 			t.Fatal("AddMigration with a nil Up should panic")
@@ -375,8 +375,8 @@ func TestAddMigrationNilUpPanics(t *testing.T) {
 }
 
 func TestMigrateHonoursContextCancellation(t *testing.T) {
-	resetMigrationsForTest()
-	t.Cleanup(resetMigrationsForTest)
+	ResetMigrationsForTest()
+	t.Cleanup(ResetMigrationsForTest)
 	AddMigration(Migration{ID: "0001", Up: func(_ context.Context, _ Tx) error { return nil }})
 
 	ctx, cancel := context.WithCancel(context.Background())

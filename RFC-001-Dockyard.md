@@ -742,7 +742,7 @@ CGo-free SQLite — as its persistence driver, **behind a `Store` interface seam
 distributed / at-scale HTTP deployments must be addable without a rewrite.
 
 ```go
-// internal/store — the seam. V1 driver: modernc.org/sqlite.
+// runtime/store — the seam. V1 driver: modernc.org/sqlite.
 type Store interface {
     Tasks() TaskStore   // §8.5 — durable task state
     Obs()   ObsStore    // §11  — observability history
