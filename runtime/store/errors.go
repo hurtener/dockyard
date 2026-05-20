@@ -26,11 +26,16 @@ var (
 	// prefix — migrations are append-only and forward-only.
 	ErrMigrationOutOfOrder = errors.New("store: migration registered out of order")
 
-	// ErrDuplicateDriver is returned by Register when a driver name is
-	// registered twice.
+	// ErrReadOnly is returned by Tx.Put and Tx.Delete when they are called on
+	// a read-only transaction (one produced by View). A write inside a View
+	// callback is a programming error; the transaction is not mutated.
+	ErrReadOnly = errors.New("store: write attempted on a read-only transaction")
+
+	// ErrDuplicateDriver is the panic value when Register is called with a
+	// driver name that is already registered.
 	ErrDuplicateDriver = errors.New("store: driver registered twice")
 
-	// ErrDuplicateMigration is returned by AddMigration when a migration ID is
-	// registered twice.
+	// ErrDuplicateMigration is the panic value when AddMigration is called
+	// with a migration ID that is already registered.
 	ErrDuplicateMigration = errors.New("store: migration registered twice")
 )

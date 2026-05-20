@@ -66,15 +66,15 @@ are later phases by the master plan and are explicit non-goals here.
 
 ## Acceptance criteria
 
-- [ ] A trivial server registers one tool and serves it: a client over the
+- [x] A trivial server registers one tool and serves it: a client over the
       in-memory transport discovers the tool via `tools/list` and a `tools/call`
       returns the typed output in `structuredContent`.
-- [ ] The stdio serve path (`Server.ServeStdio`) honours context cancellation.
-- [ ] The SDK version is pinned to a recent v1.x — `go-sdk v1.6.0` in `go.mod`.
-- [ ] `CGO_ENABLED=0 go build ./...` succeeds; `cmd/dockyard` builds.
-- [ ] The package layout matches AGENTS.md §3 — `runtime/server/`,
+- [x] The stdio serve path (`Server.ServeStdio`) honours context cancellation.
+- [x] The SDK version is pinned to a recent v1.x — `go-sdk v1.6.0` in `go.mod`.
+- [x] `CGO_ENABLED=0 go build ./...` succeeds; `cmd/dockyard` builds.
+- [x] The package layout matches AGENTS.md §3 — `runtime/server/`,
       `cmd/dockyard/`.
-- [ ] A single `Server` serves multiple concurrent sessions cleanly under
+- [x] A single `Server` serves multiple concurrent sessions cleanly under
       `-race`.
 
 ## Files added or changed

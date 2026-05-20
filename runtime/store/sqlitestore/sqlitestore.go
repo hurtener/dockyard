@@ -182,7 +182,7 @@ func (t *sqliteTx) Get(ns, key string) ([]byte, error) {
 
 func (t *sqliteTx) Put(ns, key string, value []byte) error {
 	if !t.writable {
-		return store.ErrClosed
+		return store.ErrReadOnly
 	}
 	// Store a non-nil blob so an empty value round-trips distinctly from a
 	// missing key (the column is NOT NULL).
@@ -201,7 +201,7 @@ func (t *sqliteTx) Put(ns, key string, value []byte) error {
 
 func (t *sqliteTx) Delete(ns, key string) error {
 	if !t.writable {
-		return store.ErrClosed
+		return store.ErrReadOnly
 	}
 	if _, err := t.tx.ExecContext(t.ctx,
 		`DELETE FROM kv WHERE ns = ? AND key = ?`, ns, key); err != nil {

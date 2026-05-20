@@ -500,6 +500,24 @@ func TestCreateTaskResultMeta_ZeroIsNoOp(t *testing.T) {
 	}
 }
 
+// TestCreateTaskResultMeta_NilBaseZeroValueReturnsEmptyMeta pins the aligned
+// behaviour: with a nil base and a zero value, EncodeCreateTaskResultMeta
+// returns a non-nil empty Meta, exactly like the sibling Encode*Meta funcs —
+// not a nil Meta. Predictable, non-nil return shapes keep callers simple.
+func TestCreateTaskResultMeta_NilBaseZeroValueReturnsEmptyMeta(t *testing.T) {
+	c := CodecFor(VersionMCP20251125)
+	out, err := c.EncodeCreateTaskResultMeta(nil, CreateTaskResultMeta{})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if out == nil {
+		t.Fatal("nil base + zero value returned a nil Meta — should be a non-nil empty Meta")
+	}
+	if len(out) != 0 {
+		t.Errorf("zero value emitted keys: %v", out)
+	}
+}
+
 func TestCreateTaskResultMeta_Malformed(t *testing.T) {
 	c := CodecFor(VersionMCP20251125)
 	_, _, err := c.DecodeCreateTaskResultMeta(Meta{metaKeyModelImmediateResponse: 42})

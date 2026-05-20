@@ -83,16 +83,16 @@ on top of this seam.
 
 ## Acceptance criteria
 
-- [ ] Both drivers (`inmem`, `sqlitestore`) pass the shared conformance suite.
-- [ ] The build is CGo-free: `CGO_ENABLED=0 go build ./...` succeeds and the
+- [x] Both drivers (`inmem`, `sqlitestore`) pass the shared conformance suite.
+- [x] The build is CGo-free: `CGO_ENABLED=0 go build ./...` succeeds and the
       `modernc.org/sqlite` driver compiles under it.
-- [ ] A concurrent-reuse test passes under `-race` — a single `Store` is safe under
+- [x] A concurrent-reuse test passes under `-race` — a single `Store` is safe under
       concurrent goroutine use for both drivers.
-- [ ] Migration idempotency is verified: a clean `Migrate` then a re-run `Migrate`
+- [x] Migration idempotency is verified: a clean `Migrate` then a re-run `Migrate`
       both succeed and leave identical schema state; an out-of-order or mutated
       migration is rejected.
-- [ ] `runtime/store` and the two drivers meet the 85% coverage target.
-- [ ] `scripts/smoke/phase-03.sh` reports `OK ≥ count(criteria)` and `FAIL = 0`.
+- [x] `runtime/store` and the two drivers meet the 85% coverage target.
+- [x] `scripts/smoke/phase-03.sh` reports `OK ≥ count(criteria)` and `FAIL = 0`.
 
 ## Files added or changed
 
@@ -249,14 +249,14 @@ All checks `skip()` gracefully if the surface is absent (`common.sh` convention)
 
 ## Pre-merge checklist
 
-- [ ] `make drift-audit` passes
-- [ ] `make check-mirror` passes
-- [ ] `make preflight` passes
-- [ ] `go test -race ./...` and `golangci-lint run` clean
-- [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
-- [ ] Coverage on touched packages ≥ stated target
-- [ ] New CLI command / manifest field / public API has a smoke check in this PR
-- [ ] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
-- [ ] Cross-subsystem seam opened/consumed ⇒ integration test (`AGENTS.md` §17)
-- [ ] New vocabulary added to `docs/glossary.md`
-- [ ] New / changed architectural decision filed in `docs/decisions.md`
+- [x] `make drift-audit` passes
+- [x] `make check-mirror` passes
+- [x] `make preflight` passes
+- [x] `go test -race ./...` and `golangci-lint run` clean
+- [x] All cross-references (`RFC §X.Y`, `brief NN`) resolve
+- [x] Coverage on touched packages ≥ stated target
+- [x] New CLI command / manifest field / public API has a smoke check in this PR
+- [x] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
+- [x] Cross-subsystem seam opened/consumed ⇒ integration test (`AGENTS.md` §17)
+- [x] New vocabulary added to `docs/glossary.md`
+- [x] New / changed architectural decision filed in `docs/decisions.md`

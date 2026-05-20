@@ -413,3 +413,24 @@ extend the applied sequence as a prefix (`ErrMigrationOutOfOrder` — covers reo
 and removal) and a recorded migration whose fingerprint diverges
 (`ErrMigrationMutated` — a migration edited after merge). Each migration runs in its
 own transaction so a failure leaves a clean applied prefix.
+
+---
+
+## D-028 — Wave 1 ships a wave-end E2E regression gate over its three foundation phases
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** AGENTS.md §17 / §17.7, `test/integration/wave1_test.go`
+**Why:** Wave 1 shipped three independent foundation phases — `runtime/server`
+(phase 01), `internal/protocolcodec` (phase 02), and `runtime/store` (phase 03) —
+that each depend only on phase 00 and do not yet consume one another, so no single
+phase owned a cross-subsystem integration test. AGENTS.md §17 still requires a
+wave-boundary gate. `test/integration/wave1_test.go` is that gate: it exercises all
+three packages' real public surfaces in one binary — a real `runtime/server` over
+the SDK in-memory transport, the real `protocolcodec` codecs, and BOTH real `Store`
+drivers (`inmem` and `sqlitestore`) — proves the wave's surface composes cleanly
+side by side, covers a failure mode on each subsystem, and runs an N≥10 concurrency
+stress under `-race` with a goroutine-leak assertion after teardown. It is a
+regression gate over the shipped surface, not a fabricated seam between phases that
+do not yet wire together. The §17.5 checkpoint audit of Wave 1 lands alongside it as
+the same `chore(checkpoint)` PR.

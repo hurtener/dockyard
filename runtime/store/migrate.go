@@ -76,10 +76,12 @@ func registeredMigrations() []Migration {
 	return out
 }
 
-// resetMigrationsForTest clears the global migration registry. Tests that
-// register migrations call it to stay isolated; it is unexported so it is not
-// part of the public surface.
-func resetMigrationsForTest() {
+// ResetMigrationsForTest clears the global migration registry. It exists
+// solely so tests — including the cross-package conformance suite in
+// runtime/store/storetest — can register migrations and stay isolated from one
+// another. It is not part of the runtime API and must not be called outside
+// tests.
+func ResetMigrationsForTest() {
 	migrationsMu.Lock()
 	defer migrationsMu.Unlock()
 	migrations = nil

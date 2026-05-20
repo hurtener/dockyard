@@ -15,13 +15,26 @@ func TestCodecFor_KnownVersions(t *testing.T) {
 }
 
 func TestCodecFor_UnknownFallsBackToDefault(t *testing.T) {
-	c := CodecFor("9999-99-99")
+	const unknown ProtocolVersion = "9999-99-99"
+
+	// Guard the premise: the version must genuinely be unregistered, otherwise
+	// this test would exercise the hit path, not the fallback path.
+	if _, registered := codecRegistry[unknown]; registered {
+		t.Fatalf("test premise broken: %q is registered", unknown)
+	}
+
+	c := CodecFor(unknown)
 	if c == nil {
 		t.Fatal("CodecFor should never return nil")
 	}
-	def := CodecFor(DefaultVersion)
-	if c.Version() != def.Version() {
-		t.Errorf("unknown version did not fall back to default codec")
+	// The fallback must hand back the exact codec the registry holds for the
+	// default version — not merely a codec whose Version() happens to match
+	// (v1Codec.Version() always returns DefaultVersion, so that would be
+	// vacuous). Comparing against the registry entry proves the fallback
+	// branch in CodecFor actually selected DefaultVersion.
+	want := codecRegistry[DefaultVersion]
+	if c != want {
+		t.Errorf("unknown version did not fall back to the default-registry codec: got %#v want %#v", c, want)
 	}
 }
 

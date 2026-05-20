@@ -145,7 +145,7 @@ func (t *memTx) Get(ns, key string) ([]byte, error) {
 
 func (t *memTx) Put(ns, key string, value []byte) error {
 	if !t.writable {
-		return store.ErrClosed
+		return store.ErrReadOnly
 	}
 	v := cloneBytes(value)
 	t.staged[nsKey{ns, key}] = &v
@@ -154,7 +154,7 @@ func (t *memTx) Put(ns, key string, value []byte) error {
 
 func (t *memTx) Delete(ns, key string) error {
 	if !t.writable {
-		return store.ErrClosed
+		return store.ErrReadOnly
 	}
 	t.staged[nsKey{ns, key}] = nil
 	return nil
