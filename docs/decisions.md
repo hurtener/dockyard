@@ -434,3 +434,68 @@ stress under `-race` with a goroutine-leak assertion after teardown. It is a
 regression gate over the shipped surface, not a fabricated seam between phases that
 do not yet wire together. The §17.5 checkpoint audit of Wave 1 lands alongside it as
 the same `chore(checkpoint)` PR.
+
+---
+
+## D-029 — The contract-first tool builder binds its contract types at construction, not via fluent type-parameter methods
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** `runtime/tool` (`builder.go`), `docs/plans/phase-04-codegen.md`
+**Why:** Brief 04 §3 sketches the contract-first builder as
+`app.Tool("show_customer_health").Input[ShowCustomerHealthInput]().Output[...]().UI(...).Handler(...)`
+— a fluent chain in which `Input` and `Output` are generic *methods*. That chain
+is not legal Go: the language does not permit type parameters on methods, only on
+functions and types. (Brief 06 §2.1 confirms generics are mature in Go 1.26 but
+names no change that lifts this restriction; Phase 01's `runtime/server.AddTool`
+is already a package function for exactly this reason.) Phase 04 therefore binds
+the input and output contract types once, at construction, through the
+package-level generic constructor `tool.New[In, Out](name)`; `Describe`, `UI`,
+`Handler`, and `Register` are plain methods on the resulting `Builder[In, Out]`.
+This is a Go-language adaptation, not a design change — the contract-first
+property (P1) and the fluent, single-source-of-truth ergonomics of the brief
+sketch are fully preserved. The builder still generates the tool's JSON Schema
+from the bound Go structs and registers the generated schema, so the registered
+schema is provably the contract.
+
+---
+
+## D-030 — `google/jsonschema-go` is the single JSON Schema engine and a direct dependency
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** `internal/codegen` (`schema.go`), `go.mod`, RFC §6.2
+**Why:** RFC §6.2 and brief 06 §2.3 settle that Dockyard generates JSON Schema
+with `github.com/google/jsonschema-go` — the same engine the official MCP Go SDK
+uses internally. Phase 04 makes this concrete: `internal/codegen` calls
+`jsonschema.For`/`ForType`, and the dependency is promoted from indirect (pulled
+transitively by the SDK) to a **direct** `go.mod` requirement, because Dockyard
+now imports it in first-party code. Adopting any second schema library
+(`invopop/jsonschema`, `swaggest/jsonschema-go`) is rejected: it would create a
+divergent schema dialect between what Dockyard generates and what the SDK
+validates against. Phase 04 keeps the version the SDK already pins (`v0.4.3`) so
+there is exactly one dialect; RFC §18 Q-6 (formalising the lockstep as the SDK
+updates) remains open and is revisited when the SDK's pin moves.
+
+---
+
+## D-031 — Generated JSON Schema is marshalled deterministically and pinned by golden tests
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** `internal/codegen` (`schema.go` `Marshal`, `golden_test.go`,
+`testdata/*.golden`), AGENTS.md §11
+**Why:** Design A generates JSON Schema and TypeScript independently from Go
+(RFC §6.2), so a bug in either generator — or a regression in the young upstream
+`google/jsonschema-go` inference engine (brief 06 R1/R3) — could silently desync
+the artifacts. Phase 04 closes this on the schema side two ways. First,
+`codegen.Marshal` is deterministic: identical input always yields byte-identical
+output (object properties render in struct-field order via the engine's
+`PropertyOrder`; two-space indent; trailing newline), so regeneration is
+byte-stable and a real change is the only thing that produces a diff. Second,
+the generated schema for a representative contract set is pinned by **golden
+tests** (`testdata/*.golden`, fixed contract to fixed JSON, regenerated with
+`-update`), per AGENTS.md §11. Any drift in codegen output, or an upstream
+inference change, surfaces as a reviewable diff rather than as a silent contract
+break. This is the schema half of the RFC §6.2 drift defence; the schema-to-TS
+cross-check is Phase 05's.
