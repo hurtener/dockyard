@@ -1,0 +1,27 @@
+# Binaries
+/Dockyard
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test & coverage output
+*.test
+*.out
+coverage.*
+
+# Go workspace
+go.work
+go.work.sum
+
+# Dependency directory (vendored)
+/vendor/
+
+# Environment / secrets
+.env
+.env.*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
