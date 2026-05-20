@@ -80,19 +80,19 @@ None. Phase 06 implements RFC §4.2 as written and adopts the brief findings abo
 
 ## Acceptance criteria
 
-- [ ] A valid `dockyard.app.yaml` loads into a typed `Manifest` Go struct with
+- [x] A valid `dockyard.app.yaml` loads into a typed `Manifest` Go struct with
       every RFC §4.2 field populated.
-- [ ] An invalid manifest fails with a source-located error naming the file and,
+- [x] An invalid manifest fails with a source-located error naming the file and,
       where the YAML node carries a position, the line.
-- [ ] The Go type references in `tools[].input` / `tools[].output` resolve through
+- [x] The Go type references in `tools[].input` / `tools[].output` resolve through
       the resolver seam to JSON Schemas.
-- [ ] Structural validation rejects: missing `name`/`title`/`version`, malformed
+- [x] Structural validation rejects: missing `name`/`title`/`version`, malformed
       `version`, unknown `transport`, unknown `task_support`, unknown
       `display_mode`, a `ui:` referencing no `apps[]` entry, duplicate tool/app
       names, malformed `ui://` URI, unknown `visibility`.
-- [ ] The example manifest under `examples/` round-trips: load → validate → no
+- [x] The example manifest under `examples/` round-trips: load → validate → no
       error.
-- [ ] `scripts/smoke/phase-06.sh` reports `OK ≥ 6`, `FAIL = 0`.
+- [x] `scripts/smoke/phase-06.sh` reports `OK ≥ 6`, `FAIL = 0`.
 
 ## Files added or changed
 
@@ -102,8 +102,8 @@ None. Phase 06 implements RFC §4.2 as written and adopts the brief findings abo
 - `internal/manifest/validate.go` — structural validation + source-located errors.
 - `internal/manifest/resolve.go` — the contract-resolver seam + a registry-backed
   resolver wrapping `internal/codegen.SchemaForType`.
-- `internal/manifest/manifest_test.go` — table + golden validation tests.
 - `internal/manifest/load_test.go` — loader / round-trip tests.
+- `internal/manifest/validate_test.go` — table + golden structural-validation tests.
 - `internal/manifest/resolve_test.go` — resolver-seam tests.
 - `internal/manifest/testdata/*.yaml` — valid + invalid fixtures.
 - `examples/customer-health/dockyard.app.yaml` — the round-tripped example.
@@ -202,14 +202,14 @@ func (m *Manifest) ResolveContracts(r ContractResolver) (map[string]ToolContract
 
 ## Pre-merge checklist
 
-- [ ] `make drift-audit` passes
-- [ ] `make check-mirror` passes
-- [ ] `make preflight` passes
-- [ ] `go test -race ./...` and `golangci-lint run` clean
-- [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
-- [ ] Coverage on touched packages ≥ stated target
-- [ ] New CLI command / manifest field / public API has a smoke check in this PR
-- [ ] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
-- [ ] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
-- [ ] New vocabulary added to `docs/glossary.md`
-- [ ] New / changed architectural decision filed in `docs/decisions.md`
+- [x] `make drift-audit` passes
+- [x] `make check-mirror` passes
+- [x] `make preflight` passes
+- [x] `go test -race ./...` and `golangci-lint run` clean
+- [x] All cross-references (`RFC §X.Y`, `brief NN`) resolve
+- [x] Coverage on touched packages ≥ stated target
+- [x] New CLI command / manifest field / public API has a smoke check in this PR
+- [x] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
+- [x] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
+- [x] New vocabulary added to `docs/glossary.md`
+- [x] New / changed architectural decision filed in `docs/decisions.md`

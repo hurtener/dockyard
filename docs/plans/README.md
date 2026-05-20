@@ -31,9 +31,9 @@ done-definition, dependency declarations, and coverage discipline.
 | 01 | Runtime library skeleton + go-sdk baseline    | runtime/server         | §3, §5           | 03        | 00            | 80%  | Shipped |
 | 02 | `protocolcodec` seam + vendored specs         | internal/protocolcodec | §5.4, §16        | 01,02,03  | 00            | 85%  | Shipped |
 | 03 | `Store` seam + sqlite + inmem + conformance   | runtime/store          | §13              | 06, 02    | 00            | 85%  | Shipped |
-| 04 | Contract-first codegen + typed tool builder   | internal/codegen       | §6               | 06, 04    | 01            | 80%  | Pending |
-| 05 | Go → TypeScript codegen + drift cross-check   | internal/codegen       | §6.2             | 06, 04    | 04            | 80%  | Pending |
-| 06 | Manifest — `dockyard.app.yaml`                | internal/manifest      | §4.2             | 04, 01    | 04            | 80%  | Pending |
+| 04 | Contract-first codegen + typed tool builder   | internal/codegen       | §6               | 06, 04    | 01            | 80%  | Shipped |
+| 05 | Go → TypeScript codegen + drift cross-check   | internal/codegen       | §6.2             | 06, 04    | 04            | 80%  | Shipped |
+| 06 | Manifest — `dockyard.app.yaml`                | internal/manifest      | §4.2             | 04, 01    | 04            | 80%  | Shipped |
 | 07 | MCP server core — transports + security       | runtime/server         | §5               | 03, 01    | 01, 02        | 85%  | Pending |
 | 08 | Tool handler runtime — `Result`, content split| runtime/server         | §5, §6.3         | 01, 03    | 07, 04        | 85%  | Pending |
 | 09 | MCP Apps extension — server-side              | runtime/apps           | §7.1, §7.4       | 01, 03    | 07, 02, 06    | 85%  | Pending |
@@ -130,6 +130,9 @@ test under `-race`; migration idempotency verified.
 
 **Goal.** Go contract structs → JSON Schema via `google/jsonschema-go`; the
 contract-first tool builder API (`app.Tool(...).Input[T]().Output[T]()`).
+**Note.** That fluent sketch is not legal Go — type parameters cannot sit on
+methods. D-029 settled the shipped, Go-legal shape: the package-level generic
+constructor `tool.New[In, Out](name)` binds the contract types at construction.
 **Acceptance.** A Go struct generates a correct JSON Schema; the builder produces a
 registered tool; golden tests cover generated output.
 **Briefs.** 06, 04. **Deps.** 01.

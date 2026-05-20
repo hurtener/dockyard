@@ -96,11 +96,19 @@ func TestPhase04_CodegenBuilderServerWiring(t *testing.T) {
 	}
 	wantIn, err := codegen.SchemaFor[orderInput]()
 	if err != nil {
-		t.Fatalf("SchemaFor: %v", err)
+		t.Fatalf("SchemaFor input: %v", err)
 	}
 	if canonical(t, list.Tools[0].InputSchema) != canonical(t, wantIn) {
 		t.Errorf("registered input schema is not the generated schema:\n got %s\nwant %s",
 			canonical(t, list.Tools[0].InputSchema), canonical(t, wantIn))
+	}
+	wantOut, err := codegen.SchemaFor[orderOutput]()
+	if err != nil {
+		t.Fatalf("SchemaFor output: %v", err)
+	}
+	if canonical(t, list.Tools[0].OutputSchema) != canonical(t, wantOut) {
+		t.Errorf("registered output schema is not the generated schema:\n got %s\nwant %s",
+			canonical(t, list.Tools[0].OutputSchema), canonical(t, wantOut))
 	}
 
 	// Calling the tool routes content vs structuredContent per RFC §6.3.

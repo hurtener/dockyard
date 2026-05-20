@@ -111,6 +111,66 @@ func TestCrossCheck_NonObjectSchema(t *testing.T) {
 		"not an object")
 }
 
+// --- CrossCheck: the documented WithNullOptional limitation ------------------
+
+// TestCrossCheck_WithNullOptionalIsMisclassified pins the limitation CrossCheck's
+// doc comment warns about: an optional field generated with WithNullOptional
+// renders as `field: T | null` with NO `?` marker, so parseTSInterface — which
+// keys optionality solely off the `?` — reads it as required. CrossCheck then
+// reports a false ErrSchemaTSDrift on any omitempty field whenever it is handed
+// WithNullOptional output. The doc comment instructs callers to pass non-null
+// (default `field?: T`) TypeScript to CrossCheck; this test makes that
+// documented contract a guarded one, so Phase 18 inherits a known boundary
+// rather than a surprise.
+func TestCrossCheck_WithNullOptionalIsMisclassified(t *testing.T) {
+	t.Parallel()
+	schema, err := codegen.SchemaFor[showRevenueOutput]()
+	if err != nil {
+		t.Fatalf("SchemaFor: %v", err)
+	}
+
+	// Sanity: with the default optional style the matched pair cross-checks
+	// clean — the WithNullOptional artifact is the only thing changing below.
+	defaultTS, err := codegen.TypeScriptForSource(driftRevenueSource)
+	if err != nil {
+		t.Fatalf("TypeScriptForSource (default): %v", err)
+	}
+	if err := codegen.CrossCheck(schema, "ShowRevenueOutput", defaultTS); err != nil {
+		t.Fatalf("CrossCheck on the default-style pair should pass, got: %v", err)
+	}
+
+	// Same contract, generated with WithNullOptional: `currency` (an omitempty
+	// field) renders as `currency: string | null`, with no `?`.
+	nullTS, err := codegen.TypeScriptForSource(driftRevenueSource, codegen.WithNullOptional())
+	if err != nil {
+		t.Fatalf("TypeScriptForSource (WithNullOptional): %v", err)
+	}
+	if !strings.Contains(string(nullTS), "currency: string | null") {
+		t.Fatalf("WithNullOptional output should render `currency: string | null`, got:\n%s", nullTS)
+	}
+	if strings.Contains(string(nullTS), "currency?:") {
+		t.Fatalf("WithNullOptional output should NOT carry a `?` on currency, got:\n%s", nullTS)
+	}
+
+	// CrossCheck misclassifies the schema-optional `currency` as TS-required and
+	// reports drift — the documented limitation. This is the contract Phase 18
+	// inherits: feed CrossCheck default-style TypeScript, not WithNullOptional.
+	err = codegen.CrossCheck(schema, "ShowRevenueOutput", nullTS)
+	if err == nil {
+		t.Fatal("documented limitation regressed: CrossCheck should report a false " +
+			"drift on a WithNullOptional artifact's omitempty field")
+	}
+	if !errors.Is(err, codegen.ErrSchemaTSDrift) {
+		t.Errorf("error should wrap ErrSchemaTSDrift, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "currency") {
+		t.Errorf("error should name the misclassified property `currency`, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "optional in the schema but required in TypeScript") {
+		t.Errorf("error should describe the optionality misclassification, got %v", err)
+	}
+}
+
 // --- CheckStale -------------------------------------------------------------
 
 func TestCheckStale_Fresh(t *testing.T) {
