@@ -212,3 +212,84 @@ no capability is gated behind a hosted service.
 **Why:** The Svelte bridge shell library persists an App's view-state keyed on
 `_meta.viewUUID` across re-renders, so app authors never hand-roll view-state
 plumbing.
+
+---
+
+## D-017 — Agent skills + published docs are V1 deliverables and ongoing hygiene
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §2 (G10), master plan Phase 29, AGENTS.md §19
+**Why:** A developer building MCP apps with Dockyard via an AI coding agent should
+be productive from day one. Dockyard authors a set of agent skills (Agent Skills /
+`SKILL.md` format, agentskills.io conventions) and publishes a GitHub Pages
+technical-documentation site. Phase 29 establishes both; from that phase on,
+keeping them in lockstep with the user-facing surface is mandatory — skill/doc
+drift is a defect, the same as RFC drift.
+
+---
+
+## D-018 — A shared frontend design system is established before any page is built
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §10, master plan Phase 10a, `docs/design/CONVENTIONS.md`,
+AGENTS.md §20
+**Why:** The sibling project Harbor did not establish a design system up front;
+pages were built ad hoc, components and patterns were duplicated across the Console,
+and a costly remediation was needed later to retrofit a shared foundation. Dockyard
+has more frontend surface (the inspector, three template App UIs, the bridge shell,
+the docs site, and post-V1 the multi-server console), so it establishes the design
+system as a day-one charter (`docs/design/CONVENTIONS.md`) and builds the shared
+`web/ui/` inventory + tokens at Phase 10a — before any page-bearing phase. From
+Phase 10a on, composing the shared inventory (no duplicated components, the
+four-state `PageState` on every page, tokens as the single source of visual truth,
+spec→mockup→build) is mandatory hygiene.
+
+---
+
+## D-019 — Pin the Go MCP SDK to v1.6.0
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §5.1, `go.mod`, phase plan `phase-01-runtime-skeleton`
+**Why:** D-002 settled that Dockyard builds on `github.com/modelcontextprotocol/go-sdk`
+and never forks it; this records the concrete pinned version. Brief 03 §2.1
+identifies v1.6.0 (2026-05-08) as the current stable release, under the v1.x
+no-breaking-changes guarantee and CGo-free. Phase 01 pins exactly v1.6.0.
+Version bumps are deliberate, reviewed `go.mod` changes — never a floating
+dependency — and the SDK surface is isolated behind `runtime/server` so a bump
+is a localized change (brief 03 R3/R4).
+
+---
+
+## D-020 — The runtime is an importable library; `cmd/dockyard` is a separate binary
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §3, AGENTS.md §3, phase plan `phase-01-runtime-skeleton`
+**Why:** RFC §3 describes Dockyard as "two Go programs and a contract between
+them" — the `dockyard` CLI/generator and the app runtime. Phase 01 establishes
+the runtime as a normal importable Go package tree under `runtime/` (starting
+with `runtime/server`), vendored into a generated app whose `main.go` stays
+thin, and `cmd/dockyard` as a distinct binary entrypoint. They are not merged
+into one package: the CLI is a developer tool, the runtime is a dependency of
+every shipped app, and conflating them would pull CLI/generator code into every
+app binary.
+
+---
+
+## D-021 — `Server.MCP()` is a temporary, documented SDK seam, not long-term API
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §5.4, phase plan `phase-01-runtime-skeleton`
+**Why:** RFC §5.4 / P3 require that handler-facing and manifest-facing Dockyard
+APIs never expose raw SDK or protocol structs. Phase 01 ships `Server.MCP()
+*mcp.Server` anyway, as a deliberate, godoc-flagged seam: sibling Phases 02
+(`protocolcodec`) and 07 (server core — transports, security, resource
+registration) need SDK-level access before the Dockyard-owned registration
+surface is complete. The leak is bounded and tracked: once Phase 07 lands the
+full Dockyard registration API, `MCP()` is expected to be unexported. Recording
+it here so the departure from the §5.4 intent is visible and reversible, not
+silent (AGENTS.md §15).
