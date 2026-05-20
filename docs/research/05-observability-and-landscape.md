@@ -170,17 +170,20 @@ The inspector consumes the obs/v1 stream over a local out-of-band channel (HTTP/
 ## 5. What Dockyard must adopt / build / avoid
 
 **Adopt:**
+
 - OTel MCP semantic conventions (`mcp.*`, `gen_ai.*`, `span.mcp.server`) as the *export vocabulary* and as naming guidance for `obs/v1`.
 - The MCP `logging` capability — bridge it, don't bypass it.
 - mcp-use's inspector DX bar: widget emulator, host-bridge emulation, device/locale/CSP testing, RPC logger with filtering.
 - Sentry's framing of "silent, protocol-masked failures" as a first-class signal (`ErrorInfo.Silent`).
 
 **Build (V1):**
+
 - `obs/v1` — a canonical, versioned, headless observability event protocol; the runtime emits it, the inspector consumes it. This is the "observability as a protocol" deliverable.
 - A local single-server **inspector** that surfaces: live `obs/v1` event stream + RPC log; per-tool latency/error/volume analytics; MCP App rendering with host-bridge emulation, device/locale/CSP testing; fixture selector (happy/empty/error/permission/slow/large) wired to generated contracts; contract-drift and schema-validation verdicts; host-compatibility verdicts; structured-log view bridging `notifications/message`.
 - An optional `OTelEmitter` export adapter (off by default).
 
 **Avoid:**
+
 - The MCP Mesh anti-pattern: observability that only works once you deploy and operate an external stack (Grafana/Tempo/Redis). Dockyard observability must be intrinsic and zero-dependency — useful for a one-server, ten-minute developer with nothing else installed.
 - Any cloud-only control plane, hosted-registry lock-in, or "real observability requires our managed service" gating. The full inspector + `obs/v1` ship in the OSS binary.
 - Letting the inspector become a production-facing client or an RCE surface (CVE-2025-49596): dev-mode-gated, localhost-only, read-only.

@@ -18,3 +18,11 @@ MD024:
 # markdownlint v0.40.0 and post-dates the RFC, README, and vendored-spec tables;
 # do not fight it.
 MD060: false
+
+# Bare URLs are normal in research-brief Sources lists and vendored-spec READMEs.
+MD034: false
+
+# Hard tabs: Go code samples in fenced blocks legitimately use tabs — only flag
+# tabs in prose, never in code.
+MD010:
+  code_blocks: false

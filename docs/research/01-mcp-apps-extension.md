@@ -2,6 +2,7 @@
 
 **Date:** 2026-05-20
 **Sources:** (full URLs in §7; reachability noted inline)
+
 - `https://modelcontextprotocol.io/extensions/apps/overview` — reachable, fetched.
 - `https://apps.extensions.modelcontextprotocol.io/api/` — reachable, but it is a landing/index page only; no API surface extractable directly.
 - `https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx` (and `raw.githubusercontent.com` mirror) — reachable, fetched; this is the authoritative spec (SEP-1865, dated 2026-01-26).
@@ -70,7 +71,7 @@ iframe ("the View") and the host over `window.postMessage`.
 
 A tool declares its UI through nested metadata:
 
-```
+```text
 _meta.ui = {
   resourceUri?: string,                       // a ui:// URI
   visibility?: Array<"model" | "app">         // default ["model","app"]
@@ -96,7 +97,7 @@ The View and host communicate via a **JSON-RPC dialect of MCP transported over
 
 **Lifecycle:** the View sends `ui/initialize`:
 
-```
+```text
 { "jsonrpc":"2.0", "id":N, "method":"ui/initialize",
   "params": { "protocolVersion": string,
               "capabilities": { "appCapabilities"?: McpUiAppCapabilities },
@@ -115,6 +116,7 @@ The host replies with `McpUiInitializeResult` carrying `hostContext`,
 Apps can theme themselves to the host.
 
 **View → Host requests:**
+
 - `ui/open-link` — `{ url: string }`
 - `ui/message` — `{ role, content }` (send a message into the chat)
 - `ui/request-display-mode` — `{ mode }` (`"inline"`, `"fullscreen"`, `"pip"`)
@@ -122,6 +124,7 @@ Apps can theme themselves to the host.
 - `tools/call` — proxied through the host to the server.
 
 **Host → View notifications:**
+
 - `ui/notifications/tool-input` — `{ arguments }` (sent before the result)
 - `ui/notifications/tool-input-partial` — `{ arguments }` (streaming inputs)
 - `ui/notifications/tool-result` — a standard MCP `CallToolResult`
@@ -142,11 +145,13 @@ matters for Dockyard: a tool call from the App arrives at the server over the
   cookies/localStorage, no parent navigation, no script execution in the
   parent context.
 - **Default CSP** (applied when `_meta.ui.csp` is omitted) is deny-by-default:
-  ```
+
+  ```text
   default-src 'none'; script-src 'self' 'unsafe-inline';
   style-src 'self' 'unsafe-inline'; img-src 'self' data:;
   media-src 'self' data:; connect-src 'none';
   ```
+
   This is why single-file HTML bundles (e.g. `vite-plugin-singlefile`) are the
   path of least resistance — no external origins to declare.
 - To allow network/assets, the resource declares `_meta.ui.csp` with:
@@ -164,7 +169,7 @@ matters for Dockyard: a tool call from the App arrives at the server over the
 
 A tool result is a standard MCP `CallToolResult`:
 
-```
+```text
 {
   content: ContentBlock[],       // text/image/etc — enters model context
   structuredContent?: object,    // typed data for the UI — NOT in model context
@@ -184,7 +189,7 @@ view-state persistence across re-renders.
 Apps is negotiated through the core MCP **`extensions`** capability block. The
 host advertises support during `initialize`:
 
-```
+```json
 { "capabilities": {
     "extensions": {
       "io.modelcontextprotocol/ui": { "mimeTypes": ["text/html;profile=mcp-app"] }
@@ -368,6 +373,7 @@ render and drive Apps during `dockyard dev`.
 ## 5. What Dockyard must adopt / build / avoid
 
 **Must adopt (server-side compliance baseline):**
+
 - Register `ui://` resources with `mimeType = text/html;profile=mcp-app`.
 - Serve resource HTML via `resources/read` as `text` or `blob`, including
   `_meta.ui` (`csp`, `permissions`, `domain`, `prefersBorder`) on the response.
@@ -382,6 +388,7 @@ render and drive Apps during `dockyard dev`.
   endpoint).
 
 **Must build (the paved road on top of compliance):**
+
 - Contract-first codegen: Go input/output structs → JSON Schema → generated
   Svelte/TS types, with `structuredContent` as the typed UI payload.
 - A choke-pointed CSP/domain layer so resource-read responses always carry
@@ -398,6 +405,7 @@ render and drive Apps during `dockyard dev`.
   `claudemcpcontent.com` origin).
 
 **Must avoid:**
+
 - Hardcoding host-specific behavior (Claude domain hashing) into the core.
 - Treating CSP as static manifest-only config.
 - Emitting the deprecated flat `_meta["ui/resourceUri"]`.

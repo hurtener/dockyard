@@ -97,7 +97,7 @@ So mcp-use has *types* but not *contracts*. The braindump's "killer feature: con
 
 Dockyard ships **one statically-linked CGo-free binary** (`dockyard`). No `npx`, no package fan-out, no Node on the install target. Proposed command surface — explicitly a superset of mcp-use's, closing each gap from §2.9:
 
-```
+```text
 dockyard new <name> --template <t>   # scaffold; -t analytical-card | approval-flow | inspector (V1)
 dockyard dev                         # MCP server + Svelte dev server + local host simulator
                                      #   + schema watcher + contract typegen, all one process
@@ -161,6 +161,7 @@ Widget auto-discovery, kept from mcp-use but Svelte-native: `.svelte` files unde
 ## 5. What Dockyard must adopt / build / avoid
 
 **Adopt (match mcp-use — these are table stakes):**
+
 - One-command scaffold → one-command dev loop with a server already running.
 - Widget-by-convention auto-discovery (Svelte files → `ui://` resources, no manual registration).
 - Inspector on by default in `dev`, plus a standalone `dockyard inspect` mode with `--url`/`--port`/`--no-open` (CI-friendly).
@@ -169,6 +170,7 @@ Widget auto-discovery, kept from mcp-use but Svelte-native: `.svelte` files unde
 - A BYOK chat tab in the inspector to test model-driven tool selection without a real host.
 
 **Build (beat mcp-use — Go-leveraged differentiators):**
+
 - **Single embedded-asset binary** — `dockyard build` emits one CGo-free static executable: MCP server + tools + schemas + bundled Svelte UI. No Node on the target. Local stdio install is just `{"command": "/path/to/app"}`.
 - **Generated contracts, not hand-declared types** — `dockyard generate` derives JSON Schema + Svelte/TS types + fixtures from Go structs; widget shapes cannot drift. This is the headline win over mcp-use's `useWidget<T>()`.
 - **A real test toolchain** — `dockyard test` (contract tests, golden snapshots, host-compat matrix) and `dockyard validate` (manifest/schema/mapping/MIME/UI-state/stale-typegen gates). Quality enforced by the toolchain, not docs.
@@ -179,6 +181,7 @@ Widget auto-discovery, kept from mcp-use but Svelte-native: `.svelte` files unde
 - **Cross-compile matrix** in `build` (darwin/linux/windows × arm64/amd64) + checksums — trivial in Go, painful in Node.
 
 **Avoid (do not copy mcp-use's mistakes):**
+
 - Do not funnel deployment to a proprietary cloud. `build` emits portable artifacts; Portico is the optional, OSS control plane. (mcp-mesh.ai cautionary tale — Dump 4.)
 - Do not ship a multi-package fan-out. One `dockyard` binary; no version-skew matrix.
 - Do not make templates protocol-flavored (`starter`/`mcp-ui`/`apps-sdk`). Templates describe workflows.

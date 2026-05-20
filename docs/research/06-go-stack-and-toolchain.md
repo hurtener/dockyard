@@ -30,6 +30,7 @@ The current release is **Go 1.26**, released February 2026. Concretely, "2026 st
 `//go:embed` (stable since Go 1.16) is the canonical answer and needs no third-party library. The pattern: a `web/embed.go` file with `//go:embed all:dist` populating an `embed.FS`, served via `http.FileServerFS` with an SPA fallback to `index.html` for unknown paths. For Dockyard the embedded assets are *also* served as MCP `ui://` resources, not just over HTTP — the same `embed.FS` backs both the inspector's HTTP preview and the MCP resource handler.
 
 Key constraints found:
+
 - The Svelte build must produce **static output**. For plain Svelte+Vite the default `vite build` output works. For SvelteKit, `@sveltejs/adapter-static` is required (prerendered, no Node server) — confirmed by the Liip and PocketBase write-ups.
 - `//go:embed` cannot reach outside its own module directory and ignores files starting with `_`/`.` unless `all:` is prefixed. Generated layout must keep `web/dist` inside the Go module tree.
 - Build ordering matters: `web/dist` must exist *before* `go build`. If it is missing the build fails. Solution: a committed `.gitkeep`/placeholder `index.html` plus a `go:generate` or Makefile step that runs the Vite build first. `dockyard build` orchestrates this explicitly.
@@ -49,6 +50,7 @@ However, tygo emits TS *directly from Go AST* — it does not consume JSON Schem
 ### 2.5 Go CLI framework
 
 Three real contenders:
+
 - **`spf13/cobra`** — the de facto standard (35k+ stars), used by `kubectl`, `gh`, `hugo`, Docker. Nested commands, generated help, shell completions, large ecosystem, pairs with `viper` for config. Heavier; some boilerplate.
 - **`alecthomas/kong`** — struct-tag-driven; you declare the CLI as a Go struct and Kong binds args/flags to fields. Very little boilerplate, type-safe, good for medium CLIs.
 - **`urfave/cli`** — simpler, composable, flag-focused; lighter than Cobra but a smaller ecosystem.
@@ -64,6 +66,7 @@ Dockyard should **not shell out to either** — it should embed its own watcher 
 ### 2.7 Vite/Svelte build integration
 
 Vite is the Svelte build tool in 2026. Integration facts:
+
 - **`dev` mode:** Vite dev server runs on its own port with HMR; the Go server proxies UI requests to it (or the inspector iframe points at the Vite URL). Generated `vite.config.ts` sets `base: './'` so embedded assets resolve with relative paths.
 - **`build` mode:** `vite build` → static `web/dist` → consumed by `//go:embed`.
 - The braindump's `web/src/generated/contracts.ts` is a *Vite source input*, so codegen must run **before** `vite build` and **before/while** the Vite dev server is running.
@@ -81,12 +84,14 @@ CGo-free is satisfied automatically by the above (`embed`, `slog`, `fsnotify`, `
 The naive pipeline `Go → JSON Schema → TS` is attractive (one schema, two consumers) but has a seam: **`tygo` does not read JSON Schema** — it reads Go source. A JSON-Schema-driven TS step would need a separate `json-schema-to-typescript` (npm) tool, adding a Node dependency to codegen. Two viable designs:
 
 **Design A — fan-out from Go (recommended).**
-```
+
+```text
                     ┌─ google/jsonschema-go .For() ──► contracts.schema.json  (MCP wire contract)
 internal/contracts  │
   *.go  (SoT)  ──────┤
                     └─ tygo ───────────────────────────► web/src/generated/contracts.ts (UI types)
 ```
+
 Go structs are the SoT. Schema and TS are generated *independently from Go*, each by a pure-Go tool. `dockyard validate` then **cross-checks** schema vs. TS for drift (compile-time TS check + a schema-shape assertion). No Node dependency in the codegen path.
 
 **Design B — schema-as-hub.** `Go → JSON Schema → TS` via `json-schema-to-typescript`. Single schema, but pulls Node into `dockyard generate`. Rejected for V1: it makes the generator depend on a Node toolchain even for projects that haven't run `npm install` yet.
@@ -109,6 +114,7 @@ gen := tygo.New(cfg); err = gen.Generate()
 `dockyard dev`'s schema watcher (fsnotify on `internal/contracts/*.go`) re-runs both generators on save — this is the braindump's "schema watcher active / TypeScript types generated" line.
 
 ### 3.2 Embed pattern (generated `web/embed.go`)
+
 ```go
 package web
 

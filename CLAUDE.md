@@ -487,5 +487,3 @@ From **Phase 10a** onward:
 Before Phase 10a lands, `web/ui/` and the filled `docs/design/CONVENTIONS.md` do not
 yet exist; Phase 10a establishes them and turns this rule on. The §14 checklist
 enforces it.
-
-

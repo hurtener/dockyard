@@ -28,9 +28,9 @@ done-definition, dependency declarations, and coverage discipline.
 | #  | Name                                          | Subsystem              | RFC §            | Briefs    | Deps          | Cov. | Status  |
 |---:|-----------------------------------------------|------------------------|------------------|-----------|---------------|-----:|---------|
 | 00 | Repo skeleton & hygiene                       | repo / hygiene         | n/a              | —         | —             | n/a  | Shipped |
-| 01 | Runtime library skeleton + go-sdk baseline    | runtime/server         | §3, §5           | 03        | 00            | 80%  | Pending |
-| 02 | `protocolcodec` seam + vendored specs         | internal/protocolcodec | §5.4, §16        | 01,02,03  | 00            | 85%  | Pending |
-| 03 | `Store` seam + sqlite + inmem + conformance   | runtime/store          | §13              | 06, 02    | 00            | 85%  | Pending |
+| 01 | Runtime library skeleton + go-sdk baseline    | runtime/server         | §3, §5           | 03        | 00            | 80%  | Shipped |
+| 02 | `protocolcodec` seam + vendored specs         | internal/protocolcodec | §5.4, §16        | 01,02,03  | 00            | 85%  | Shipped |
+| 03 | `Store` seam + sqlite + inmem + conformance   | runtime/store          | §13              | 06, 02    | 00            | 85%  | Shipped |
 | 04 | Contract-first codegen + typed tool builder   | internal/codegen       | §6               | 06, 04    | 01            | 80%  | Pending |
 | 05 | Go → TypeScript codegen + drift cross-check   | internal/codegen       | §6.2             | 06, 04    | 04            | 80%  | Pending |
 | 06 | Manifest — `dockyard.app.yaml`                | internal/manifest      | §4.2             | 04, 01    | 04            | 80%  | Pending |

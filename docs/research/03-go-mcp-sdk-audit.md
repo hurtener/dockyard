@@ -129,6 +129,7 @@ Nothing above requires patching the SDK. The Tasks extension follows the same pa
 ## 5. What Dockyard must adopt / build / avoid
 
 **Adopt (free from the SDK — do not reinvent):**
+
 - The entire server primitive set: tools (incl. generic `AddTool[In,Out]` with schema inference), resources, resource templates, prompts, completion, elicitation, sampling, logging, progress, pagination.
 - All transports: stdio, streamable-HTTP, SSE, in-memory, command. Use `InMemoryTransport` as the backbone of the Dockyard inspector and contract tests.
 - The `ServerCapabilities.AddExtension` hook and the `_meta` (`Meta`) plumbing — these are the official seams for Apps and Tasks.
@@ -136,6 +137,7 @@ Nothing above requires patching the SDK. The Tasks extension follows the same pa
 - Session lifecycle, middleware pipeline, keepalive, security knobs.
 
 **Build (Dockyard's value-add — not in the SDK):**
+
 - The **MCP Apps layer**: `ui://` resource conventions, tool↔UI `_meta` linkage, `text/html;profile=mcp-app` MIME correctness, the iframe/`postMessage` host bridge, host-compatibility checks, CSP/resource policy. SDK gives primitives; Dockyard gives the App.
 - The **MCP Tasks layer** for V1: a shim over `_meta`/extension primitives (optionally vendoring `experimental-ext-tasks`), with an internal interface so the official SDK Tasks API can be swapped in later.
 - Typed `_meta` accessors / validation so extension metadata is checked by Dockyard's toolchain.
@@ -143,6 +145,7 @@ Nothing above requires patching the SDK. The Tasks extension follows the same pa
 - Everything above the protocol: manifest, templates, CLI, local preview/inspector, codegen, packaging, quality gates, observability.
 
 **Avoid:**
+
 - **Forking the SDK.** The extension + `_meta` hooks make a fork unnecessary for Apps and Tasks; a fork would forfeit the v1.x compatibility guarantee and security updates. Layer, do not fork.
 - **Relying on SDK defaults for security.** Set cross-origin protection, Origin/Content-Type verification, and DNS-rebinding protection explicitly.
 - **Pinning an old SDK version.** The Tasks API, custom-notification fix (#745), and spec updates all arrive in future releases; Dockyard must stay current.

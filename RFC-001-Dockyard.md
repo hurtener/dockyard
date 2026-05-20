@@ -312,10 +312,10 @@ The SDK exposes exactly two hooks Dockyard needs (Brief 03 §2.4):
   to its `ui://` resource purely through `_meta`; the Tasks shim rides the same
   plumbing.
 
-The SDK maintainers **deliberately scoped first-class Apps support out** (issue
-#933, "all primitives in place"). That is not a gap to lament — it is precisely
-Dockyard's value-add. The Apps ergonomics, manifest wiring, MIME correctness, host
-compatibility, and bridge contract are 100% Dockyard's to build.
+The SDK maintainers **deliberately scoped first-class Apps support out**
+(issue #933, "all primitives in place"). That is not a gap to lament — it is
+precisely Dockyard's value-add. The Apps ergonomics, manifest wiring, MIME
+correctness, host compatibility, and bridge contract are 100% Dockyard's to build.
 
 ### 5.4 The `protocolcodec` isolation seam — settled
 

@@ -2,6 +2,7 @@
 
 **Date:** 2026-05-20
 **Sources:**
+
 - https://modelcontextprotocol.io/extensions/tasks/overview — reachable (overview page; note: lags the spec — uses `tasks/update`, which the authoritative spec does **not** define)
 - https://github.com/modelcontextprotocol/experimental-ext-tasks — reachable; mined via GitHub API. Authoritative files: `docs/specification/draft/tasks.mdx`, `schema/draft/schema.ts`, `seps/1686-tasks.md`
 - https://github.com/modelcontextprotocol/go-sdk — reachable; no confirmed Tasks-extension surface as of 2026-05 (see §4)
@@ -37,6 +38,7 @@ track **SEP-1686 / SEP-2663**.
 
 Tasks is *direction-agnostic*: either side can be requestor or receiver. For Dockyard
 (server-side only) the relevant directions are:
+
 - **Server as receiver** of task-augmented `tools/call` — the primary case.
 - **Server as requestor** of task-augmented `sampling/createMessage` and `elicitation/create`
   toward the client (needed when a long task elicits user input mid-flight).
@@ -44,6 +46,7 @@ Tasks is *direction-agnostic*: either side can be requestor or receiver. For Doc
 ### 2.2 Lifecycle / status model
 
 Five statuses (`TaskStatus`): `working`, `input_required`, `completed`, `failed`, `cancelled`.
+
 - A task **MUST** begin in `working`.
 - Legal transitions: `working` → {`input_required`, `completed`, `failed`, `cancelled`};
   `input_required` → {`working`, `completed`, `failed`, `cancelled`}.
@@ -65,6 +68,7 @@ a task. Shape: `{ "task": Task }`. (The overview page's `resultType: "task"` dis
 `null` = unlimited), `pollInterval?` (ms).
 
 **JSON-RPC methods (receiver must serve):**
+
 | Method | Params | Result | Notes |
 |---|---|---|---|
 | `tasks/get` | `{ taskId }` | `Result & Task` | Poll status. **Non-blocking** — returns current state immediately. |
@@ -103,11 +107,13 @@ separate `tasks/update` call.
 ### 2.6 Capability negotiation
 
 Declared in the `tasks` capability at initialization. **Server capabilities:**
+
 ```json
 { "capabilities": { "tasks": {
   "list": {}, "cancel": {},
   "requests": { "tools": { "call": {} } } } } }
 ```
+
 - `tasks.list` / `tasks.cancel` — gate those operations.
 - `tasks.requests.tools.call` — server accepts task-augmented `tools/call`. This set is
   **exhaustive**: absent request type = unsupported.
@@ -117,6 +123,7 @@ Declared in the `tasks` capability at initialization. **Server capabilities:**
 
 **Tool-level negotiation (second, finer layer).** Each tool in `tools/list` declares
 `execution.taskSupport`: `"forbidden"` (default if absent), `"optional"`, or `"required"`.
+
 - `forbidden` → client must not task-augment; server **SHOULD** return `-32601` if it tries.
 - `optional` → client may call either way.
 - `required` → client **MUST** task-augment; server **MUST** return `-32601` otherwise.
@@ -258,13 +265,15 @@ type TaskStore interface {
 
 ## 5. What Dockyard must adopt / build / avoid
 
-**Adopt**
+### Adopt
+
 - Treat `experimental-ext-tasks` `schema/draft/schema.ts` as the single source of truth;
   the `/overview` page is a non-authoritative summary.
 - The two-layer negotiation model: `tasks` capability *and* per-tool `execution.taskSupport`.
 - Polling-as-default; `notifications/tasks/status` and `progress` as best-effort extras.
 
-**Build (server-side, V1)**
+### Build (server-side, V1)
+
 - A **Tasks runtime** layered over go-sdk: capability advertisement; `tasks/*` method
   routing; `CreateTaskResult` substitution for task-augmented `tools/call`.
 - A pluggable **TaskStore** (in-memory default; durable adapter for HTTP/Portico modes) with
@@ -280,7 +289,8 @@ type TaskStore interface {
 - Auth-context binding of tasks; crypto-strong ID generation; `tasks.list` gated on
   identifiability.
 
-**Avoid**
+### Avoid
+
 - Implementing `tasks/update` / `inputRequests` from the overview page — not in the spec.
 - Leaking experimental protocol structs into the public handler API — wrap everything.
 - Advertising `tasks.list` in unauthenticated single-user stdio mode.

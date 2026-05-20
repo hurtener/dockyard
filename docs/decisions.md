@@ -248,6 +248,113 @@ spec→mockup→build) is mandatory hygiene.
 
 ---
 
+## D-019 — Pin the Go MCP SDK to v1.6.0
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §5.1, `go.mod`, phase plan `phase-01-runtime-skeleton`
+**Why:** D-002 settled that Dockyard builds on `github.com/modelcontextprotocol/go-sdk`
+and never forks it; this records the concrete pinned version. Brief 03 §2.1
+identifies v1.6.0 (2026-05-08) as the current stable release, under the v1.x
+no-breaking-changes guarantee and CGo-free. Phase 01 pins exactly v1.6.0.
+Version bumps are deliberate, reviewed `go.mod` changes — never a floating
+dependency — and the SDK surface is isolated behind `runtime/server` so a bump
+is a localized change (brief 03 R3/R4).
+
+---
+
+## D-020 — The runtime is an importable library; `cmd/dockyard` is a separate binary
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §3, AGENTS.md §3, phase plan `phase-01-runtime-skeleton`
+**Why:** RFC §3 describes Dockyard as "two Go programs and a contract between
+them" — the `dockyard` CLI/generator and the app runtime. Phase 01 establishes
+the runtime as a normal importable Go package tree under `runtime/` (starting
+with `runtime/server`), vendored into a generated app whose `main.go` stays
+thin, and `cmd/dockyard` as a distinct binary entrypoint. They are not merged
+into one package: the CLI is a developer tool, the runtime is a dependency of
+every shipped app, and conflating them would pull CLI/generator code into every
+app binary.
+
+---
+
+## D-021 — `Server.MCP()` is a temporary, documented SDK seam, not long-term API
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §5.4, phase plan `phase-01-runtime-skeleton`
+**Why:** RFC §5.4 / P3 require that handler-facing and manifest-facing Dockyard
+APIs never expose raw SDK or protocol structs. Phase 01 ships `Server.MCP()
+*mcp.Server` anyway, as a deliberate, godoc-flagged seam: sibling Phases 02
+(`protocolcodec`) and 07 (server core — transports, security, resource
+registration) need SDK-level access before the Dockyard-owned registration
+surface is complete. The leak is bounded and tracked: once Phase 07 lands the
+full Dockyard registration API, `MCP()` is expected to be unexported. Recording
+it here so the departure from the §5.4 intent is visible and reversible, not
+silent (AGENTS.md §15).
+
+---
+
+## D-022 — `protocolcodec` exposes versioned codecs behind a `Codec` interface
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §5.4, §16, `internal/protocolcodec`, phase plan 02
+**Why:** RFC §16 mandates codecs keyed on the negotiated `protocolVersion`.
+Phase 02 makes that concrete: `protocolcodec` exposes a `Codec` interface and a
+registry, with `CodecFor(version)` selecting an implementation and falling back
+to the default codec for an empty or unrecognised version (graceful
+degradation, RFC §16 item 7), plus `CodecForStrict` for tooling that must flag
+an unknown version. V1 registers one `v1Codec` for every supported version
+because the Apps (2026-01-26) and Tasks (experimental) wire shapes are stable
+across them; the registry is the seam at which a future spec bump registers a
+*new* codec for a *new* version, leaving old peers on their old codec. Encoders
+emit only current spec shapes; decoders are tolerant (ignore unknown keys,
+accept deprecated forms).
+
+---
+
+## D-023 — The deprecated flat `_meta["ui/resourceUri"]` form is read-tolerated, never emitted
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §16 item 3, RFC §7.1, brief 01 §2.3,
+`internal/protocolcodec`
+**Why:** The MCP Apps spec (revision 2026-01-26) marks the flat
+`_meta["ui/resourceUri"]` form deprecated and slated for removal before GA,
+replaced by the nested `_meta.ui` object. Per RFC §16 item 3 deprecated shapes
+are tolerated on read and never emitted. `protocolcodec` implements exactly
+that: `DecodeAppsToolMeta` reads the nested form and, if absent, falls back to
+the flat form (so a tool authored against an older host still links its UI);
+`EncodeAppsToolMeta` emits only the nested form and actively strips the flat
+key from any base `_meta` it is given. A round-trip test (decode-flat →
+re-encode → assert flat key absent) makes the guarantee binding.
+
+---
+
+## D-024 — Phase 02 hand-writes the Tasks wire types; the schema→Go generator is deferred
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §8.2, §16 item 4, brief 02 §3/§5, phase plan 02
+("Findings I'm departing from")
+**Why:** RFC §16 item 4 and brief 02 §5 describe the Tasks wire layer as
+"code-generated from the vendored schema." Phase 02's scope is the isolation
+seam and the `_meta`-borne / capability surface — a small, stable subset of the
+Tasks schema. Standing up a TypeScript-schema → Go code generator now would be
+premature: the generator is a contracts-pipeline concern (Wave 2, Phase 04,
+RFC §6.2) and the full `tasks/*` method-envelope wire layer is needed only when
+the V1 Tasks runtime lands (Wave 5). Phase 02 therefore vendors the
+authoritative schema (`mcp-tasks-experimental.schema.ts`, pinned by SHA) and
+hand-writes the Go wire types this phase needs, guarded by golden tests so a
+spec change is a visible diff. The forward-compatibility property is preserved
+(one seam, pinned snapshot, regenerate-and-diff discipline); only the *means*
+of regeneration is deferred. When the generated layer lands it replaces the
+hand-written types behind the unchanged `Codec` interface.
+
+---
+
 ## D-025 — The `Store` seam is a generic namespaced KV primitive, not Tasks/Obs accessors
 
 **Date:** 2026-05-20
@@ -306,104 +413,3 @@ extend the applied sequence as a prefix (`ErrMigrationOutOfOrder` — covers reo
 and removal) and a recorded migration whose fingerprint diverges
 (`ErrMigrationMutated` — a migration edited after merge). Each migration runs in its
 own transaction so a failure leaves a clean applied prefix.
-## D-022 — `protocolcodec` exposes versioned codecs behind a `Codec` interface
-
-**Date:** 2026-05-20
-**Status:** Settled
-**Where it lives:** RFC §5.4, §16, `internal/protocolcodec`, phase plan 02
-**Why:** RFC §16 mandates codecs keyed on the negotiated `protocolVersion`.
-Phase 02 makes that concrete: `protocolcodec` exposes a `Codec` interface and a
-registry, with `CodecFor(version)` selecting an implementation and falling back
-to the default codec for an empty or unrecognised version (graceful
-degradation, RFC §16 item 7), plus `CodecForStrict` for tooling that must flag
-an unknown version. V1 registers one `v1Codec` for every supported version
-because the Apps (2026-01-26) and Tasks (experimental) wire shapes are stable
-across them; the registry is the seam at which a future spec bump registers a
-*new* codec for a *new* version, leaving old peers on their old codec. Encoders
-emit only current spec shapes; decoders are tolerant (ignore unknown keys,
-accept deprecated forms).
-
----
-
-## D-023 — The deprecated flat `_meta["ui/resourceUri"]` form is read-tolerated, never emitted
-
-**Date:** 2026-05-20
-**Status:** Settled
-**Where it lives:** RFC §16 item 3, RFC §7.1, brief 01 §2.3,
-`internal/protocolcodec`
-**Why:** The MCP Apps spec (revision 2026-01-26) marks the flat
-`_meta["ui/resourceUri"]` form deprecated and slated for removal before GA,
-replaced by the nested `_meta.ui` object. Per RFC §16 item 3 deprecated shapes
-are tolerated on read and never emitted. `protocolcodec` implements exactly
-that: `DecodeAppsToolMeta` reads the nested form and, if absent, falls back to
-the flat form (so a tool authored against an older host still links its UI);
-`EncodeAppsToolMeta` emits only the nested form and actively strips the flat
-key from any base `_meta` it is given. A round-trip test (decode-flat →
-re-encode → assert flat key absent) makes the guarantee binding.
-
----
-
-## D-024 — Phase 02 hand-writes the Tasks wire types; the schema→Go generator is deferred
-
-**Date:** 2026-05-20
-**Status:** Settled
-**Where it lives:** RFC §8.2, §16 item 4, brief 02 §3/§5, phase plan 02
-("Findings I'm departing from")
-**Why:** RFC §16 item 4 and brief 02 §5 describe the Tasks wire layer as
-"code-generated from the vendored schema." Phase 02's scope is the isolation
-seam and the `_meta`-borne / capability surface — a small, stable subset of the
-Tasks schema. Standing up a TypeScript-schema → Go code generator now would be
-premature: the generator is a contracts-pipeline concern (Wave 2, Phase 04,
-RFC §6.2) and the full `tasks/*` method-envelope wire layer is needed only when
-the V1 Tasks runtime lands (Wave 5). Phase 02 therefore vendors the
-authoritative schema (`mcp-tasks-experimental.schema.ts`, pinned by SHA) and
-hand-writes the Go wire types this phase needs, guarded by golden tests so a
-spec change is a visible diff. The forward-compatibility property is preserved
-(one seam, pinned snapshot, regenerate-and-diff discipline); only the *means*
-of regeneration is deferred. When the generated layer lands it replaces the
-hand-written types behind the unchanged `Codec` interface.
-## D-019 — Pin the Go MCP SDK to v1.6.0
-
-**Date:** 2026-05-20
-**Status:** Settled
-**Where it lives:** RFC §5.1, `go.mod`, phase plan `phase-01-runtime-skeleton`
-**Why:** D-002 settled that Dockyard builds on `github.com/modelcontextprotocol/go-sdk`
-and never forks it; this records the concrete pinned version. Brief 03 §2.1
-identifies v1.6.0 (2026-05-08) as the current stable release, under the v1.x
-no-breaking-changes guarantee and CGo-free. Phase 01 pins exactly v1.6.0.
-Version bumps are deliberate, reviewed `go.mod` changes — never a floating
-dependency — and the SDK surface is isolated behind `runtime/server` so a bump
-is a localized change (brief 03 R3/R4).
-
----
-
-## D-020 — The runtime is an importable library; `cmd/dockyard` is a separate binary
-
-**Date:** 2026-05-20
-**Status:** Settled
-**Where it lives:** RFC §3, AGENTS.md §3, phase plan `phase-01-runtime-skeleton`
-**Why:** RFC §3 describes Dockyard as "two Go programs and a contract between
-them" — the `dockyard` CLI/generator and the app runtime. Phase 01 establishes
-the runtime as a normal importable Go package tree under `runtime/` (starting
-with `runtime/server`), vendored into a generated app whose `main.go` stays
-thin, and `cmd/dockyard` as a distinct binary entrypoint. They are not merged
-into one package: the CLI is a developer tool, the runtime is a dependency of
-every shipped app, and conflating them would pull CLI/generator code into every
-app binary.
-
----
-
-## D-021 — `Server.MCP()` is a temporary, documented SDK seam, not long-term API
-
-**Date:** 2026-05-20
-**Status:** Settled
-**Where it lives:** RFC §5.4, phase plan `phase-01-runtime-skeleton`
-**Why:** RFC §5.4 / P3 require that handler-facing and manifest-facing Dockyard
-APIs never expose raw SDK or protocol structs. Phase 01 ships `Server.MCP()
-*mcp.Server` anyway, as a deliberate, godoc-flagged seam: sibling Phases 02
-(`protocolcodec`) and 07 (server core — transports, security, resource
-registration) need SDK-level access before the Dockyard-owned registration
-surface is complete. The leak is bounded and tracked: once Phase 07 lands the
-full Dockyard registration API, `MCP()` is expected to be unexported. Recording
-it here so the departure from the §5.4 intent is visible and reversible, not
-silent (AGENTS.md §15).
