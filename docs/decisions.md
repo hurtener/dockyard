@@ -248,6 +248,64 @@ spec→mockup→build) is mandatory hygiene.
 
 ---
 
+## D-025 — The `Store` seam is a generic namespaced KV primitive, not Tasks/Obs accessors
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §13, `runtime/store`, Phase 03 plan
+**Why:** RFC §13's illustrative `Store` interface sketches `Tasks() TaskStore` and
+`Obs() ObsStore` accessors. Phase 03's scope is the seam and its two drivers only —
+not the `TaskStore` (Phase 14, RFC §8.5) or `ObsStore` (Phase 15, RFC §11). Shipping
+those accessors now would force Phase 03 to define out-of-scope sub-store types. The
+V1 `Store` interface instead exposes a generic, namespaced, transactional key-value
+primitive (`View`/`Update` → `Tx` with `Get`/`Put`/`Delete`/`Scan`) plus `Migrate`,
+`Ping`, and `Close`. The future `TaskStore` and `ObsStore` are thin typed facades
+constructed over a `Store`, each owning its own forward-only migrations registered
+through `store.AddMigration`. This preserves RFC §13's intent — "a future driver
+implements the same interface; a new persistence concern is proven by the
+conformance suite" — while keeping the seam shippable in one phase. It is an
+interface-shape decision, not a design change; the RFC's `Tasks()`/`Obs()` sketch is
+illustrative, and a Postgres driver still implements one unchanged interface.
+
+---
+
+## D-026 — V1 `Store` drivers: `inmem` and `modernc.org/sqlite`; the SQLite driver is `database/sql`-based
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §13, RFC §17, `runtime/store/inmem`, `runtime/store/sqlitestore`
+**Why:** RFC §13 and §17 settle `modernc.org/sqlite` — a pure-Go, CGo-free port of
+SQLite3 (brief 06 §2.8) — as the V1 durable driver, with an in-memory driver for
+single-user stdio apps. The SQLite driver is built on the `database/sql` driver
+`modernc.org/sqlite` registers, using a single `kv(ns, key, value)` table
+(`WITHOUT ROWID`, composite primary key); a future sub-store layers typed structure
+via its own migrations. The connection pool is pinned to one connection
+(`SetMaxOpenConns(1)`): an in-memory SQLite database is per-connection, and SQLite
+serializes writers regardless. WAL journaling and a busy timeout are set via DSN
+pragmas. `modernc.org/sqlite` supports all four Dockyard target triples
+(darwin/arm64, linux/amd64, linux/arm64, windows/amd64 — brief 06 §4 R6); the
+cross-compile matrix is verified by a later release-engineering phase. The build is
+CGo-free and CI enforces `CGO_ENABLED=0` (brief 06 §4 R7).
+
+---
+
+## D-027 — Migrations are forward-only, append-only, idempotent, and runner-tracked
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §13, AGENTS.md §9, `runtime/store/migrate.go`
+**Why:** AGENTS.md §9 mandates forward-only migrations that are never edited after
+merge. Phase 03 implements one shared migration runner (`store.RunMigrations`) that
+every driver's `Migrate` delegates to, so migration semantics are identical across
+drivers. Migrations register globally via `store.AddMigration` (typically from a
+sub-store package's `init`); the runner records each applied migration in a reserved
+KV namespace (`__store_migrations__`) through the same `Tx` primitive, so idempotency
+and tracking work uniformly on both drivers with no driver-specific schema. The
+runner enforces append-only ordering: it rejects a registered sequence that does not
+extend the applied sequence as a prefix (`ErrMigrationOutOfOrder` — covers reordering
+and removal) and a recorded migration whose fingerprint diverges
+(`ErrMigrationMutated` — a migration edited after merge). Each migration runs in its
+own transaction so a failure leaves a clean applied prefix.
 ## D-022 — `protocolcodec` exposes versioned codecs behind a `Codec` interface
 
 **Date:** 2026-05-20

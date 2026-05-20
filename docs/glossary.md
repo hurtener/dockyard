@@ -28,6 +28,9 @@ offers typed view→host helpers, negotiates display modes, and framework-manage
 advertises the extensions and capabilities it supports. Dockyard reads this at run
 time and adapts; it never hardcodes a per-host capability matrix. RFC §7.5. D-011.
 
+**Conformance suite** — the shared `runtime/store/storetest` test battery every
+`Store` driver must pass. A new persistence guarantee is added to the suite once and
+proven against every driver, never bolted onto one driver. RFC §13. D-025, D-026.
 **Codec** — a `protocolcodec` encoder/decoder pair for one negotiated MCP
 `protocolVersion`. A codec encodes Dockyard domain types into MCP extension wire
 formats and decodes wire formats back; it is obtained with `CodecFor` /
@@ -52,6 +55,11 @@ Selected at run time, not baked in. RFC §14.
 more `ui://` UI resources. A plain MCP server and an MCP App are the same artifact
 at different levels of completeness. RFC §4.1.
 
+**Forward-only migration** — an append-only, ordered, idempotent schema or data step
+applied through the `Store` seam's migration runner. Once a migration has merged it
+is never edited; the runner rejects reordering, removal, or post-merge mutation.
+RFC §13, AGENTS.md §9. D-027.
+
 ## H
 
 **Host profile** — a pluggable set of host-specific *derivation functions* (e.g.
@@ -64,6 +72,13 @@ algorithms, not a capability matrix. RFC §7.5. D-012.
 component. It implements the host half of the `ui/` bridge to render Apps locally,
 surfaces the `obs/v1` stream, fixtures, latency analytics, drift verdicts, and
 capability-set emulation. Dev-mode-gated, localhost-only, read-only. RFC §12.
+
+## K
+
+**KV namespace** — a logical partition of a `Store`'s key space. Every key is
+addressed by `(namespace, key)`; future sub-stores (`TaskStore`, `ObsStore`) each own
+one or more namespaces, and the migration runner reserves `__store_migrations__`.
+RFC §13. D-025.
 
 ## M
 
@@ -106,7 +121,12 @@ domains. RFC §7.4.
 
 **`Store` seam** — the `Store` interface all durable state goes through (tasks,
 `obs/v1` history, inspector state). V1 driver: `modernc.org/sqlite`. The seam keeps
-a future Postgres driver addable without a rewrite. RFC §13. D-007.
+a future Postgres driver addable without a rewrite. RFC §13. D-007, D-025.
+
+**Store driver** — a concrete implementation of the `Store` seam registered via an
+`init()` blank-import. V1 ships two: `inmem` (in-memory, for single-user stdio apps)
+and `sqlite` (durable, `modernc.org/sqlite`). Every driver must pass the conformance
+suite. RFC §13. D-026.
 
 ## T
 
