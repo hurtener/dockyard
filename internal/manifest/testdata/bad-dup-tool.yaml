@@ -1,0 +1,14 @@
+name: dup-tool
+title: Dup Tool
+version: 1.0.0
+runtime:
+  transports: [stdio]
+tools:
+  - name: echo
+    description: First.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput
+  - name: echo
+    description: Second.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput

@@ -1,0 +1,40 @@
+# Example Dockyard manifest — RFC §4.2.
+#
+# This is the manifest the internal/manifest loader round-trips in its tests:
+# load -> validate -> no error. It mirrors the RFC §4.2 reference manifest and
+# exercises every block — runtime, tools, apps, and the quality gates.
+name: customer-health
+title: Customer Health
+version: 0.1.0
+
+runtime:
+  transports: [stdio, http]      # which deployment modes this app supports
+  ui:
+    framework: svelte            # V1: svelte only
+    bundle: single-file          # default; deny-by-default CSP (RFC §7.4)
+
+tools:
+  - name: show_customer_health
+    description: Show an interactive customer health dashboard for an account.
+    input: internal/contracts.ShowCustomerHealthInput
+    output: internal/contracts.ShowCustomerHealthOutput
+    ui: customer_health          # links to the apps[] entry below
+    task_support: optional       # forbidden | optional | required (RFC §8.4)
+
+apps:
+  - id: customer_health
+    uri: ui://customer-health/main
+    entry: web/src/apps/customer-health.svelte
+    display_modes: [inline, fullscreen]   # subset of inline|fullscreen|pip
+    csp:
+      connect: [https://api.company.com]
+    visibility: [model, app]
+
+quality:                          # RFC §9.4 — enforced by `dockyard validate`
+  require_loading_state: true
+  require_empty_state: true
+  require_error_state: true
+  require_permission_state: true
+  require_fixtures: true
+  require_contract_tests: true
+  require_spec_compliance: true

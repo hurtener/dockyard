@@ -1,0 +1,10 @@
+name: bad-transport
+title: Bad Transport
+version: 1.0.0
+runtime:
+  transports: [carrier-pigeon]
+tools:
+  - name: echo
+    description: Echo.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput
