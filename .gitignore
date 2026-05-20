@@ -25,3 +25,6 @@ go.work.sum
 .DS_Store
 .idea/
 .vscode/
+
+# Private, non-repo discussion notes (monetization, etc. — never committed)
+/_private/

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Dockyard pre-commit hook — runs the preflight gate before every commit.
+# Bypass only in a documented emergency (git commit --no-verify).
+set -euo pipefail
+repo=$(git rev-parse --show-toplevel)
+cd "$repo"
+bash scripts/preflight.sh
