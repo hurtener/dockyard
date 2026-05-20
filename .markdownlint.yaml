@@ -13,3 +13,8 @@ MD041: false
 # Permit duplicate headings under different parents (per-phase detail blocks).
 MD024:
   siblings_only: true
+
+# Table pipe-spacing/alignment style: cosmetic only. MD060 is new in
+# markdownlint v0.40.0 and post-dates the RFC, README, and vendored-spec tables;
+# do not fight it.
+MD060: false
