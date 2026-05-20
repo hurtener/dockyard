@@ -1,0 +1,43 @@
+{
+  "type": "object",
+  "properties": {
+    "headline": {
+      "type": "string",
+      "description": "the model-facing summary line"
+    },
+    "total": {
+      "type": "number"
+    },
+    "lines": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "amount"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "currency": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "headline",
+    "total",
+    "lines"
+  ],
+  "additionalProperties": false
+}

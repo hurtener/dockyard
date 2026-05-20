@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "the customer name"
+    },
+    "count": {
+      "type": "integer"
+    },
+    "ratio": {
+      "type": "number"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "count",
+    "enabled"
+  ],
+  "additionalProperties": false
+}

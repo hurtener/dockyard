@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "period": {
+      "type": "string",
+      "description": "the reporting period, e.g. 2026-Q1"
+    },
+    "region": {
+      "type": "string",
+      "description": "optional region filter"
+    }
+  },
+  "required": [
+    "period"
+  ],
+  "additionalProperties": false
+}

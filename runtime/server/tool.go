@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -25,6 +26,24 @@ type ToolDef struct {
 	Name        string
 	Description string
 }
+
+// ToolOutput is the result of a contract-first tool handler. It splits the two
+// channels of an MCP CallToolResult (RFC §6.3): Text is model-facing and lands
+// in content[]; Structured is the typed, UI-facing payload and lands in
+// structuredContent; Meta lands in _meta.
+//
+// It is the seam the contract-first tool builder (runtime/tool, Phase 04) uses
+// so the builder controls the content/structuredContent routing without
+// reaching past the runtime into the raw SDK result type (P3 — the runtime
+// surface does not expose raw protocol structs).
+type ToolOutput[Out any] struct {
+	Text       string
+	Structured Out
+	Meta       map[string]any
+}
+
+// ToolOutputFunc is a tool handler that returns the full ToolOutput split.
+type ToolOutputFunc[In, Out any] func(ctx context.Context, in In) (ToolOutput[Out], error)
 
 // AddTool registers a typed tool on the server. It must be called before Run.
 // In and Out must each be a struct (or map) so the inferred input schema has
@@ -67,6 +86,80 @@ func AddTool[In, Out any](s *Server, def ToolDef, fn ToolFunc[In, Out]) error {
 		Name:        def.Name,
 		Description: def.Description,
 	}, handler); err != nil {
+		return fmt.Errorf("dockyard/runtime/server: register tool %q: %w", def.Name, err)
+	}
+
+	s.tools = append(s.tools, def.Name)
+	return nil
+}
+
+// AddToolWithSchemas registers a typed tool whose input and output JSON Schemas
+// are supplied by the caller rather than inferred by the SDK at registration
+// time. It is the seam the contract-first tool builder (runtime/tool, Phase 04)
+// composes: the builder generates the schema from the Go contract struct via
+// internal/codegen and hands it here, so the registered tool's schema is
+// guaranteed to be the generated schema — the contract-first guarantee (P1,
+// RFC §6.1), not whatever the SDK would infer separately.
+//
+// The handler returns a ToolOutput, so the builder controls the
+// content/structuredContent split (RFC §6.3): ToolOutput.Text lands in
+// content[], ToolOutput.Structured in structuredContent, ToolOutput.Meta in
+// _meta.
+//
+// Either schema may be nil, in which case the SDK falls back to inferring it
+// from In/Out (the same behaviour as AddTool). When non-nil, a schema must have
+// JSON type "object" — the MCP spec's requirement for tool input/output schemas.
+//
+// In and Out must still be structs (or maps) so the SDK can decode arguments
+// into In and encode Out into structuredContent.
+func AddToolWithSchemas[In, Out any](
+	s *Server,
+	def ToolDef,
+	in, out *jsonschema.Schema,
+	fn ToolOutputFunc[In, Out],
+) error {
+	if s == nil {
+		return errors.New("dockyard/runtime/server: AddToolWithSchemas on nil server")
+	}
+	if def.Name == "" {
+		return errors.New("dockyard/runtime/server: ToolDef.Name is required")
+	}
+	if fn == nil {
+		return fmt.Errorf("dockyard/runtime/server: tool %q has a nil handler", def.Name)
+	}
+	for _, existing := range s.tools {
+		if existing == def.Name {
+			return fmt.Errorf("dockyard/runtime/server: tool %q already registered", def.Name)
+		}
+	}
+
+	handler := func(ctx context.Context, _ *mcpsdk.CallToolRequest, arg In) (*mcpsdk.CallToolResult, Out, error) {
+		out, err := fn(ctx, arg)
+		if err != nil {
+			var zero Out
+			return nil, zero, err
+		}
+		// Populate Content explicitly so the model-facing text is the
+		// handler's Text — the SDK only auto-fills Content with the JSON of
+		// the output when Content is left unset (RFC §6.3).
+		res := &mcpsdk.CallToolResult{
+			Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: out.Text}},
+		}
+		if len(out.Meta) > 0 {
+			res.Meta = mcpsdk.Meta(out.Meta)
+		}
+		return res, out.Structured, nil
+	}
+
+	tool := &mcpsdk.Tool{Name: def.Name, Description: def.Description}
+	if in != nil {
+		tool.InputSchema = in
+	}
+	if out != nil {
+		tool.OutputSchema = out
+	}
+
+	if err := addToolSafe(s.mcp, tool, handler); err != nil {
 		return fmt.Errorf("dockyard/runtime/server: register tool %q: %w", def.Name, err)
 	}
 

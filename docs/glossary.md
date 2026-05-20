@@ -37,6 +37,12 @@ formats and decodes wire formats back; it is obtained with `CodecFor` /
 `CodecForStrict`. Encoders emit only current spec shapes; decoders tolerate
 unknown keys and deprecated forms. RFC §5.4, §16. D-022.
 
+**Contract struct** — a Go input or output struct that is the single source of
+truth for a tool's schema. `internal/codegen` generates the tool's JSON Schema
+from it (Phase 04) and `tygo` generates the TypeScript types from it (Phase 05);
+a contract struct's top-level type must be an object (a struct or string-keyed
+map). RFC §6.1. D-029, D-030.
+
 **Contract-first** — the property (P1) that a tool's input and output are typed Go
 structs (the single source of truth) from which JSON Schema, TypeScript types, and
 fixtures are generated. RFC §6. D-004.
@@ -59,6 +65,14 @@ at different levels of completeness. RFC §4.1.
 applied through the `Store` seam's migration runner. Once a migration has merged it
 is never edited; the runner rejects reordering, removal, or post-merge mutation.
 RFC §13, AGENTS.md §9. D-027.
+
+## G
+
+**Generated schema** — the JSON Schema produced from a contract struct by
+`internal/codegen` via `google/jsonschema-go`. It is never hand-written (P1); it
+is marshalled deterministically and pinned by golden tests so any drift is a
+visible diff. The typed tool builder registers the generated schema on the tool,
+so the schema a host sees is provably the contract. RFC §6.1, §6.2. D-030, D-031.
 
 ## H
 
@@ -129,6 +143,12 @@ and `sqlite` (durable, `modernc.org/sqlite`). Every driver must pass the conform
 suite. RFC §13. D-026.
 
 ## T
+
+**Tool builder** — the `runtime/tool` fluent, typed API an app author uses to
+declare an MCP tool: `tool.New[In, Out](name)` binds the input and output
+contract structs, then `Describe`/`UI`/`Handler` set the rest and `Register`
+installs the tool on a server with its generated schema. The contract-first
+app-facing surface (RFC §6, brief 04 §3). D-029.
 
 **Task support** — a tool's declared relationship to the MCP Tasks extension:
 `forbidden`, `optional`, or `required` (manifest `task_support`, → `execution.taskSupport`
