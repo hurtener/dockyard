@@ -5,6 +5,14 @@ same PR that introduces it. When in doubt, the RFC wins (AGENTS.md §15).
 
 ---
 
+## A
+
+**App runtime** — the Dockyard runtime library (`runtime/`): the importable Go
+package tree — `runtime/server` (the MCP server core), and later
+`runtime/apps`, `runtime/tasks`, `runtime/obs`, `runtime/store` — vendored into
+every generated Dockyard app. A generated app's `main.go` stays thin and
+delegates the protocol weight to the app runtime. RFC §3. D-020.
+
 ## B
 
 **Bridge shell library** — the Svelte library (`web/bridge/`) vendored into every
@@ -62,6 +70,12 @@ capability-set emulation. Dev-mode-gated, localhost-only, read-only. RFC §12.
 **Manifest** — `dockyard.app.yaml`, an app's control plane: it declares tools,
 `ui://` apps, transports, and quality requirements, and drives `validate`,
 `generate`, `dev`, `test`, `build`, and `install`. RFC §4.2.
+
+**MCP server core** — the `runtime/server` package: the part of the app runtime
+that wraps the official Go MCP SDK and exposes Dockyard's server construction,
+typed tool registration, and transport serve loop. The settled foundation
+(RFC §5.1, D-002); Dockyard layers Apps, Tasks, and `obs/v1` on top and never
+forks the SDK. RFC §5. D-019, D-020.
 
 **MCP App** — at the protocol level, an MCP tool carrying `_meta.ui` metadata that
 links it to a `ui://` resource the host renders as a sandboxed iframe. Not a new
