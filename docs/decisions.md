@@ -212,3 +212,36 @@ no capability is gated behind a hosted service.
 **Why:** The Svelte bridge shell library persists an App's view-state keyed on
 `_meta.viewUUID` across re-renders, so app authors never hand-roll view-state
 plumbing.
+
+---
+
+## D-017 — Agent skills + published docs are V1 deliverables and ongoing hygiene
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §2 (G10), master plan Phase 29, AGENTS.md §19
+**Why:** A developer building MCP apps with Dockyard via an AI coding agent should
+be productive from day one. Dockyard authors a set of agent skills (Agent Skills /
+`SKILL.md` format, agentskills.io conventions) and publishes a GitHub Pages
+technical-documentation site. Phase 29 establishes both; from that phase on,
+keeping them in lockstep with the user-facing surface is mandatory — skill/doc
+drift is a defect, the same as RFC drift.
+
+---
+
+## D-018 — A shared frontend design system is established before any page is built
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §10, master plan Phase 10a, `docs/design/CONVENTIONS.md`,
+AGENTS.md §20
+**Why:** The sibling project Harbor did not establish a design system up front;
+pages were built ad hoc, components and patterns were duplicated across the Console,
+and a costly remediation was needed later to retrofit a shared foundation. Dockyard
+has more frontend surface (the inspector, three template App UIs, the bridge shell,
+the docs site, and post-V1 the multi-server console), so it establishes the design
+system as a day-one charter (`docs/design/CONVENTIONS.md`) and builds the shared
+`web/ui/` inventory + tokens at Phase 10a — before any page-bearing phase. From
+Phase 10a on, composing the shared inventory (no duplicated components, the
+four-state `PageState` on every page, tokens as the single source of visual truth,
+spec→mockup→build) is mandatory hygiene.

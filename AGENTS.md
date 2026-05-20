@@ -116,6 +116,7 @@ When a phase plan and the RFC drift, the RFC wins. File a follow-up to fix the p
 │   ├── obs/                     # obs/v1 observability runtime (RFC §11)
 │   └── store/                   # the Store seam + drivers {sqlite, inmem} (RFC §13)
 ├── web/
+│   ├── ui/                      # shared Svelte component inventory — the design system (§20)
 │   └── bridge/                  # the Svelte bridge shell library (RFC §7.3)
 ├── templates/                   # `dockyard new --template` sources (RFC §10)
 ├── examples/
@@ -130,6 +131,7 @@ When a phase plan and the RFC drift, the RFC wins. File a follow-up to fix the p
     ├── plans/                   # master plan (README.md) + phase plans + _template.md
     ├── research/                # phase-planning research briefs + INDEX.md
     ├── specifications/          # vendored MCP spec snapshots
+    ├── design/                  # design system: CONVENTIONS.md, tokens, mockups (§20)
     ├── decisions.md             # append-only D-NNN log
     └── glossary.md
 ```
@@ -170,7 +172,9 @@ A phase is **done** only when: (a) every acceptance criterion in its plan passes
 reports `OK ≥ count(criteria)` and `FAIL = 0`; (d) prior phases' smoke scripts still
 pass. A new CLI command, RPC surface, or public API ⇒ a smoke check in the **same**
 PR. A new config key or manifest field ⇒ documented in the plan, the example
-manifest, and a smoke check.
+manifest, and a smoke check. Once the agent skills and published docs exist
+(Phase 29, §19), a PR that changes user-facing surface also updates the affected
+skill(s) and docs in the same PR.
 
 ### 4.3 Reasonable plan deviations
 
@@ -327,6 +331,11 @@ These enforce P1–P4 (§1). They are binding on every phase.
 - Hardcoding a per-host capability matrix (§6).
 - Adding a CLI command, manifest field, or public API without a smoke check in the
   same PR.
+- Changing user-facing surface without updating the affected agent skill(s) and the
+  published docs in the same PR, once those exist (§19).
+- Duplicating a UI component or forking a UI pattern page-locally instead of
+  composing the shared `web/ui/` inventory, or shipping a page without empty and
+  error states (§20).
 - Editing a migration after merge.
 - Bypassing the pre-commit hook with `--no-verify` outside a documented emergency.
 
@@ -347,6 +356,11 @@ These enforce P1–P4 (§1). They are binding on every phase.
 - [ ] New vocabulary added to `docs/glossary.md` in this PR.
 - [ ] A new architectural decision (or a departure from a brief) is filed in
       `docs/decisions.md`.
+- [ ] If user-facing surface changed and the agent skills / docs site exist
+      (Phase 29+): the affected skill(s) and published docs are updated in this PR.
+- [ ] If UI was touched (Phase 10a+): composes the shared `web/ui/` inventory; any
+      new shared component landed in `web/ui/` + `docs/design/CONVENTIONS.md`; every
+      page has loading / empty / error / ready states (§20).
 
 ---
 
@@ -382,6 +396,10 @@ enforces what it can; this workflow covers what it can't.
 9. **Commit only when both pass.** The PR references the RFC section and any
    superseded decision.
 
+**UI-bearing phases** additionally follow spec → mockup → build (§20): the phase
+plan carries the page spec, an approved visual mockup precedes implementation, and
+the work composes the shared `web/ui/` inventory rather than page-local components.
+
 ---
 
 ## 17. End-to-end + integration testing
@@ -413,3 +431,61 @@ diff -q AGENTS.md CLAUDE.md   # expected: no output
 ```
 
 CI enforces this; the `mirror` job fails the build if they differ.
+
+---
+
+## 19. Agent skills & published documentation
+
+From **Phase 29** onward, Dockyard ships two developer-experience artifacts, and
+**keeping them in sync with the surface is mandatory repo hygiene** — drift in
+either is a defect, the same kind of defect as RFC drift:
+
+- **Agent skills** (`skills/`) — a set of Agent Skills in the `SKILL.md` format
+  (agentskills.io conventions) that teach an AI coding agent how to build MCP
+  servers and apps with Dockyard: scaffold a server, add a tool, attach a UI
+  resource, define contracts, run the dev loop, validate, package. A developer
+  building with Dockyard via an agent should be productive from day one.
+- **Published technical documentation** — a GitHub Pages site, built and deployed
+  by CI from the in-repo docs.
+
+**The rule.** Any PR that adds or changes **user-facing surface** — a CLI command,
+a manifest field, a template, the generated-project shape, a public runtime API —
+**updates the affected skill(s) and the docs in the same PR.** A phase plan whose
+work touches user-facing surface lists the skill/doc updates in its `Files added or
+changed` section. The §14 pre-merge checklist enforces it.
+
+Before Phase 29 lands, `skills/` and the docs site do not yet exist and the rule is
+inert; Phase 29 establishes both and turns the rule on.
+
+---
+
+## 20. Design system & UI conventions
+
+Dockyard has several frontend surfaces — the inspector, the template App UIs, the
+Svelte bridge shell, the published docs site, and (post-V1) the multi-server
+console. **They all compose one shared design system.** This rule exists because the
+sibling project Harbor did *not* establish a design system up front and accreted
+duplicated components and divergent patterns until a costly remediation; Dockyard
+does not repeat that. The system is specified in `docs/design/CONVENTIONS.md`.
+
+From **Phase 10a** onward:
+
+- **One component inventory.** Shared Svelte components live in `web/ui/` and are
+  documented in `docs/design/CONVENTIONS.md` §3. Compose them. Do **not** duplicate
+  a component or fork a pattern page-locally. A genuinely new shared component lands
+  in `web/ui/` **and** CONVENTIONS.md in the same PR.
+- **The four-state page rule.** Every page routes async state through the shared
+  four-state `PageState` — loading / empty / error / ready. The **empty and error
+  states are mandatory**, with real copy and a working retry; an empty table with no
+  copy is a defect.
+- **Design tokens are the single source of visual truth.** Colour, spacing,
+  typography, and radius come from the token set — no ad-hoc values in a component.
+- **Spec → mockup → build.** A UI-bearing phase produces a page spec, an approved
+  visual mockup is locked **before** implementation, and only then is the page
+  built. The phase plan carries the spec; mockups live under `docs/design/`.
+
+Before Phase 10a lands, `web/ui/` and the filled `docs/design/CONVENTIONS.md` do not
+yet exist; Phase 10a establishes them and turns this rule on. The §14 checklist
+enforces it.
+
+

@@ -80,6 +80,11 @@ quality bar enforced by the toolchain rather than by documentation.
 - **G9 — Genuinely open source.** No capability is gated behind a hosted service.
   `build` emits portable artifacts; Portico is the optional, open-source control
   plane.
+- **G10 — Agent-native DX.** Dockyard ships and maintains a set of agent skills
+  (Agent Skills / `SKILL.md` format) and a published technical-documentation site,
+  so a developer building with Dockyard via an AI coding agent is productive from
+  day one. Keeping skills and docs in lockstep with the surface is mandatory repo
+  hygiene (AGENTS.md §19; master plan Phase 29).
 
 ### 2.2 Non-goals (V1)
 
@@ -635,6 +640,14 @@ permission states by default. The remaining ~5 patterns from the braindump
 (`document-review`, `task-runner`, `artifact-viewer`, `form-tool`, `agent-console`)
 are a **post-V1** expansion (§19). Templates are protocol-agnostic in framing —
 named for workflows, never for transports (the mcp-use anti-pattern, Brief 04 §2.3).
+
+**Shared design system.** Every template App UI, and the inspector (§12), compose
+one shared frontend design system — the `web/ui/` Svelte component inventory and
+the `docs/design/CONVENTIONS.md` conventions (design tokens, the four-state
+`PageState`, the spec→mockup→build process). It is established **before any page is
+built** (master plan Phase 10a) so Dockyard's own surfaces never drift into
+duplicated components — and it is the foundation the post-V1 multi-server console
+(§19) builds on too. Composing it is mandatory hygiene (`AGENTS.md` §20).
 
 ---
 
