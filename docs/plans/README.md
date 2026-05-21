@@ -36,11 +36,11 @@ done-definition, dependency declarations, and coverage discipline.
 | 06 | Manifest — `dockyard.app.yaml`                | internal/manifest      | §4.2             | 04, 01    | 04            | 80%  | Shipped |
 | 07 | MCP server core — transports + security       | runtime/server         | §5               | 03, 01    | 01, 02        | 85%  | Shipped |
 | 08 | Tool handler runtime — `Result`, content split| runtime/server         | §5, §6.3         | 01, 03    | 07, 04        | 85%  | Shipped |
-| 09 | MCP Apps extension — server-side              | runtime/apps           | §7.1, §7.4       | 01, 03    | 07, 02, 06    | 85%  | Pending |
-| 10 | UI auto-discovery + embed pipeline            | runtime/apps           | §7.6, §14        | 06, 04    | 09            | 80%  | Pending |
-| 10a| UI design system, tokens & conventions        | web/ui, docs/design    | §7, §10, §12     | 04, 01    | 10            | n/a  | Pending |
-| 11 | Svelte bridge shell library                   | web/bridge             | §7.2, §7.3       | 01        | 09            | n/a  | Pending |
-| 12 | Host profiles + `_meta.ui.domain` derivation  | runtime/apps           | §7.5             | 01, 05    | 09            | 80%  | Pending |
+| 09 | MCP Apps extension — server-side              | runtime/apps           | §7.1, §7.4       | 01, 03    | 07, 02, 06    | 85%  | Shipped |
+| 10 | UI auto-discovery + embed pipeline            | runtime/apps           | §7.6, §14        | 06, 04    | 09            | 80%  | Shipped |
+| 10a| UI design system, tokens & conventions        | web/ui, docs/design    | §7, §10, §12     | 04, 01    | 10            | n/a  | Shipped |
+| 11 | Svelte bridge shell library                   | web/bridge             | §7.2, §7.3       | 01        | 09            | n/a  | Shipped |
+| 12 | Host profiles + `_meta.ui.domain` derivation  | runtime/apps           | §7.5             | 01, 05    | 09            | 80%  | Shipped |
 | 13 | MCP Tasks extension — server-side             | runtime/tasks          | §8.1, §8.2, §8.3 | 02, 03    | 07, 02        | 85%  | Pending |
 | 14 | TaskStore + `TaskHandle` + task security      | runtime/tasks          | §8.4, §8.5, §15  | 02, 06    | 13, 03        | 85%  | Pending |
 | 15 | `obs/v1` event model + headless emitter       | runtime/obs            | §11.1, §11.2     | 05        | 07            | 85%  | Pending |
