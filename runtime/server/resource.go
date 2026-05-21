@@ -29,6 +29,13 @@ type ResourceDef struct {
 	Description string
 	// MIMEType is the resource's media type, if known. Optional.
 	MIMEType string
+	// Meta is the resource declaration's `_meta` object — the metadata a host
+	// sees in resources/list. The Apps layer (runtime/apps, Phase 09) supplies
+	// `_meta.ui` here; the runtime copies it verbatim and never inspects it
+	// (P3, RFC §5.4). Note that the MCP Apps spec reads CSP/domain from the
+	// resources/read *response*, so the choke point is ResourceContent.Meta —
+	// this field carries the static declaration only (brief 01 §2.2).
+	Meta map[string]any
 }
 
 func (d ResourceDef) validate() error {
@@ -67,6 +74,14 @@ type ResourceContent struct {
 	// Blob is the binary content of the resource. When non-empty it takes
 	// precedence over Text.
 	Blob []byte
+	// Meta is the `_meta` object attached to this resource-read content entry.
+	// It is the choke point the MCP Apps spec mandates: a host reads
+	// `_meta.ui.csp` and `_meta.ui.domain` from the resources/read *response*,
+	// not only the static resource declaration (brief 01 §2.2). The Apps layer
+	// (runtime/apps, Phase 09) sets it through internal/protocolcodec; the
+	// runtime copies it verbatim onto the read reply and never inspects it
+	// (P3, RFC §5.4). A nil map yields a read reply with no `_meta`.
+	Meta map[string]any
 }
 
 // ResourceFunc reads a resource. It receives the requested URI — useful when a
@@ -112,7 +127,7 @@ func (s *Server) AddResource(def ResourceDef, fn ResourceFunc) error {
 		if mime == "" {
 			mime = def.MIMEType
 		}
-		rc := &mcpsdk.ResourceContents{URI: uri, MIMEType: mime}
+		rc := &mcpsdk.ResourceContents{URI: uri, MIMEType: mime, Meta: cloneMeta(content.Meta)}
 		if len(content.Blob) > 0 {
 			rc.Blob = content.Blob
 		} else {
@@ -130,6 +145,7 @@ func (s *Server) AddResource(def ResourceDef, fn ResourceFunc) error {
 		Title:       def.Title,
 		Description: def.Description,
 		MIMEType:    def.MIMEType,
+		Meta:        cloneMeta(def.Meta),
 	}, handler); err != nil {
 		return fmt.Errorf("dockyard/runtime/server: register resource %q: %w", def.URI, err)
 	}

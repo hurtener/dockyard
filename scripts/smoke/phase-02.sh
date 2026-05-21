@@ -40,10 +40,15 @@ else
   skip "vendored MCP Tasks schema not present yet"
 fi
 
-# 4. Seam isolation: the deprecated flat _meta key literal appears in Go
-#    sources only inside internal/protocolcodec (P3, AGENTS.md §10).
+# 4. Seam isolation: the deprecated flat _meta key literal appears in non-test
+#    Go sources only inside internal/protocolcodec (P3, AGENTS.md §10). Test
+#    files are exempt — a *_test.go outside the seam legitimately asserts
+#    *against* the flat key (proving the seam never emits it), which consumes
+#    the seam's guarantee rather than hand-building a wire shape. This matches
+#    the Go boundary guard in internal/protocolcodec/boundary_test.go, whose
+#    own header documents the same test-file exemption.
 if compgen -G "**/*.go" >/dev/null 2>&1 || find . -name '*.go' -print -quit | grep -q .; then
-  STRAY=$(grep -rl --include='*.go' 'ui/resourceUri' . 2>/dev/null \
+  STRAY=$(grep -rl --include='*.go' --exclude='*_test.go' 'ui/resourceUri' . 2>/dev/null \
             | grep -v "^\./$SEAM/" || true)
   if [ -z "$STRAY" ]; then
     ok "extension _meta key literals confined to internal/protocolcodec"

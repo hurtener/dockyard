@@ -131,10 +131,22 @@ func TestNoRawWireTypeImportsOutsideSeam(t *testing.T) {
 	})
 }
 
-// TestNoExtensionMetaKeysOutsideSeam asserts no Go source outside the seam
-// hand-writes an extension `_meta` key literal.
+// TestNoExtensionMetaKeysOutsideSeam asserts no non-test Go source outside the
+// seam hand-writes an extension `_meta` key literal.
+//
+// Test files are exempt — as this file's header §24 states, the literal keys
+// "may appear only inside the seam (and inside test files, which exercise it)".
+// A `_test.go` file outside the seam legitimately asserts *against* a key — for
+// example that a deprecated flat form is never emitted; that is a consumer of
+// the seam's guarantee, not a hand-constructed wire shape. The check scopes to
+// non-test source so it still catches the real violation (a production package
+// building an extension `_meta` shape itself) without flagging the test that
+// proves the seam holds.
 func TestNoExtensionMetaKeysOutsideSeam(t *testing.T) {
 	walkModuleGoFiles(t, func(path string, src []byte, _ *ast.File, _ *token.FileSet) {
+		if strings.HasSuffix(path, "_test.go") {
+			return
+		}
 		text := string(src)
 		for _, key := range forbiddenMetaKeys {
 			if strings.Contains(text, key) {

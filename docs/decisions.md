@@ -907,3 +907,84 @@ duplicating them, and does not re-cover the Wave 2 contract-first codegen
 pipeline or what the per-phase integration tests (`phase07_transports_test.go`,
 `phase08_handler_runtime_test.go`) already pin — it is the cross-phase
 server-core + handler-runtime wave-end test.
+
+---
+
+## D-047 — The server-side MCP Apps layer is a thin `runtime/apps` package over additive `runtime/server` seams
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §7.1, §7.4, §5.3, `runtime/apps`, `runtime/server`
+(`server.go`, `tool.go`, `resource.go`), phase plan `phase-09-apps-extension`
+**Why:** An MCP App is not a new wire primitive — it is a convention layered on
+a tool and a resource, made discoverable through `_meta` and optional through
+the `extensions` capability (brief 01 §2.1). Phase 09 therefore ships the Apps
+extension as a small `runtime/apps` package that composes the Wave-3 server
+core rather than reshaping it. Composing it cleanly needs three pieces of
+metadata the Phase-07 server surface did not yet carry, so Phase 09 adds them
+as **additive, non-breaking** fields: `server.ToolDef.Meta` (the tool
+definition's `_meta`, where `_meta.ui` links a tool to its `ui://` resource),
+`server.ResourceContent.Meta` (the resource-read response `_meta` — the choke
+point the Apps spec mandates, brief 01 §2.2) and `server.ResourceDef.Meta` (the
+static resource-declaration `_meta`), plus `server.Options.Extensions` /
+`server.ExtensionCapability` to advertise the SEP-2133 `extensions` capability
+block during `initialize` (RFC §5.3). Every existing call site uses named-field
+struct literals, so the fields are purely additive. `runtime/apps` itself
+constructs no raw extension wire shape: every `_meta.ui` object and the
+capability JSON is produced by `internal/protocolcodec` (P3, RFC §5.4) and
+normalized to a plain `map[string]any` so a caller sees the same JSON shape
+in-process and over the wire. The server runtime copies these `_meta` maps
+verbatim and never inspects them — it never reasons about a protocolcodec
+type — keeping the isolation seam intact.
+
+---
+
+## D-048 — The resource-read response is the single Apps `_meta.ui` choke point; an undeclared CSP is deny-by-default by omission
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §7.1, §7.4, `runtime/apps` (`apps.go`), phase plan
+`phase-09-apps-extension`
+**Why:** Brief 01 §2.2 is explicit: a host reads `_meta.ui.csp` and
+`_meta.ui.domain` from the `resources/read` *response*, not only the static
+resource declaration. `runtime/apps` threads `_meta.ui` through one choke point
+— `App.resourceMeta`, computed once at `Register` and returned by the read
+handler on every `resources/read` of the App — so every read reply carries
+correct metadata. The same `_meta.ui` is also attached to the static resource
+declaration so a host inspecting `resources/list` sees it, but the read
+response is the authoritative surface. The read `_meta.ui` is
+**host-independent**: the resource handler does not branch on negotiated client
+capabilities (the Phase-07 `ResourceFunc` seam does not receive them, and it
+does not need to — a non-Apps host simply ignores `_meta.ui`, so graceful
+degradation needs no per-host branching, RFC §7.5). Critically, when an App
+declares no CSP, no permissions, no domain and no border preference,
+`protocolcodec` omits the `_meta.ui` object entirely. That omission **is** the
+deny-by-default policy required by RFC §7.4 / brief 01 §2.5: with no
+`_meta.ui.csp` a host applies its deny-by-default CSP — zero external origins —
+which is exactly why generated apps default to single-file bundles. Emitting an
+explicit empty CSP object would be redundant and risks a host misreading an
+empty allowlist; omission is the correct, spec-faithful encoding.
+
+---
+
+## D-049 — Phase 09 plumbs `_meta.ui.domain` verbatim; host-profile derivation is deferred to Phase 12
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §7.5, RFC §18 Q-5, `runtime/apps` (`apps.go`), phase
+plan `phase-09-apps-extension`
+**Why:** Brief 01 §2.8 / §5 call for a per-host capability matrix and note that
+`_meta.ui.domain` is host-specific — Claude derives a SHA-256-signed
+`<hash>.claudemcpcontent.com` subdomain from the server URL. RFC §7.5 and
+AGENTS.md §6 settled that Dockyard does **not** maintain a per-host capability
+matrix: host support is read from the MCP capability-negotiation handshake at
+run time, and host-specific *derivations* live behind pluggable host profiles —
+algorithms, not matrices. Phase 09 deliberately departs from brief 01's
+"build a host matrix" framing: it builds none. It only plumbs the
+`_meta.ui.domain` field through `_meta.ui` — an `App.Domain` set by the
+developer is carried verbatim onto the resource-read response and never
+derived, hashed, or host-specialized. Auto-derivation of the dedicated iframe
+origin, including Claude's signed form, is Phase 12's pluggable host profiles
+(RFC §7.5, RFC §18 Q-5). This keeps Phase 09 scoped to the server-side
+registration + capability + CSP surface and keeps host-specific code out of the
+Apps core, exactly as RFC §7.5 mandates.

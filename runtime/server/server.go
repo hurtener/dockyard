@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -40,6 +41,30 @@ type Options struct {
 	// Logger receives the server's structured logs. When nil, slog.Default()
 	// is used. AGENTS.md §5 mandates log/slog.
 	Logger *slog.Logger
+	// Extensions are the MCP extension capabilities the server advertises
+	// during the initialize handshake (the SEP-2133 `extensions` capability
+	// block; RFC §5.3). The Apps layer (runtime/apps, Phase 09) supplies the
+	// io.modelcontextprotocol/ui entry here. A nil/empty slice advertises no
+	// extensions — the server behaves as a plain MCP server.
+	//
+	// Each entry's Settings is opaque wire JSON produced by the owning
+	// extension layer through internal/protocolcodec; the runtime never
+	// inspects it, preserving the protocolcodec isolation seam (P3, RFC §5.4).
+	Extensions []ExtensionCapability
+}
+
+// ExtensionCapability is one MCP extension-capability advertisement: a
+// registry-scoped extension name and its opaque settings JSON. It is the
+// runtime-facing carrier for the SEP-2133 `extensions` capability block
+// (RFC §5.3) — Settings is produced by internal/protocolcodec, so the runtime
+// surface never exposes a raw protocol struct (P3).
+type ExtensionCapability struct {
+	// Name is the registry-scoped extension identifier, e.g.
+	// "io.modelcontextprotocol/ui".
+	Name string
+	// Settings is the per-extension settings object, as opaque wire JSON. A
+	// nil/empty value advertises the extension with no settings object.
+	Settings json.RawMessage
 }
 
 func (o *Options) logger() *slog.Logger {
@@ -47,6 +72,29 @@ func (o *Options) logger() *slog.Logger {
 		return o.Logger
 	}
 	return slog.Default()
+}
+
+// serverCapabilities builds the SDK capability block to advertise, or nil when
+// the app declares no extensions (so the SDK keeps its inferred capabilities).
+func (o *Options) serverCapabilities() (*mcpsdk.ServerCapabilities, error) {
+	if o == nil || len(o.Extensions) == 0 {
+		return nil, nil
+	}
+	caps := &mcpsdk.ServerCapabilities{}
+	for _, ext := range o.Extensions {
+		if ext.Name == "" {
+			return nil, errors.New("dockyard/runtime/server: extension capability with empty Name")
+		}
+		var settings map[string]any
+		if len(ext.Settings) > 0 {
+			if err := json.Unmarshal(ext.Settings, &settings); err != nil {
+				return nil, fmt.Errorf(
+					"dockyard/runtime/server: extension %q settings: %w", ext.Name, err)
+			}
+		}
+		caps.AddExtension(ext.Name, settings)
+	}
+	return caps, nil
 }
 
 // Server is the Dockyard app-runtime MCP server. It wraps an SDK *mcp.Server
@@ -64,16 +112,29 @@ type Server struct {
 // New constructs a Dockyard MCP server. It returns an error rather than
 // panicking so a thin app main.go can fail cleanly (AGENTS.md §5: never panic
 // across the MCP boundary).
+//
+// When opts.Extensions is non-empty the server advertises those MCP extension
+// capabilities during the initialize handshake (RFC §5.3); the SDK's inferred
+// tools/resources capabilities are preserved — only the explicit extension
+// block is added.
 func New(info Info, opts *Options) (*Server, error) {
 	if err := info.validate(); err != nil {
 		return nil, err
 	}
 	log := opts.logger()
+	caps, err := opts.serverCapabilities()
+	if err != nil {
+		return nil, err
+	}
+	var sdkOpts *mcpsdk.ServerOptions
+	if caps != nil {
+		sdkOpts = &mcpsdk.ServerOptions{Capabilities: caps}
+	}
 	mcpSrv := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    info.Name,
 		Title:   info.Title,
 		Version: info.Version,
-	}, nil)
+	}, sdkOpts)
 	return &Server{
 		info: info,
 		log:  log,
