@@ -20,8 +20,17 @@
 // in content[], Structured is the typed UI payload and lands in
 // structuredContent, and Meta lands in _meta.
 //
-// The streamable-HTTP transport, the security knobs, the Apps and Tasks
-// extension layers, and the obs/v1 stream land in later phases (RFC §5.2, §5.3,
-// §7, §8, §11); the seams here are kept deliberately small so those phases
-// extend without reshaping this package.
+// Phase 07 completes the MCP server core (RFC §5): typed resource registration
+// (AddResource), the streamable-HTTP transport (HTTPHandler) alongside stdio,
+// and the in-memory transport (ServeInMemory) for tests and the inspector.
+// HTTP security — DNS-rebinding protection, Origin/Content-Type verification,
+// and cross-origin protection — is set explicitly via HTTPSecurity and never
+// inherited from an SDK default, because the SDK has flipped those defaults
+// between releases (RFC §5.2, AGENTS.md §7, brief 03 §2.3). Phase 07 also
+// retires the temporary exported MCP() SDK seam (D-021, D-042): the
+// Dockyard-owned registration and transport surface is now complete.
+//
+// The Apps and Tasks extension layers and the obs/v1 stream land in later
+// phases (RFC §5.3, §7, §8, §11); the seams here are kept deliberately small so
+// those phases extend without reshaping this package.
 package server

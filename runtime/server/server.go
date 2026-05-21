@@ -51,13 +51,14 @@ func (o *Options) logger() *slog.Logger {
 
 // Server is the Dockyard app-runtime MCP server. It wraps an SDK *mcp.Server
 // and is the seam later phases extend with the Apps, Tasks, and obs/v1 layers
-// (RFC §5). A Server is safe to construct once and serve repeatedly; tool
-// registration happens before Run.
+// (RFC §5). A Server is safe to construct once and serve repeatedly; tool and
+// resource registration happens before Run.
 type Server struct {
-	info  Info
-	log   *slog.Logger
-	mcp   *mcpsdk.Server
-	tools []string // registered tool names, in registration order
+	info      Info
+	log       *slog.Logger
+	mcp       *mcpsdk.Server
+	tools     []string // registered tool names, in registration order
+	resources []string // registered resource URIs, in registration order
 }
 
 // New constructs a Dockyard MCP server. It returns an error rather than
@@ -91,15 +92,17 @@ func (s *Server) Tools() []string {
 	return out
 }
 
-// MCP exposes the underlying SDK server. This is a deliberate, temporary seam
-// for sibling Phase 02 / 07 work that needs SDK-level registration before the
-// Dockyard-owned builder API lands; it is not part of the long-term app-facing
-// surface and app authors should not depend on it.
-func (s *Server) MCP() *mcpsdk.Server { return s.mcp }
+// The temporary exported MCP() *mcp.Server seam (D-021) is retired in Phase 07
+// (D-042): the Dockyard-owned registration surface (AddTool,
+// AddToolWithSchemas, AddResource) and the transport entrypoints (Run,
+// ServeStdio, ServeInMemory, HTTPHandler) are complete, so no caller needs raw
+// SDK access. The SDK *mcp.Server is reached only through the unexported s.mcp
+// field, restoring RFC §5.4 / P3 — the runtime surface exposes no raw SDK
+// structs.
 
 // Run serves the MCP protocol over the given transport until the context is
-// cancelled or the peer disconnects. Phase 01 wires stdio (see ServeStdio);
-// streamable-HTTP arrives in Phase 07 (RFC §5.2).
+// cancelled or the peer disconnects. ServeStdio wires stdio; HTTPHandler wires
+// streamable-HTTP; ServeInMemory wires the in-memory transport (RFC §5.2).
 func (s *Server) Run(ctx context.Context, t mcpsdk.Transport) error {
 	if t == nil {
 		return ErrNoTransport
@@ -121,4 +124,26 @@ func (s *Server) Run(ctx context.Context, t mcpsdk.Transport) error {
 // closes the pipe.
 func (s *Server) ServeStdio(ctx context.Context) error {
 	return s.Run(ctx, &mcpsdk.StdioTransport{})
+}
+
+// ServeInMemory serves the server over an in-memory transport and returns the
+// matching client-side transport (RFC §5.2). It is the backbone of the
+// inspector and the contract tests (brief 03 §2.3): no OS pipe, no socket — the
+// two transports are connected in process.
+//
+// ServeInMemory starts the server in a background goroutine bound to ctx and
+// returns once the server is connected, so the caller can immediately connect a
+// client to the returned transport. The server stops when ctx is cancelled. Any
+// serve error is logged; callers that need it should use Run directly.
+func (s *Server) ServeInMemory(ctx context.Context) mcpsdk.Transport {
+	serverT, clientT := mcpsdk.NewInMemoryTransports()
+	go func() {
+		if err := s.Run(ctx, serverT); err != nil && ctx.Err() == nil {
+			s.log.ErrorContext(ctx, "dockyard server in-memory serve failed",
+				slog.String("name", s.info.Name),
+				slog.String("error", err.Error()),
+			)
+		}
+	}()
+	return clientT
 }
