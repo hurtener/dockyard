@@ -1170,3 +1170,77 @@ cannot serve both a synchronous and a task-returning tool on the same surface
 both carried the single-file-plus-CSP contradiction, are corrected to
 `bundle: multi-file` — the coherent shape for an app that opts into an external
 origin.
+
+---
+
+## D-062 — `_meta.ui.domain` is auto-derived through a pluggable host-profile seam
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §7.5, RFC §18 Q-5, `runtime/apps`
+(`hostprofile.go`, `domain.go`, `apps.go`), phase plan `phase-12-host-profiles`
+**Why:** D-049 deferred `_meta.ui.domain` derivation: Phase 09 carried an
+`App.Domain` onto the resource-read response verbatim. Phase 12 resolves it.
+`App.Domain` is now a host-agnostic *domain label*; the concrete
+`_meta.ui.domain` origin is **auto-derived** (RFC §7.5, D-012, RFC §18 Q-5
+resolution) through a `HostProfile` — an interface + factory + driver seam
+(AGENTS.md §4.4). A `HostProfile` carries host-specific *derivation functions
+only* — algorithms, never a capability matrix — reaffirming the brief 01 §2.8 /
+§5 / §6 Q-3 departure D-049 first recorded: Dockyard builds no per-host feature
+table (D-011). Drivers self-register via `init()`; `HostProfileFor` looks up by
+host id; an empty id resolves to the always-registered `generic` verbatim
+profile, so the Phase 09 behaviour is the default and a non-signing host is
+unaffected. The single choke point `DerivedDomain` runs the chosen profile, and
+`apps.go` calls it without naming any host — host-specific code lives only in
+driver files behind the seam, exactly as RFC §7.5 mandates. An empty label
+still derives an empty origin, preserving Phase 09's deny-by-default `_meta.ui`
+omission (RFC §7.4).
+
+---
+
+## D-063 — The Claude host profile derives `<hex128>.claudemcpcontent.com` from SHA-256
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §7.5, `runtime/apps/hostprofile_claude.go`, phase plan
+`phase-12-host-profiles`
+**Why:** Brief 01 §2.5 documents Claude's dedicated-origin form as
+`<hash32>.claudemcpcontent.com`, "a SHA-256 hash of the MCP server URL", and
+§4 sharp edge 3 stresses this is a Claude implementation detail, not a spec
+mandate, that must not be hardcoded in the core. The `claude` host profile
+implements it concretely as: `hash = lowercase-hex(SHA-256(serverURL + "\x00" +
+domainLabel)[:16])`, origin = `hash + ".claudemcpcontent.com"`. The chosen
+concrete form fixes three under-specified points. (1) **Length:** the first
+16 bytes of the digest, hex-encoded to 32 characters — matching brief 01's
+`hash32`, 128 bits of collision resistance, well inside the 63-character
+DNS-label limit. (2) **Hash input:** both the server URL *and* the App's domain
+label, NUL-separated, so each server gets an origin it cannot forge for another
+server *and* two Apps on one server can request two distinct dedicated origins;
+the NUL separator cannot appear in either half, so distinct pairs cannot
+collide by concatenation. (3) **Missing server URL:** a non-empty label with no
+server URL is a typed error, never a guessable/forgeable origin. The form is
+isolated in one driver file, so a correction when Claude's exact algorithm is
+confirmed is a one-file change behind the seam.
+
+---
+
+## D-064 — A signing host profile requires the MCP server URL on the App
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §7.5, `runtime/apps` (`apps.go`,
+`hostprofile_claude.go`), phase plan `phase-12-host-profiles`
+**Why:** A signed dedicated origin (D-063) is, by construction, derived from the
+MCP server URL — that binding is the property that stops one server claiming
+another's origin. The runtime therefore needs the server URL at App
+registration. Rather than reach into transport state — which is not known at
+`apps.Register` time and varies per deployment — Phase 12 adds an explicit
+`App.ServerURL` field the developer (or a future scaffold/manifest layer)
+supplies. The default `generic` verbatim profile ignores it, so the field is
+optional for the common single-file-bundle case; a signing profile that is
+handed a non-empty domain label with an empty `ServerURL` fails `Register` with
+a wrapped `ErrInvalidApp`, never a panic and never a forgeable origin. This
+keeps the host-profile seam pure (a derivation function over explicit inputs)
+and defers negotiated-host plumbing — wiring the profile id and server URL out
+of the live `initialize` handshake — to a later phase, as the Phase 12 plan's
+non-goals state.
