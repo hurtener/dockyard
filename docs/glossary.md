@@ -342,6 +342,39 @@ a build blocker, never a warning. RFC §6.2. D-034.
 
 ## T
 
+**Task** — a durable MCP Tasks state machine that wraps a task-augmented
+request: instead of blocking for the final result, the receiver returns a task
+the requestor polls and resumes. A task carries an ID, a lifecycle status, and
+the underlying request's eventual result (RFC §8.1, brief 02 §2.1).
+
+**Task lifecycle** — the five-status state machine a task moves through:
+`working` (mandatory initial), `input_required`, and the terminal `completed` /
+`failed` / `cancelled`. Legal transitions are `working →
+{input_required, completed, failed, cancelled}` and `input_required →
+{working, completed, failed, cancelled}`; terminal statuses are immutable.
+Enforced by `runtime/tasks.Engine` (RFC §8.3, brief 02 §2.2).
+
+**`CreateTaskResult`** — the result a receiver returns for an accepted
+task-augmented request, in place of the underlying request's own result. It
+wraps the `Task` object; the actual result is fetched later via `tasks/result`
+(RFC §8.3, brief 02 §2.3).
+
+**`input_required`** — the non-terminal task status meaning the receiver needs
+input from the requestor (e.g. an elicitation). The requestor responds by
+calling `tasks/result`, the channel over which the elicitation is delivered
+(RFC §8.3, brief 02 §2.5).
+
+**Tasks engine** — `runtime/tasks.Engine`, the server-side `tasks/*` JSON-RPC
+method router and task-lifecycle owner. It routes `tasks/get`/`result`/`cancel`/
+`list` and substitutes a `CreateTaskResult` for a task-augmented `tools/call`.
+The go-sdk cannot route a method outside its fixed dispatch table, so Dockyard
+routes `tasks/*` itself behind the engine (RFC §8.2, brief 03).
+
+**`TaskStore`** — the persistence seam for durable task state
+(`runtime/tasks.TaskStore`). Phase 13 ships an in-memory driver; Phase 14
+supplies the durable `Store`-backed driver with TTL enforcement, per-requestor
+concurrency caps, and a purge sweep (RFC §8.5).
+
 **Tool builder** — the `runtime/tool` fluent, typed API an app author uses to
 declare an MCP tool: `tool.New[In, Out](name)` binds the input and output
 contract structs, then `Describe`/`UI`/`Handler` set the rest and `Register`
