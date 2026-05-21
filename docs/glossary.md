@@ -15,12 +15,14 @@ delegates the protocol weight to the app runtime. RFC §3. D-020.
 
 ## B
 
-**Bridge shell library** — the Svelte library (`web/bridge/`) vendored into every
-Dockyard app. It implements the *host half* of the `ui/` `postMessage` JSON-RPC
-dialect so app authors never hand-write protocol code: it runs the `ui/initialize`
-handshake, exposes `hostContext` as stores, fans out host→view notifications,
-offers typed view→host helpers, negotiates display modes, and framework-manages
-`viewUUID` view-state. RFC §7.3. D-016.
+**Bridge shell library** — the Svelte/TypeScript library (`web/bridge/`) vendored
+into every Dockyard app. It implements the *View half* of the `ui/` `postMessage`
+JSON-RPC dialect — the side that runs inside the App's sandboxed iframe — so app
+authors never hand-write protocol code: it runs the `ui/initialize` handshake,
+exposes `hostContext` as Svelte stores, fans out host→view notifications, offers
+typed view→host helpers, negotiates display modes, and framework-manages
+`viewUUID` view-state. Its peer, the *host half* of the same dialect, is the
+inspector. RFC §7.2, §7.3. D-016, D-059, D-060, D-061.
 
 ## C
 
@@ -80,6 +82,13 @@ Selected at run time, not baked in. RFC §14.
 **Display mode** — one of the three MCP Apps viewing styles: **inline** (widget),
 **fullscreen**, **pip**. Negotiated at run time via `ui/request-display-mode` and
 `hostContext.displayMode`, handled by the bridge shell library. RFC §7.2.
+
+**Display-mode negotiation** — the runtime protocol exchange by which a View
+moves between inline, fullscreen, and pip: the View calls
+`ui/request-display-mode`, the host grants or denies, and the result is reflected
+in `hostContext.displayMode`. The bridge shell only offers a mode the host
+advertised in `availableDisplayModes` — capability-driven, never a host matrix.
+RFC §7.2, §7.5. D-059.
 
 **Dockyard app** — an MCP server (tools + resources) optionally extended with one or
 more `ui://` UI resources. A plain MCP server and an MCP App are the same artifact
@@ -147,6 +156,12 @@ it (the go-sdk's `getServer func(*http.Request) *Server`). Dockyard exposes it a
 wiring. RFC §5.2. brief 03 §2.3.
 
 ## H
+
+**hostContext** — the host-supplied context delivered to a View in the
+`ui/initialize` result and patched by `ui/notifications/host-context-changed`:
+theme, `styles.variables` (standardized host CSS custom properties), `displayMode`,
+`availableDisplayModes`, `locale`, container dimensions, and more. The bridge
+shell exposes it as reactive Svelte stores. RFC §7.3. brief 01 §2.4.
 
 **Handler runtime** — the `runtime/tool` layer that wraps a contract-first tool
 handler in production: it validates incoming arguments at the catalog edge (edge
@@ -329,3 +344,12 @@ is a deliberate, reviewed update of the vendored file. RFC §16. AGENTS.md §10.
 codecs are keyed on the negotiated MCP `protocolVersion`, so a spec revision
 registers a *new* codec for the *new* version while older peers keep theirs — a
 spec bump is localized, never a refactor. RFC §16. D-009, D-022.
+
+**View** — an MCP App's UI running inside the host's sandboxed iframe; the
+client-shaped peer of an MCP host in the `ui/` `postMessage` dialect. The bridge
+shell library implements the View side of that dialect. RFC §7.3. brief 01 §2.4.
+
+**viewUUID** — the `_meta.viewUUID` key under which the bridge shell persists an
+App's view-state across host-driven re-renders. The bridge framework-manages it:
+asking for the same `viewUUID` again recovers the same state snapshot. RFC §7.3.
+D-060.

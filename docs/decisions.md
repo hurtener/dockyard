@@ -1173,6 +1173,62 @@ origin.
 
 ---
 
+## D-059 — The bridge shell negotiates display modes by capability, never a host matrix
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §7.2, §7.5, `web/bridge`, phase plan 11
+**Why:** Brief 01 §2.8 / §5 describe a per-host capability matrix (e.g. "VS Code
+has no fullscreen/pip") as a build-time gate. RFC §7.5 and AGENTS.md §6 forbid a
+hardcoded host matrix — it always drifts. Phase 11's bridge shell therefore
+negotiates display modes (inline / fullscreen / pip, RFC §7.2) **purely from the
+negotiated `hostContext.availableDisplayModes`** delivered in the `ui/initialize`
+result and patched by `host-context-changed`. `requestDisplayMode(mode)` rejects
+a mode absent from `availableDisplayModes` *client-side* with a
+`DisplayModeUnavailableError` and no round trip, and otherwise forwards
+`ui/request-display-mode` and reflects the host's grant/deny. A brand-new host
+works without a Dockyard release. The phase ships no host matrix; that concern is
+out of scope (host-specific *derivations* live behind Phase 12's host profiles).
+
+---
+
+## D-060 — `_meta.viewUUID` view-state is framework-managed by the bridge shell
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §7.3, `web/bridge` (`view-state.ts`), phase plan 11
+**Why:** Brief 01 open question Q-9 asks whether `_meta.viewUUID`-based view-state
+persistence is framework-managed or left to the app author. RFC §7.3 settles that
+the bridge **framework-manages** it. Phase 11 implements a `ViewStateStore`: one
+in-memory snapshot per `viewUUID`, exposed as a Svelte store via
+`bridge.viewState<T>(uuid)`. Asking for the same `viewUUID` again recovers the
+same snapshot — that is how an App's view-state round-trips across a host-driven
+re-render (a result re-push, a display-mode change, a re-mount). The store is
+scoped to one bridge session, the lifetime `viewUUID` is defined over; it is not
+a cross-session durable layer (that is the host's Store, RFC §13). `callTool`
+attaches `_meta.viewUUID` when a view handle is supplied so a proxied `tools/call`
+correlates with its view. App authors never hand-roll view-state.
+
+---
+
+## D-061 — The bridge consumes a `ToolContract` shape; codegen must satisfy it
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §6, §7.3, `web/bridge` (`contracts.ts`), phase plan 11
+**Why:** RFC §7.3 says the bridge consumes the generated `contracts.ts` so an
+App's `structuredContent` payload is typed and cannot drift from the tool's Go
+output struct (P1). The contract-first codegen that emits `contracts.ts` is
+Phase 06, which has not landed when Phase 11 ships. Rather than depend on
+non-existent generated output, Phase 11 defines the **shape** generated
+`contracts.ts` must satisfy: a `ToolContract<I, O>` interface (tool name + phantom
+input/output type carriers) plus `ContractInput` / `ContractOutput` extractors and
+a `defineContract` helper. `bridge.callContract(contract, args)` and
+`onToolResult<ContractOutput<C>>` are typed end-to-end against it. When Phase 06's
+codegen lands, its generated `contracts.ts` must structurally satisfy
+`ToolContract` (a `contracts` object of `ToolContract` values keyed by tool name)
+for the typed `structuredContent` path to hold — recorded here so the obligation
+is not lost.
 ## D-062 — `_meta.ui.domain` is auto-derived through a pluggable host-profile seam
 
 **Date:** 2026-05-21
