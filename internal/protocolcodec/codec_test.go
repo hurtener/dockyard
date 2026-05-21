@@ -567,3 +567,143 @@ func TestTasksServerCapability_EmptyInput(t *testing.T) {
 		t.Errorf("ok=%v err=%v", ok, err)
 	}
 }
+
+// --- Tasks: method envelopes -------------------------------------------------
+
+func TestCreateTaskResult_RoundTrip(t *testing.T) {
+	c := CodecFor(VersionMCP20251125)
+	created := time.Date(2026, 5, 21, 10, 30, 0, 0, time.UTC)
+	in := CreateTaskResult{
+		Task: Task{
+			ID:            "task-abc",
+			Status:        TaskWorking,
+			StatusMessage: "in progress",
+			CreatedAt:     created,
+			LastUpdatedAt: created,
+			TTL:           ptr(int64(60000)),
+			PollInterval:  ptr(int64(5000)),
+		},
+		Meta: Meta{"io.modelcontextprotocol/model-immediate-response": "working on it"},
+	}
+	raw, err := c.EncodeCreateTaskResult(in)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	got, err := c.DecodeCreateTaskResult(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Task.ID != in.Task.ID || got.Task.Status != in.Task.Status {
+		t.Errorf("task mismatch: %#v", got.Task)
+	}
+	if got.Meta["io.modelcontextprotocol/model-immediate-response"] != "working on it" {
+		t.Errorf("meta lost: %#v", got.Meta)
+	}
+}
+
+func TestCreateTaskResult_DecodeRejectsBadStatus(t *testing.T) {
+	c := CodecFor(VersionMCP20251125)
+	_, err := c.DecodeCreateTaskResult(json.RawMessage(
+		`{"task":{"taskId":"x","status":"bogus","createdAt":"2026-05-21T10:30:00Z","lastUpdatedAt":"2026-05-21T10:30:00Z","ttl":null}}`))
+	if !errors.Is(err, ErrMalformedMeta) {
+		t.Fatalf("want ErrMalformedMeta, got %v", err)
+	}
+}
+
+func TestTaskIDParams_RoundTrip(t *testing.T) {
+	c := CodecFor(VersionMCP20251125)
+	raw, err := c.EncodeTaskIDParams(TaskID{ID: "task-42"})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if string(raw) != `{"taskId":"task-42"}` {
+		t.Fatalf("unexpected wire: %s", raw)
+	}
+	got, err := c.DecodeTaskIDParams(raw)
+	if err != nil || got.ID != "task-42" {
+		t.Fatalf("decode: %v %#v", err, got)
+	}
+}
+
+func TestTaskIDParams_DecodeRejectsEmpty(t *testing.T) {
+	c := CodecFor(VersionMCP20251125)
+	_, err := c.DecodeTaskIDParams(json.RawMessage(`{"taskId":""}`))
+	if !errors.Is(err, ErrMalformedMeta) {
+		t.Fatalf("want ErrMalformedMeta for empty taskId, got %v", err)
+	}
+}
+
+func TestGetTaskResult_RoundTrip(t *testing.T) {
+	c := CodecFor(VersionMCP20251125)
+	created := time.Date(2026, 5, 21, 9, 15, 0, 0, time.UTC)
+	in := Task{
+		ID:            "task-flat",
+		Status:        TaskCompleted,
+		CreatedAt:     created,
+		LastUpdatedAt: created,
+		TTL:           nil,
+	}
+	raw, err := c.EncodeGetTaskResult(in)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	// The GetTaskResult shape is flat: taskId at the top level, no `task` key.
+	if !strings.Contains(string(raw), `"taskId":"task-flat"`) || strings.Contains(string(raw), `"task":`) {
+		t.Fatalf("GetTaskResult must be the flat Task shape: %s", raw)
+	}
+	got, err := c.DecodeGetTaskResult(raw)
+	if err != nil || got.ID != "task-flat" || got.Status != TaskCompleted {
+		t.Fatalf("decode: %v %#v", err, got)
+	}
+}
+
+func TestListTasks_RoundTrip(t *testing.T) {
+	c := CodecFor(VersionMCP20251125)
+	p, err := c.EncodeListTasksParams(ListTasksParams{Cursor: "page-2"})
+	if err != nil {
+		t.Fatalf("encode params: %v", err)
+	}
+	gotP, err := c.DecodeListTasksParams(p)
+	if err != nil || gotP.Cursor != "page-2" {
+		t.Fatalf("decode params: %v %#v", err, gotP)
+	}
+	created := time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)
+	res := ListTasksResult{
+		Tasks: []Task{
+			{ID: "t1", Status: TaskWorking, CreatedAt: created, LastUpdatedAt: created},
+			{ID: "t2", Status: TaskCompleted, CreatedAt: created, LastUpdatedAt: created},
+		},
+		NextCursor: "page-3",
+	}
+	raw, err := c.EncodeListTasksResult(res)
+	if err != nil {
+		t.Fatalf("encode result: %v", err)
+	}
+	gotR, err := c.DecodeListTasksResult(raw)
+	if err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if len(gotR.Tasks) != 2 || gotR.NextCursor != "page-3" {
+		t.Fatalf("result mismatch: %#v", gotR)
+	}
+}
+
+func TestListTasks_EmptyPageIsArrayNotNull(t *testing.T) {
+	c := CodecFor(VersionMCP20251125)
+	raw, err := c.EncodeListTasksResult(ListTasksResult{})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	// `tasks` is a required field; an empty page is [], never null.
+	if !strings.Contains(string(raw), `"tasks":[]`) {
+		t.Fatalf("empty tasks page must encode as []: %s", raw)
+	}
+}
+
+func TestListTasksParams_EmptyInput(t *testing.T) {
+	c := CodecFor(VersionMCP20251125)
+	got, err := c.DecodeListTasksParams(nil)
+	if err != nil || got.Cursor != "" {
+		t.Fatalf("nil params: %v %#v", err, got)
+	}
+}

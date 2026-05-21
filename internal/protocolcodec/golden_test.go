@@ -158,3 +158,79 @@ func TestGolden_CreateTaskResultMeta(t *testing.T) {
 		t.Errorf("golden mismatch:\n got: %s\nwant: %s", got, want)
 	}
 }
+
+func TestGolden_CreateTaskResult(t *testing.T) {
+	c := CodecFor(VersionMCP20251125)
+	created := time.Date(2025, 11, 25, 10, 30, 0, 0, time.UTC)
+	updated := time.Date(2025, 11, 25, 10, 40, 0, 0, time.UTC)
+	raw, err := c.EncodeCreateTaskResult(CreateTaskResult{
+		Task: Task{
+			ID:            "786512e2-9e0d-44bd-8f29-789f320fe840",
+			Status:        TaskWorking,
+			StatusMessage: "The operation is now in progress.",
+			CreatedAt:     created,
+			LastUpdatedAt: updated,
+			TTL:           ptr(int64(60000)),
+			PollInterval:  ptr(int64(5000)),
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	const want = `{"task":{"createdAt":"2025-11-25T10:30:00Z",` +
+		`"lastUpdatedAt":"2025-11-25T10:40:00Z","pollInterval":5000,` +
+		`"status":"working","statusMessage":"The operation is now in progress.",` +
+		`"taskId":"786512e2-9e0d-44bd-8f29-789f320fe840","ttl":60000}}`
+	if got := canon(t, raw); got != want {
+		t.Errorf("golden mismatch:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestGolden_GetTaskResult(t *testing.T) {
+	c := CodecFor(VersionMCP20251125)
+	created := time.Date(2025, 11, 25, 10, 30, 0, 0, time.UTC)
+	updated := time.Date(2025, 11, 25, 10, 40, 0, 0, time.UTC)
+	raw, err := c.EncodeGetTaskResult(Task{
+		ID:            "786512e2-9e0d-44bd-8f29-789f320fe840",
+		Status:        TaskWorking,
+		CreatedAt:     created,
+		LastUpdatedAt: updated,
+		TTL:           ptr(int64(30000)),
+		PollInterval:  ptr(int64(5000)),
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	// Flat Result & Task — taskId at the top level, no nested `task`.
+	const want = `{"createdAt":"2025-11-25T10:30:00Z","lastUpdatedAt":"2025-11-25T10:40:00Z",` +
+		`"pollInterval":5000,"status":"working",` +
+		`"taskId":"786512e2-9e0d-44bd-8f29-789f320fe840","ttl":30000}`
+	if got := canon(t, raw); got != want {
+		t.Errorf("golden mismatch:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestGolden_ListTasksResult(t *testing.T) {
+	c := CodecFor(VersionMCP20251125)
+	created := time.Date(2025, 11, 25, 9, 15, 0, 0, time.UTC)
+	updated := time.Date(2025, 11, 25, 10, 40, 0, 0, time.UTC)
+	raw, err := c.EncodeListTasksResult(ListTasksResult{
+		Tasks: []Task{{
+			ID:            "abc123-def456-ghi789",
+			Status:        TaskCompleted,
+			CreatedAt:     created,
+			LastUpdatedAt: updated,
+			TTL:           ptr(int64(60000)),
+		}},
+		NextCursor: "next-page-cursor",
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	const want = `{"nextCursor":"next-page-cursor","tasks":[{"createdAt":"2025-11-25T09:15:00Z",` +
+		`"lastUpdatedAt":"2025-11-25T10:40:00Z","status":"completed",` +
+		`"taskId":"abc123-def456-ghi789","ttl":60000}]}`
+	if got := canon(t, raw); got != want {
+		t.Errorf("golden mismatch:\n got: %s\nwant: %s", got, want)
+	}
+}

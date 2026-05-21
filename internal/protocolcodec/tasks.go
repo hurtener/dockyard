@@ -143,6 +143,47 @@ type TasksServerCapability struct {
 	ToolsCall bool
 }
 
+// CreateTaskResult is the Dockyard domain view of the schema's
+// `CreateTaskResult` — the result a receiver returns for an accepted
+// task-augmented request, in place of the underlying request's own result
+// (brief 02 §2.3). It wraps a [Task]; the schema attaches no `resultType`
+// discriminator (brief 02 §5 "avoid").
+type CreateTaskResult struct {
+	// Task is the durable task the request was accepted as.
+	Task Task
+	// Meta is the optional `_meta` carried on the result — currently just the
+	// provisional model-immediate-response key. A nil map omits `_meta`.
+	Meta Meta
+}
+
+// TaskID is the Dockyard domain view of the params of `tasks/get`,
+// `tasks/result` and `tasks/cancel` — each takes a single `taskId` string
+// (brief 02 §2.3). It is one type because the three method params are
+// structurally identical.
+type TaskID struct {
+	// ID is the `taskId` request parameter.
+	ID string
+}
+
+// ListTasksParams is the Dockyard domain view of the `tasks/list` request
+// params — a `PaginatedRequest` carrying an optional opaque `cursor`
+// (brief 02 §2.3).
+type ListTasksParams struct {
+	// Cursor is the opaque pagination cursor; empty requests the first page.
+	Cursor string
+}
+
+// ListTasksResult is the Dockyard domain view of the `tasks/list` result — a
+// `PaginatedResult` carrying the page of tasks and an optional `nextCursor`
+// (brief 02 §2.3).
+type ListTasksResult struct {
+	// Tasks is the page of tasks.
+	Tasks []Task
+	// NextCursor is the opaque cursor for the next page; empty means the page
+	// is the last one.
+	NextCursor string
+}
+
 // ---- wire shapes (raw JSON; stay inside the seam) ----
 
 // taskWire is the schema's `Task` object. `ttl` is intentionally NOT
@@ -183,4 +224,35 @@ type tasksReqCapabilityWire struct {
 
 type tasksToolsReqWire struct {
 	Call *struct{} `json:"call,omitempty"`
+}
+
+// ---- method-envelope wire shapes ----
+
+// createTaskResultWire is the schema's `CreateTaskResult` — `{ task, _meta? }`.
+// It extends `Result`, whose only field is the optional `_meta`.
+type createTaskResultWire struct {
+	Task taskWire `json:"task"`
+	Meta Meta     `json:"_meta,omitempty"`
+}
+
+// taskIDParamsWire is the params object of `tasks/get`, `tasks/result` and
+// `tasks/cancel` — each is `{ "taskId": string }`.
+type taskIDParamsWire struct {
+	TaskID string `json:"taskId"`
+}
+
+// getTaskResultWire is the schema's `GetTaskResult` / `CancelTaskResult`:
+// `Result & Task` — the flat `Task` shape, with `taskId` at the top level
+// rather than nested under a `task` key.
+type getTaskResultWire = taskWire
+
+// listTasksParamsWire is the `tasks/list` request params (`PaginatedRequest`).
+type listTasksParamsWire struct {
+	Cursor string `json:"cursor,omitempty"`
+}
+
+// listTasksResultWire is the schema's `ListTasksResult` (`PaginatedResult`).
+type listTasksResultWire struct {
+	Tasks      []taskWire `json:"tasks"`
+	NextCursor string     `json:"nextCursor,omitempty"`
 }

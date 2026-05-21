@@ -239,7 +239,9 @@ signed `claudemcpcontent.com` form; profiles register via the seam.
 
 **Goal.** `tasks/*` method routing, `tasks` capability advertisement,
 `CreateTaskResult` substitution for task-augmented `tools/call`; the wire layer
-code-generated from the vendored experimental schema; the five-status lifecycle.
+hand-derived from the vendored experimental schema and pinned by golden tests
+(D-069 — a `ts → Go` generator is disproportionate for one schema file); the
+five-status lifecycle.
 **Acceptance.** A task-augmented call returns `CreateTaskResult`; `tasks/get`/
 `result`/`cancel`/`list` behave per spec; lifecycle transitions enforced.
 **Briefs.** 02, 03. **Deps.** 07, 02.

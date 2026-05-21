@@ -1475,3 +1475,39 @@ constants (`ExtensionApps`, `MIMETypeApp`, `VersionApps20260126`) — a
 doc/contract check, not a cross-language test. This keeps the wave-end E2E a
 real integration of the Go seams (09↔10↔12) without fabricating a brittle
 Node-in-Go harness for the frontend.
+
+---
+
+## D-069 — The Tasks wire layer is hand-derived from the vendored schema and pinned by golden tests, not code-generated
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** `internal/protocolcodec/tasks.go`,
+`internal/protocolcodec/codec.go`, `internal/protocolcodec/golden_test.go`,
+phase plan `phase-13-tasks-server`, master plan `docs/plans/README.md` (Phase 13
+goal), `AGENTS.md` / `CLAUDE.md` §10
+**Why:** The Phase 13 master-plan goal and brief 02 (§3, §5) describe the Tasks
+wire layer as "code-generated from the vendored experimental schema"
+(`mcp-tasks-experimental.schema.ts`). The settled Phase 02 pattern (D-010)
+instead **hand-derives** the `protocolcodec` wire structs from the vendored
+schema and pins them with **golden tests** that are themselves the
+spec-compliance assertion — there is no `ts → Go` generator in the tree, and
+the MCP Apps wire layer (also vendored, also experimental-adjacent) follows the
+same hand-derived + golden pattern. Phase 13 aligns the Tasks wire layer with
+that established pattern rather than introducing a one-off TypeScript-to-Go
+generator for a single schema file: the cost of a bespoke generator (a JS/TS
+toolchain dependency, its own drift surface) is not repaid by one ~350-line
+vendored schema. The forward-compatibility guarantee is unchanged in substance —
+a spec bump is still regenerate-and-diff *in spirit*: the vendored snapshot is
+re-pinned by upstream SHA, the wire structs are re-derived against it, and the
+golden tests surface every changed shape as a visible diff. The
+`internal/protocolcodec` doc and the codec comments already frame a spec bump as
+"a deliberate, reviewed update of those files followed by a regenerate-and-diff
+of this package"; D-069 records that "regenerate" here means re-derive-and-
+golden-diff, not run a generator. A future spec revision that materially grows
+the Tasks surface may revisit this; for V1 the hand-derived layer is the
+decision. This decision **supersedes** the prior wording: the master-plan
+Phase 13 goal and `AGENTS.md` / `CLAUDE.md` §10 are corrected in the same PR to
+say "hand-derived … pinned by golden tests" — the §15 way to override a
+specified decision (a visible reconciliation, not a contradiction left to
+drift).
