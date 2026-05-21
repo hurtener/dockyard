@@ -23,7 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: npx --yes markdownlint-cli2 "**/*.md" "#node_modules"
+      # `!**/node_modules` excludes a nested web/* node_modules too, so the
+      # check is identical whether or not frontend deps have been installed.
+      - run: npx --yes markdownlint-cli2 "**/*.md" "!**/node_modules"
 
   drift-audit:
     name: drift-audit
@@ -50,6 +52,20 @@ jobs:
           args: --timeout=5m
         continue-on-error: false
 
+  web:
+    name: web — frontend type-check + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/bridge/package-lock.json
+      # `make web` installs deps on first run, then runs the frontend gate
+      # (svelte-check + tsc + vitest). It no-ops gracefully before web/ lands.
+      - run: make web
+
   preflight:
     name: preflight
     runs-on: ubuntu-latest
@@ -59,4 +75,10 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/bridge/package-lock.json
+      # preflight runs the per-phase smoke scripts; phase-11 asserts `make web`.
       - run: make preflight

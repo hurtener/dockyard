@@ -15,12 +15,14 @@ delegates the protocol weight to the app runtime. RFC §3. D-020.
 
 ## B
 
-**Bridge shell library** — the Svelte library (`web/bridge/`) vendored into every
-Dockyard app. It implements the *host half* of the `ui/` `postMessage` JSON-RPC
-dialect so app authors never hand-write protocol code: it runs the `ui/initialize`
-handshake, exposes `hostContext` as stores, fans out host→view notifications,
-offers typed view→host helpers, negotiates display modes, and framework-manages
-`viewUUID` view-state. RFC §7.3. D-016.
+**Bridge shell library** — the Svelte/TypeScript library (`web/bridge/`) vendored
+into every Dockyard app. It implements the *View half* of the `ui/` `postMessage`
+JSON-RPC dialect — the side that runs inside the App's sandboxed iframe — so app
+authors never hand-write protocol code: it runs the `ui/initialize` handshake,
+exposes `hostContext` as Svelte stores, fans out host→view notifications, offers
+typed view→host helpers, negotiates display modes, and framework-manages
+`viewUUID` view-state. Its peer, the *host half* of the same dialect, is the
+inspector. RFC §7.2, §7.3. D-016, D-059, D-060, D-061.
 
 ## C
 
@@ -60,6 +62,12 @@ struct, not inline schema. Resolved to a JSON Schema through the manifest's
 
 ## D
 
+**Dedicated origin** — the stable, per-App sandboxed-iframe origin a host serves
+an App's HTML from (`_meta.ui.domain`), needed by APIs that allowlist origins
+(CORS). Dockyard auto-derives it from a host-agnostic domain label through the
+host-profile seam — including a host's signed form (e.g. Claude's SHA-256
+`claudemcpcontent.com` subdomain). RFC §7.5. D-062, D-063.
+
 **Deny-by-default CSP** — the Content-Security-Policy a UI resource gets when it
 declares no `_meta.ui.csp` domains: zero external origins, so a single-file HTML
 bundle just works. `runtime/apps` encodes it by **omitting** the `_meta.ui` CSP
@@ -75,9 +83,21 @@ Selected at run time, not baked in. RFC §14.
 **fullscreen**, **pip**. Negotiated at run time via `ui/request-display-mode` and
 `hostContext.displayMode`, handled by the bridge shell library. RFC §7.2.
 
+**Display-mode negotiation** — the runtime protocol exchange by which a View
+moves between inline, fullscreen, and pip: the View calls
+`ui/request-display-mode`, the host grants or denies, and the result is reflected
+in `hostContext.displayMode`. The bridge shell only offers a mode the host
+advertised in `availableDisplayModes` — capability-driven, never a host matrix.
+RFC §7.2, §7.5. D-059.
+
 **Dockyard app** — an MCP server (tools + resources) optionally extended with one or
 more `ui://` UI resources. A plain MCP server and an MCP App are the same artifact
 at different levels of completeness. RFC §4.1.
+
+**Domain label** — the host-agnostic domain identifier an App author declares
+(`App.Domain`). It is not carried verbatim onto `_meta.ui.domain`: it is the
+input to host-profile derivation, which turns it into the host's concrete
+dedicated origin. RFC §7.5. D-062.
 
 **Drift cross-check** — the `internal/codegen` library check that hard-fails when
 the generated JSON Schema and the generated TypeScript for a contract desync (a
@@ -143,6 +163,12 @@ wiring. RFC §5.2. brief 03 §2.3.
 
 ## H
 
+**hostContext** — the host-supplied context delivered to a View in the
+`ui/initialize` result and patched by `ui/notifications/host-context-changed`:
+theme, `styles.variables` (standardized host CSS custom properties), `displayMode`,
+`availableDisplayModes`, `locale`, container dimensions, and more. The bridge
+shell exposes it as reactive Svelte stores. RFC §7.3. brief 01 §2.4.
+
 **Handler runtime** — the `runtime/tool` layer that wraps a contract-first tool
 handler in production: it validates incoming arguments at the catalog edge (edge
 validation), runs the typed handler, hardens the content split (RFC §6.3), and
@@ -160,7 +186,15 @@ docstring instruction. AGENTS.md §5, §13. D-053.
 
 **Host profile** — a pluggable set of host-specific *derivation functions* (e.g.
 deriving Claude's signed `claudemcpcontent.com` iframe origin). A host profile is
-algorithms, not a capability matrix. RFC §7.5. D-012.
+algorithms, not a capability matrix. Implemented as the `apps.HostProfile`
+interface; drivers self-register with the host-profile registry. RFC §7.5.
+D-012, D-062, D-063.
+
+**Host-profile registry** — the process-wide interface + factory + driver
+registry of `HostProfile` derivation drivers in `runtime/apps`. Drivers
+self-register via `init()`; `HostProfileFor` looks one up by host id and an
+empty id resolves to the `generic` verbatim default. It is the seam through
+which a new host is a new driver file, never a core edit. RFC §7.5. D-062.
 
 **HTTP security options** — the explicit security posture of Dockyard's
 streamable-HTTP transport: DNS-rebinding (localhost) protection,
@@ -325,3 +359,12 @@ is a deliberate, reviewed update of the vendored file. RFC §16. AGENTS.md §10.
 codecs are keyed on the negotiated MCP `protocolVersion`, so a spec revision
 registers a *new* codec for the *new* version while older peers keep theirs — a
 spec bump is localized, never a refactor. RFC §16. D-009, D-022.
+
+**View** — an MCP App's UI running inside the host's sandboxed iframe; the
+client-shaped peer of an MCP host in the `ui/` `postMessage` dialect. The bridge
+shell library implements the View side of that dialect. RFC §7.3. brief 01 §2.4.
+
+**viewUUID** — the `_meta.viewUUID` key under which the bridge shell persists an
+App's view-state across host-driven re-renders. The bridge framework-manages it:
+asking for the same `viewUUID` again recovers the same state snapshot. RFC §7.3.
+D-060.

@@ -1239,3 +1239,130 @@ pointing at an App not yet discovered — the natural pre-discovery state, which
 `Load`'s cross-reference check would reject — `WriteDiscoveredApps` parses
 without the cross-reference checks and applies full validation only to the
 merged result. A comment-preserving manifest editor is a deliberate deferral.
+## D-059 — The bridge shell negotiates display modes by capability, never a host matrix
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §7.2, §7.5, `web/bridge`, phase plan 11
+**Why:** Brief 01 §2.8 / §5 describe a per-host capability matrix (e.g. "VS Code
+has no fullscreen/pip") as a build-time gate. RFC §7.5 and AGENTS.md §6 forbid a
+hardcoded host matrix — it always drifts. Phase 11's bridge shell therefore
+negotiates display modes (inline / fullscreen / pip, RFC §7.2) **purely from the
+negotiated `hostContext.availableDisplayModes`** delivered in the `ui/initialize`
+result and patched by `host-context-changed`. `requestDisplayMode(mode)` rejects
+a mode absent from `availableDisplayModes` *client-side* with a
+`DisplayModeUnavailableError` and no round trip, and otherwise forwards
+`ui/request-display-mode` and reflects the host's grant/deny. A brand-new host
+works without a Dockyard release. The phase ships no host matrix; that concern is
+out of scope (host-specific *derivations* live behind Phase 12's host profiles).
+
+---
+
+## D-060 — `_meta.viewUUID` view-state is framework-managed by the bridge shell
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §7.3, `web/bridge` (`view-state.ts`), phase plan 11
+**Why:** Brief 01 open question Q-9 asks whether `_meta.viewUUID`-based view-state
+persistence is framework-managed or left to the app author. RFC §7.3 settles that
+the bridge **framework-manages** it. Phase 11 implements a `ViewStateStore`: one
+in-memory snapshot per `viewUUID`, exposed as a Svelte store via
+`bridge.viewState<T>(uuid)`. Asking for the same `viewUUID` again recovers the
+same snapshot — that is how an App's view-state round-trips across a host-driven
+re-render (a result re-push, a display-mode change, a re-mount). The store is
+scoped to one bridge session, the lifetime `viewUUID` is defined over; it is not
+a cross-session durable layer (that is the host's Store, RFC §13). `callTool`
+attaches `_meta.viewUUID` when a view handle is supplied so a proxied `tools/call`
+correlates with its view. App authors never hand-roll view-state.
+
+---
+
+## D-061 — The bridge consumes a `ToolContract` shape; codegen must satisfy it
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §6, §7.3, `web/bridge` (`contracts.ts`), phase plan 11
+**Why:** RFC §7.3 says the bridge consumes the generated `contracts.ts` so an
+App's `structuredContent` payload is typed and cannot drift from the tool's Go
+output struct (P1). The contract-first codegen that emits `contracts.ts` is
+Phase 06, which has not landed when Phase 11 ships. Rather than depend on
+non-existent generated output, Phase 11 defines the **shape** generated
+`contracts.ts` must satisfy: a `ToolContract<I, O>` interface (tool name + phantom
+input/output type carriers) plus `ContractInput` / `ContractOutput` extractors and
+a `defineContract` helper. `bridge.callContract(contract, args)` and
+`onToolResult<ContractOutput<C>>` are typed end-to-end against it. When Phase 06's
+codegen lands, its generated `contracts.ts` must structurally satisfy
+`ToolContract` (a `contracts` object of `ToolContract` values keyed by tool name)
+for the typed `structuredContent` path to hold — recorded here so the obligation
+is not lost.
+## D-062 — `_meta.ui.domain` is auto-derived through a pluggable host-profile seam
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §7.5, RFC §18 Q-5, `runtime/apps`
+(`hostprofile.go`, `domain.go`, `apps.go`), phase plan `phase-12-host-profiles`
+**Why:** D-049 deferred `_meta.ui.domain` derivation: Phase 09 carried an
+`App.Domain` onto the resource-read response verbatim. Phase 12 resolves it.
+`App.Domain` is now a host-agnostic *domain label*; the concrete
+`_meta.ui.domain` origin is **auto-derived** (RFC §7.5, D-012, RFC §18 Q-5
+resolution) through a `HostProfile` — an interface + factory + driver seam
+(AGENTS.md §4.4). A `HostProfile` carries host-specific *derivation functions
+only* — algorithms, never a capability matrix — reaffirming the brief 01 §2.8 /
+§5 / §6 Q-3 departure D-049 first recorded: Dockyard builds no per-host feature
+table (D-011). Drivers self-register via `init()`; `HostProfileFor` looks up by
+host id; an empty id resolves to the always-registered `generic` verbatim
+profile, so the Phase 09 behaviour is the default and a non-signing host is
+unaffected. The single choke point `DerivedDomain` runs the chosen profile, and
+`apps.go` calls it without naming any host — host-specific code lives only in
+driver files behind the seam, exactly as RFC §7.5 mandates. An empty label
+still derives an empty origin, preserving Phase 09's deny-by-default `_meta.ui`
+omission (RFC §7.4).
+
+---
+
+## D-063 — The Claude host profile derives `<hex128>.claudemcpcontent.com` from SHA-256
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §7.5, `runtime/apps/hostprofile_claude.go`, phase plan
+`phase-12-host-profiles`
+**Why:** Brief 01 §2.5 documents Claude's dedicated-origin form as
+`<hash32>.claudemcpcontent.com`, "a SHA-256 hash of the MCP server URL", and
+§4 sharp edge 3 stresses this is a Claude implementation detail, not a spec
+mandate, that must not be hardcoded in the core. The `claude` host profile
+implements it concretely as: `hash = lowercase-hex(SHA-256(serverURL + "\x00" +
+domainLabel)[:16])`, origin = `hash + ".claudemcpcontent.com"`. The chosen
+concrete form fixes three under-specified points. (1) **Length:** the first
+16 bytes of the digest, hex-encoded to 32 characters — matching brief 01's
+`hash32`, 128 bits of collision resistance, well inside the 63-character
+DNS-label limit. (2) **Hash input:** both the server URL *and* the App's domain
+label, NUL-separated, so each server gets an origin it cannot forge for another
+server *and* two Apps on one server can request two distinct dedicated origins;
+the NUL separator cannot appear in either half, so distinct pairs cannot
+collide by concatenation. (3) **Missing server URL:** a non-empty label with no
+server URL is a typed error, never a guessable/forgeable origin. The form is
+isolated in one driver file, so a correction when Claude's exact algorithm is
+confirmed is a one-file change behind the seam.
+
+---
+
+## D-064 — A signing host profile requires the MCP server URL on the App
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §7.5, `runtime/apps` (`apps.go`,
+`hostprofile_claude.go`), phase plan `phase-12-host-profiles`
+**Why:** A signed dedicated origin (D-063) is, by construction, derived from the
+MCP server URL — that binding is the property that stops one server claiming
+another's origin. The runtime therefore needs the server URL at App
+registration. Rather than reach into transport state — which is not known at
+`apps.Register` time and varies per deployment — Phase 12 adds an explicit
+`App.ServerURL` field the developer (or a future scaffold/manifest layer)
+supplies. The default `generic` verbatim profile ignores it, so the field is
+optional for the common single-file-bundle case; a signing profile that is
+handed a non-empty domain label with an empty `ServerURL` fails `Register` with
+a wrapped `ErrInvalidApp`, never a panic and never a forgeable origin. This
+keeps the host-profile seam pure (a derivation function over explicit inputs)
+and defers negotiated-host plumbing — wiring the profile id and server URL out
+of the live `initialize` handshake — to a later phase, as the Phase 12 plan's
+non-goals state.
