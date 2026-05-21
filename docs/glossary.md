@@ -47,6 +47,12 @@ map). RFC §6.1. D-029, D-030.
 structs (the single source of truth) from which JSON Schema, TypeScript types, and
 fixtures are generated. RFC §6. D-004.
 
+**Content split** — the routing rule for a tool result (RFC §6.3): the handler's
+model-facing `Text` goes to `CallToolResult.content[]` (it enters the LLM
+context) and its typed `Structured` output goes to `structuredContent` (UI-facing,
+excluded from model context). The Dockyard handler runtime hardens the split so no
+empty `TextContent` block is emitted when `Text` is empty. RFC §6.3. D-043.
+
 **Contract reference** — the `"<package/path>.TypeName"` string a manifest's
 `tools[].input` / `tools[].output` field holds: a reference to a Go contract
 struct, not inline schema. Resolved to a JSON Schema through the manifest's
@@ -73,6 +79,16 @@ other), or when generated output is stale versus its Go source. Because Design A
 generates schema and TypeScript independently (RFC §6.2), the cross-check is what
 makes a generator bug a loud build failure rather than silent server↔UI drift.
 Phase 18's `dockyard validate` command calls it. RFC §6.2. D-034.
+
+## E
+
+**Edge validation** — argument validation at the catalog edge: the Dockyard
+handler runtime validates a tool call's incoming arguments against the tool's
+generated input JSON Schema *before* the typed handler runs, so a schema-violating
+argument becomes a typed `tool.ArgumentError` (wrapping `ErrInvalidArguments`)
+rather than a panic or a vague failure. RFC §5, §6.3. D-044.
+
+## F
 
 **Forward-only migration** — an append-only, ordered, idempotent schema or data step
 applied through the `Store` seam's migration runner. Once a migration has merged it
@@ -102,6 +118,13 @@ it (the go-sdk's `getServer func(*http.Request) *Server`). Dockyard exposes it a
 wiring. RFC §5.2. brief 03 §2.3.
 
 ## H
+
+**Handler runtime** — the `runtime/tool` layer that wraps a contract-first tool
+handler in production: it validates incoming arguments at the catalog edge (edge
+validation), runs the typed handler, hardens the content split (RFC §6.3), and
+raises routing flags for oversized or misrouted payloads. Built once per tool by
+`Builder.Register`; safe for concurrent tool calls. RFC §5, §6.3. D-043, D-044,
+D-045.
 
 **Host profile** — a pluggable set of host-specific *derivation functions* (e.g.
 deriving Claude's signed `claudemcpcontent.com` iframe origin). A host profile is
@@ -170,6 +193,14 @@ RFC §1.
 `require_fixtures`, `require_contract_tests`, …) declaring a quality requirement
 the app opts into. `internal/manifest` parses and shape-checks the `quality`
 block; the gates are *enforced* by `dockyard validate`. RFC §4.2, §9.4. D-035.
+
+## R
+
+**Routing flag** — a typed, non-fatal signal the handler runtime raises when a
+tool's output is oversized (`FlagOversizeOutput` — serialized `structuredContent`
+over the size budget) or misrouted (`FlagMisroutedContent` — UI-shaped JSON placed
+in the model-facing `Text`). A flag never fails the tool call; it is recorded on
+the tool's `Builder` and read through `Builder.Flags()`. RFC §6.3. D-045.
 
 ## S
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -44,6 +45,39 @@ type ToolOutput[Out any] struct {
 
 // ToolOutputFunc is a tool handler that returns the full ToolOutput split.
 type ToolOutputFunc[In, Out any] func(ctx context.Context, in In) (ToolOutput[Out], error)
+
+// rawArgsKey is the unexported context key under which AddToolWithSchemas
+// stashes the raw, undecoded tool-call arguments for the duration of a handler
+// invocation.
+type rawArgsKey struct{}
+
+// RawArguments returns the raw, undecoded JSON arguments of the in-flight
+// tool call, or nil if none are available (the call carried no arguments, or
+// ctx is not a tool-handler context).
+//
+// It is the seam the contract-first handler runtime (runtime/tool, Phase 08)
+// uses to validate incoming arguments against the tool's generated input JSON
+// Schema *at the catalog edge* — before the typed handler runs — so a
+// schema-violating argument becomes a typed Dockyard error rather than a vague
+// failure (RFC §5, §6.3). The returned slice is the handler's to read, not to
+// retain past the call.
+func RawArguments(ctx context.Context) json.RawMessage {
+	v, _ := ctx.Value(rawArgsKey{}).(json.RawMessage)
+	return v
+}
+
+// WithRawArguments returns a copy of ctx carrying raw, undecoded tool-call
+// arguments retrievable via RawArguments. AddToolWithSchemas calls it on every
+// tool-handler invocation; it is also exported so an in-process invoker of the
+// handler runtime — the inspector, a contract test — can drive edge validation
+// without an over-the-wire call. Passing nil or empty args leaves ctx
+// unchanged.
+func WithRawArguments(ctx context.Context, raw json.RawMessage) context.Context {
+	if len(raw) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, rawArgsKey{}, raw)
+}
 
 // AddTool registers a typed tool on the server. It must be called before Run.
 // In and Out must each be a struct (or map) so the inferred input schema has
@@ -133,7 +167,13 @@ func AddToolWithSchemas[In, Out any](
 		}
 	}
 
-	handler := func(ctx context.Context, _ *mcpsdk.CallToolRequest, arg In) (*mcpsdk.CallToolResult, Out, error) {
+	handler := func(ctx context.Context, req *mcpsdk.CallToolRequest, arg In) (*mcpsdk.CallToolResult, Out, error) {
+		// Stash the raw, undecoded arguments so a handler-runtime layer can
+		// validate them against the generated input schema at the catalog
+		// edge (RawArguments; Phase 08).
+		if req != nil && req.Params != nil {
+			ctx = WithRawArguments(ctx, req.Params.Arguments)
+		}
 		out, err := fn(ctx, arg)
 		if err != nil {
 			var zero Out
@@ -142,8 +182,17 @@ func AddToolWithSchemas[In, Out any](
 		// Populate Content explicitly so the model-facing text is the
 		// handler's Text — the SDK only auto-fills Content with the JSON of
 		// the output when Content is left unset (RFC §6.3).
-		res := &mcpsdk.CallToolResult{
-			Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: out.Text}},
+		//
+		// When the handler returns no model-facing text, emit a *non-nil but
+		// empty* Content slice rather than a TextContent block holding an empty
+		// string. A non-nil empty slice still suppresses the SDK's auto-fill of
+		// the output JSON into content[] (the SDK only auto-fills when Content
+		// is nil), so no UI-shaped payload leaks into the model context — and
+		// no empty TextContent block is emitted either (D-043, the Wave 2 audit
+		// quirk). A non-empty Text yields exactly one TextContent block.
+		res := &mcpsdk.CallToolResult{Content: []mcpsdk.Content{}}
+		if out.Text != "" {
+			res.Content = []mcpsdk.Content{&mcpsdk.TextContent{Text: out.Text}}
 		}
 		if len(out.Meta) > 0 {
 			res.Meta = mcpsdk.Meta(out.Meta)

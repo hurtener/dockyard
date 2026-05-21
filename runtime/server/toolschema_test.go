@@ -113,3 +113,48 @@ func TestAddToolWithSchemas_ExplicitSchemaAndRouting(t *testing.T) {
 		t.Errorf("result _meta = %+v, want k=v", res.Meta)
 	}
 }
+
+// TestAddToolWithSchemas_NoEmptyTextBlock proves the D-043 fix: a handler that
+// returns no model-facing text (ToolOutput.Text == "") yields a result with
+// zero content blocks — no empty TextContent — while the typed output still
+// lands in structuredContent (RFC §6.3).
+func TestAddToolWithSchemas_NoEmptyTextBlock(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t)
+
+	silent := func(_ context.Context, in echoIn) (server.ToolOutput[echoOut], error) {
+		return server.ToolOutput[echoOut]{
+			// No Text — a UI-only tool result.
+			Structured: echoOut{Echo: in.Message},
+		}, nil
+	}
+	if err := server.AddToolWithSchemas(s,
+		server.ToolDef{Name: "silent"}, nil, nil, silent); err != nil {
+		t.Fatalf("AddToolWithSchemas: %v", err)
+	}
+
+	session := connect(t, s)
+	res, err := session.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "silent",
+		Arguments: echoIn{Message: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("CallTool IsError: %+v", res.Content)
+	}
+	if len(res.Content) != 0 {
+		t.Fatalf("content = %d blocks, want 0 (no empty TextContent block — D-043)", len(res.Content))
+	}
+	// The typed output still routes to structuredContent — the empty-text fix
+	// must not suppress the structured payload.
+	raw, _ := json.Marshal(res.StructuredContent)
+	var out echoOut
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal structuredContent: %v", err)
+	}
+	if out.Echo != "hi" {
+		t.Errorf("structuredContent echo = %q, want hi", out.Echo)
+	}
+}

@@ -27,6 +27,10 @@ type Builder[In, Out any] struct {
 	description string
 	uiResource  string
 	handler     Handler[In, Out]
+
+	// runtime is the per-tool handler runtime, created by Register. It is the
+	// seam Flags reads. nil before Register.
+	runtime *handlerRuntime[In, Out]
 }
 
 // New starts a contract-first tool declaration. In is the tool's input contract
@@ -109,22 +113,31 @@ func (b *Builder[In, Out]) Register(s *server.Server) error {
 		return err
 	}
 
-	handler := b.handler
-	fn := func(ctx context.Context, arg In) (server.ToolOutput[Out], error) {
-		res, herr := handler(ctx, arg)
-		if herr != nil {
-			return server.ToolOutput[Out]{}, herr
-		}
-		return server.ToolOutput[Out]{
-			Text:       res.Text,
-			Structured: res.Structured,
-			Meta:       res.Meta,
-		}, nil
+	// Build the production handler runtime (Phase 08): it validates incoming
+	// arguments against the generated input schema at the catalog edge, runs
+	// the handler, and flags oversized or misrouted payloads (RFC §5, §6.3).
+	rt, err := newHandlerRuntime(b.name, b.handler, in, DefaultOutputSizeBudget)
+	if err != nil {
+		return err
 	}
+	b.runtime = rt
 
 	def := server.ToolDef{Name: b.name, Description: b.description}
-	if err := server.AddToolWithSchemas(s, def, in, out, fn); err != nil {
+	if err := server.AddToolWithSchemas(s, def, in, out, rt.serve); err != nil {
 		return fmt.Errorf("dockyard/runtime/tool: register tool %q: %w", b.name, err)
 	}
 	return nil
+}
+
+// Flags reports the routing flags — oversized outputs, misrouted UI payloads —
+// raised by this tool's handler since Register, newest last (RFC §6.3; D-045).
+// A flag is non-fatal: it never failed a tool call, it is recorded for
+// inspection. The returned slice is a copy and safe for the caller to retain.
+// Flags is safe to call concurrently with in-flight tool calls. It returns nil
+// before Register installs the handler runtime.
+func (b *Builder[In, Out]) Flags() []Flag {
+	if b.runtime == nil {
+		return nil
+	}
+	return b.runtime.snapshotFlags()
 }
