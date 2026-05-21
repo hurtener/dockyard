@@ -34,8 +34,8 @@ done-definition, dependency declarations, and coverage discipline.
 | 04 | Contract-first codegen + typed tool builder   | internal/codegen       | §6               | 06, 04    | 01            | 80%  | Shipped |
 | 05 | Go → TypeScript codegen + drift cross-check   | internal/codegen       | §6.2             | 06, 04    | 04            | 80%  | Shipped |
 | 06 | Manifest — `dockyard.app.yaml`                | internal/manifest      | §4.2             | 04, 01    | 04            | 80%  | Shipped |
-| 07 | MCP server core — transports + security       | runtime/server         | §5               | 03, 01    | 01, 02        | 85%  | Pending |
-| 08 | Tool handler runtime — `Result`, content split| runtime/server         | §5, §6.3         | 01, 03    | 07, 04        | 85%  | Pending |
+| 07 | MCP server core — transports + security       | runtime/server         | §5               | 03, 01    | 01, 02        | 85%  | Shipped |
+| 08 | Tool handler runtime — `Result`, content split| runtime/server         | §5, §6.3         | 01, 03    | 07, 04        | 85%  | Shipped |
 | 09 | MCP Apps extension — server-side              | runtime/apps           | §7.1, §7.4       | 01, 03    | 07, 02, 06    | 85%  | Pending |
 | 10 | UI auto-discovery + embed pipeline            | runtime/apps           | §7.6, §14        | 06, 04    | 09            | 80%  | Pending |
 | 10a| UI design system, tokens & conventions        | web/ui, docs/design    | §7, §10, §12     | 04, 01    | 10            | n/a  | Pending |

@@ -123,7 +123,7 @@ type HTTPOptions struct {
 func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error)
 
 // In-memory transport (server.go)
-func (s *Server) ServeInMemory(ctx context.Context) (clientTransport, error)
+func (s *Server) ServeInMemory(ctx context.Context) mcpsdk.Transport
 ```
 
 ## Test plan
@@ -136,8 +136,9 @@ func (s *Server) ServeInMemory(ctx context.Context) (clientTransport, error)
   `httptest.Server` and an SDK `StreamableClientTransport`, lists + reads a
   resource, and calls a tool — proving the HTTP path end-to-end with a real
   client (AGENTS.md §17). Resource read-back over `InMemoryTransport`.
-- **Concurrency / golden:** `TestConcurrentReuse` extended to cover concurrent
-  resource reads + HTTP sessions under `-race`. No golden output in this phase.
+- **Concurrency / golden:** `TestConcurrentResourceReads` covers concurrent
+  resource reads and `TestPhase07_ConcurrentHTTPSessions` covers concurrent
+  HTTP sessions, both under `-race`. No golden output in this phase.
 
 ## Smoke script additions
 

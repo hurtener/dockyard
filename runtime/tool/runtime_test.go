@@ -49,6 +49,7 @@ func TestEdgeValidationRejectsInvalidArguments(t *testing.T) {
 		{"wrong type for required field", `{"period": 123}`},
 		{"missing required field", `{}`},
 		{"required field is null", `{"period": null}`},
+		{"unknown field", `{"period": "2026-Q1", "unknown": true}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
