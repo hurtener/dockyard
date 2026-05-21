@@ -31,8 +31,22 @@
 // internal/protocolcodec. Package apps constructs no raw extension wire JSON
 // itself, preserving the protocolcodec isolation seam (P3, RFC §5.4).
 //
-// Out of scope for this package: UI-resource auto-discovery and the embed
-// pipeline (Phase 10), the Svelte bridge shell (Phase 11), and host-profile
-// derivation of _meta.ui.domain (Phase 12 — this package only carries the
-// domain field verbatim).
+// Phase 10 adds convention-based UI auto-discovery and the embed pipeline on
+// top of this surface, in new files that compose Register/App rather than
+// rewriting them (RFC §7.6, §14):
+//
+//   - Discover walks the web/src/apps/ convention directory and lifts every
+//     .svelte file into a DiscoveredApp — no manual registration call;
+//   - Bundle is an embed.FS-backed view of the built Svelte UI (//go:embed
+//     all:dist); one embed.FS backs the ui:// MCP resource handler;
+//   - RegisterDiscovered registers a DiscoveredApp as a ui:// resource by
+//     composing Register, reading its HTML from the embedded Bundle.
+//
+// The discovered tool↔UI wiring is written back into dockyard.app.yaml by
+// internal/manifest.WriteDiscoveredApps, so the convention never hides the
+// architecture (RFC §7.6).
+//
+// Out of scope for this package: the Svelte bridge shell (Phase 11) and
+// host-profile derivation of _meta.ui.domain (Phase 12 — this package only
+// carries the domain field verbatim).
 package apps

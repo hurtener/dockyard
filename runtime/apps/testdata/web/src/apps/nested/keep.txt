@@ -1,0 +1,3 @@
+Non-.svelte files under the convention path are ignored by Discover.
+This file exists so the nested directory is tracked by git and the
+discovery walk has a non-.svelte entry to skip.
