@@ -865,3 +865,45 @@ Flags accumulate on the tool's `Builder` and are read through `Builder.Flags()`;
 a future `obs/v1` bridge consumes the same typed values. This mirrors brief 03
 R7's principle for `_meta`: a payload-routing defect surfaces in Dockyard's own
 typed surfaces before a host ever sees the result.
+
+---
+
+## D-046 — Wave 3 ships a wave-end E2E test of the server core + handler runtime
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** AGENTS.md §17 / §17.7, `test/integration/wave3_test.go`
+**Why:** Wave 3 shipped the MCP server core and the contract-first tool handler
+runtime (RFC §5, §6.3): `runtime/server` registers typed tools and resources
+over the go-sdk and serves them over the stdio, streamable-HTTP and in-memory
+transports with an explicit HTTP security posture (`HTTPSecurity` /
+`DefaultHTTPSecurity`), the `getServer` per-request seam, `ServeInMemory`, and
+the `WithRawArguments` / `RawArguments` handler-context seam; `runtime/tool`
+ships the contract-first builder and the production handler runtime — edge
+argument validation against the generated input JSON Schema (typed
+`*ArgumentError`), the `content` / `structuredContent` split, and the routing
+flags (`FlagOversizeOutput`, `FlagMisroutedContent`). AGENTS.md §17 requires a
+wave-boundary gate; because Wave 3 is a genuinely integrated server-core +
+handler-runtime flow, that gate is a real end-to-end test.
+`test/integration/wave3_test.go` drives the integrated surface with real
+components and no mocks at the seams: contract-first tools built with the
+`runtime/tool` builder and a resource are registered on a real `runtime/server`,
+the server is served over the real streamable-HTTP transport (behind an
+`httptest.Server` with `DefaultHTTPSecurity`) and the real in-memory transport,
+and a real SDK client drives `tools/list`, `tools/call` and `resources/read`
+against both — asserting typed output lands in `structuredContent` and the
+model-facing text in `content[]`. It covers ≥1 failure mode per seam: a typed
+`*ArgumentError` (wrapping `ErrInvalidArguments`) for invalid tool-call
+arguments caught at the catalog edge with no panic, a `FlagMisroutedContent`
+and a `FlagOversizeOutput` for misrouted / oversized payloads, and a cross-site
+HTTP POST rejected with `403 Forbidden` by the explicit cross-origin
+protection. It runs an N≥10 (`workers = 16`) concurrency stress under `-race`
+against shared components — one server build, one HTTP listener, one in-memory
+server — exercising every transport and RPC concurrently and asserting both
+race-free flag accumulation (one flag per worker, none lost or duplicated) and
+no goroutine leak after teardown. It reuses the `integration`-package helpers
+(`quietLogger`, `stableGoroutineCount`, `assertNoGoroutineLeak`) rather than
+duplicating them, and does not re-cover the Wave 2 contract-first codegen
+pipeline or what the per-phase integration tests (`phase07_transports_test.go`,
+`phase08_handler_runtime_test.go`) already pin — it is the cross-phase
+server-core + handler-runtime wave-end test.

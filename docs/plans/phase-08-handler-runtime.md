@@ -105,7 +105,7 @@ runtime/tool/flag_test.go                (new) flag detection tests
 runtime/tool/builder.go                  (changed) Register wires the handler runtime
 runtime/tool/builder_test.go             (changed) edge-validation + flag coverage
 runtime/tool/concurrency_test.go         (changed) concurrent-call test for the runtime
-test/integration/handler_runtime_test.go (new) end-to-end over InMemoryTransport
+test/integration/phase08_handler_runtime_test.go (new) end-to-end over InMemoryTransport
 ```
 
 ## Public API surface
