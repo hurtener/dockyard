@@ -1445,3 +1445,33 @@ fast if any project's gate fails; CI's npm cache keys on both lockfiles. The
 rule for a future `web/` project (the multi-server console, etc.): add its
 directory to `WEB_PROJECTS` in the same PR that lands it, so the frontend gate
 never drifts behind the surface.
+
+---
+
+## D-068 — The Wave 4 wave-end E2E drives the 09→10→12 Go chain as one wired path
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** `test/integration/wave4_test.go`, AGENTS.md §17 (wave-end
+E2E), checkpoint PR `chore(checkpoint): wave-4`
+**Why:** Wave 4 spans two kinds of artifact — a Go surface (`runtime/apps` Apps
+extension, `ui://` discovery + embed pipeline, host-profile domain derivation;
+phases 09, 10, 12) and a frontend surface (`web/bridge` the View-half `ui/`
+dialect, `web/ui` the design system; phases 11, 10a). The wave-end E2E mandated
+by §17 must drive *integrated* surface with real components, but a Go test
+cannot drive a Svelte/TS library. This decision settles the split: `wave4_test.go`
+drives the **Go** chain end to end — a contract-first tool linked to a `ui://`
+App registered through the real Apps extension on a real `runtime/server`,
+served over the SDK in-memory transport, with `.svelte` auto-discovery over the
+committed convention tree, the real `//go:embed` bundle, host-profile
+`_meta.ui.domain` derivation (generic verbatim + the Claude signed
+`claudemcpcontent.com` origin), and the discovered wiring round-tripped through
+a real `dockyard.app.yaml`. The frontend halves (`web/bridge`, `web/ui`) stay
+gated by `make web` (svelte-check + vitest), exactly as D-067 keeps each `web/`
+project's gate honest. The bridge's View-half contract is instead reconciled by
+inspection in the checkpoint audit: its `EXTENSION_ID`, `RESOURCE_MIME_TYPE`,
+and `PROTOCOL_VERSION` constants are checked against the Go `protocolcodec`
+constants (`ExtensionApps`, `MIMETypeApp`, `VersionApps20260126`) — a
+doc/contract check, not a cross-language test. This keeps the wave-end E2E a
+real integration of the Go seams (09↔10↔12) without fabricating a brittle
+Node-in-Go harness for the frontend.
