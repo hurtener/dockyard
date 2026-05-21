@@ -290,24 +290,42 @@ func (e *Engine) runTask(ctx context.Context, cancel context.CancelFunc, id stri
 }
 
 // finish records a task's terminal outcome and wakes any tasks/result waiters.
-// A finish onto an already-cancelled task is a no-op transition (the store
-// treats a same-status write as success) but the result is still recorded so a
-// late tasks/result has something to return — cancellation is cooperative.
+//
+// A finish onto a task that is already terminal is a cooperative no-op: it
+// neither transitions nor overwrites the recorded result. This is the
+// cooperative-cancellation contract (brief 02 §4.7) — tasks/cancel transitions
+// the task to `cancelled` and records the cancelled result before signalling
+// the handler's context, so when the handler then unwinds and calls finish the
+// authoritative cancelled outcome must be preserved, not clobbered by the
+// handler's unwind error (the race the Wave 5 checkpoint surfaced — D-072).
+//
+// For a task still running, the result payload is recorded BEFORE the
+// terminal-status transition: a tasks/result waiter unblocks the instant it
+// observes a terminal status, so writing SetResult first guarantees the
+// payload is already present whenever the status is terminal. Writing the
+// transition first would open a window in which tasks/result sees `completed`
+// but reads an empty payload.
 func (e *Engine) finish(
 	ctx context.Context, id string, status protocolcodec.TaskStatus, msg string, res TaskResult,
 ) {
-	if _, err := e.store.Transition(ctx, id, status, msg); err != nil {
-		// A cancelled task rejects no further transition because the store
-		// treats same-status as a no-op; any other error is logged, not
-		// panicked.
-		if !errors.Is(err, ErrIllegalTransition) {
-			e.log.ErrorContext(ctx, "task finish transition failed",
-				slog.String("taskId", id), slog.String("error", err.Error()))
-		}
+	// If the task is already terminal — tasks/cancel won the race — preserve its
+	// recorded outcome and only ensure waiters are woken.
+	if rec, err := e.store.Get(ctx, id); err == nil && rec.Status.IsTerminal() {
+		e.wake(id)
+		return
 	}
 	if err := e.store.SetResult(ctx, id, res); err != nil {
 		e.log.ErrorContext(ctx, "task set result failed",
 			slog.String("taskId", id), slog.String("error", err.Error()))
+	}
+	if _, err := e.store.Transition(ctx, id, status, msg); err != nil {
+		// A task that became terminal between the Get above and here (a
+		// concurrent tasks/cancel) rejects this transition; that is the
+		// cooperative no-op, logged at debug, never panicked.
+		if !errors.Is(err, ErrIllegalTransition) {
+			e.log.ErrorContext(ctx, "task finish transition failed",
+				slog.String("taskId", id), slog.String("error", err.Error()))
+		}
 	}
 	e.wake(id)
 }

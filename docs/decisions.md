@@ -1570,3 +1570,66 @@ MCP Tasks wire shapes stay inside `internal/protocolcodec` (P3). The master-plan
 Phase 14 block is updated in the same PR to name the transport mount in its
 Goal and Acceptance — the CLAUDE.md §4.3 way to record a reasonable plan
 deviation, not a silent scope change.
+
+---
+
+## D-072 — Wave 5 checkpoint: the Tasks transport mount injects `capabilities.tasks` into an SSE-framed initialize response, and a finished task's outcome is recorded atomically ahead of the terminal transition
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** `runtime/tasks/transport.go` (`serveInitialize`,
+`mergeTasksCapabilitySSE`), `runtime/tasks/engine.go` (`finish`),
+`runtime/tasks/dispatch.go` (`handleCancel`), `runtime/tasks/transport_test.go`,
+`test/integration/wave5_test.go`
+**Why:** The Wave 5 wave-end E2E test (`test/integration/wave5_test.go`, the
+§17.5 checkpoint) drove the integrated Tasks surface against the *real*
+components — a real `runtime/server` over the real go-sdk streamable-HTTP
+transport, a real durable `TaskStore` over real `modernc.org/sqlite` — rather
+than the stand-ins the per-phase tests used. Doing so surfaced three real
+defects, fixed in the checkpoint PR per CLAUDE.md §17 ("fix anything an
+integration test surfaces in the same PR, even when the root cause is an
+earlier phase"):
+
+  1. **`capabilities.tasks` was silently dropped over a real HTTP transport.**
+     `Mount.serveInitialize` (Phase 14, D-071) merged the `capabilities.tasks`
+     block only into a plain-`application/json` initialize response, relaying a
+     `text/event-stream` (SSE) response untouched. The real go-sdk
+     streamable-HTTP transport frames the initialize response as SSE — so in a
+     real durable HTTP/Portico deployment the Tasks capability never reached the
+     client, defeating Phase 14's "the `tasks` capability is in the
+     `initialize` result" acceptance criterion. The Phase 14 unit test
+     `TestMount_HTTPMiddleware_InjectsTasksCapability` passed only because it
+     used a plain-JSON SDK stand-in — a mock at a seam that should have used the
+     real framing. The fix: `serveInitialize` now also handles the SSE case
+     (`mergeTasksCapabilitySSE` rewrites the `data:` line carrying the
+     JSON-RPC initialize envelope); a new unit test covers the SSE path with
+     the real go-sdk SSE shape.
+
+  2. **`tasks/result` could observe a terminal status before the result
+     payload.** `Engine.finish` wrote the terminal-status transition *before*
+     the result payload, in two separate `Store` operations. A `tasks/result`
+     waiter unblocks the instant it observes a terminal status, so it could
+     read `completed` and an empty payload. The fix: `finish` records the
+     result *before* the transition, so the payload is always present once the
+     status is terminal; `handleCancel` is reordered the same way.
+
+  3. **`tasks/cancel` raced the handler's cooperative unwind.** `handleCancel`
+     cancelled the handler's run context *before* its own `→ cancelled`
+     transition; a handler observing `ctx.Done()` promptly could return and
+     drive `finish` to `failed`/`completed` first, leaving `tasks/cancel` with
+     an illegal `failed → cancelled` transition. The fix: `handleCancel`
+     transitions the task to `cancelled` (and records the cancelled outcome)
+     *before* signalling the handler's context; `finish` is now a true
+     cooperative no-op on an already-terminal task — it neither transitions nor
+     overwrites the recorded outcome — so the handler's later unwind preserves
+     the authoritative `cancelled` result (brief 02 §4.7).
+
+This decision also records the Wave 5 E2E design choice (the §17 requirement
+that a wave-end test names its informing decision, as `wave4_test.go` cites
+D-068): the Wave 5 E2E drives the Tasks surface over a real streamable-HTTP
+transport with the real `tasks.Mount` middleware in front of a real
+`runtime/server`, a real durable `TaskStore` over real sqlite, and a real SDK
+client for the handshake — no mocks at any seam — exactly so that
+real-transport framing and cross-subsystem timing are exercised, which is what
+surfaced defects 1–3. The audit verdict: with these three fixes the Wave 5
+foundation is sound.

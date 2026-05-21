@@ -41,8 +41,8 @@ done-definition, dependency declarations, and coverage discipline.
 | 10a| UI design system, tokens & conventions        | web/ui, docs/design    | §7, §10, §12     | 04, 01    | 10            | n/a  | Shipped |
 | 11 | Svelte bridge shell library                   | web/bridge             | §7.2, §7.3       | 01        | 09            | n/a  | Shipped |
 | 12 | Host profiles + `_meta.ui.domain` derivation  | runtime/apps           | §7.5             | 01, 05    | 09            | 80%  | Shipped |
-| 13 | MCP Tasks extension — server-side             | runtime/tasks          | §8.1, §8.2, §8.3 | 02, 03    | 07, 02        | 85%  | Pending |
-| 14 | TaskStore + `TaskHandle` + task security      | runtime/tasks          | §8.4, §8.5, §15  | 02, 06    | 13, 03        | 85%  | Pending |
+| 13 | MCP Tasks extension — server-side             | runtime/tasks          | §8.1, §8.2, §8.3 | 02, 03    | 07, 02        | 85%  | Shipped |
+| 14 | TaskStore + `TaskHandle` + task security      | runtime/tasks          | §8.4, §8.5, §15  | 02, 06    | 13, 03        | 85%  | Shipped |
 | 15 | `obs/v1` event model + headless emitter       | runtime/obs            | §11.1, §11.2     | 05        | 07            | 85%  | Pending |
 | 16 | `obs/v1` transports — SSE + OTel + log bridge | runtime/obs            | §11.3            | 05, 01    | 15            | 80%  | Pending |
 | 17 | `dockyard` CLI skeleton + `new`               | internal/cli, scaffold | §9, §10          | 04, 06    | 06            | 70%  | Pending |
