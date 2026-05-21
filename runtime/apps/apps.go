@@ -51,10 +51,23 @@ type App struct {
 	// Permissions is the App's sandbox-capability request. The zero value
 	// requests none.
 	Permissions Permissions
-	// Domain requests a stable dedicated sandbox origin. Carried verbatim onto
-	// _meta.ui; Dockyard never derives it here — host-profile derivation of a
-	// signed origin is Phase 12 (RFC §7.5, D-049).
+	// Domain is the App's host-agnostic domain *label* — a request for a stable
+	// dedicated sandbox origin. Dockyard does not carry it verbatim: it is the
+	// input to host-profile derivation, which produces the concrete
+	// _meta.ui.domain value on the resources/read response (RFC §7.5, D-062).
+	// An empty Domain requests no dedicated origin and omits _meta.ui.domain.
 	Domain string
+	// HostProfile is the host id selecting the host profile whose derivation
+	// function turns the Domain label into the concrete _meta.ui.domain origin.
+	// An empty value selects the default verbatim profile — the Phase 09
+	// behaviour (D-049). A signing host's id selects its derived origin form.
+	// Host ids and their derivations live behind the host-profile seam
+	// (hostprofile.go); the Apps core names no host (RFC §7.5, D-062).
+	HostProfile string
+	// ServerURL is the MCP server URL the dedicated origin is derived from. It
+	// is required when Domain is set and HostProfile selects a signing host;
+	// the default verbatim profile ignores it.
+	ServerURL string
 	// PrefersBorder is the App's visual-boundary preference. A nil pointer
 	// declares none and lets the host decide.
 	PrefersBorder *bool
@@ -107,11 +120,19 @@ func normalizeMeta(m protocolcodec.Meta) (map[string]any, error) {
 // external origins (RFC §7.4, brief 01 §2.5). When the App declares any of
 // them, _meta.ui carries exactly those fields.
 func (a App) resourceMeta() (map[string]any, error) {
+	// _meta.ui.domain is auto-derived through the pluggable host-profile seam:
+	// the App declares a host-agnostic Domain label, the host profile derives
+	// the concrete dedicated origin (RFC §7.5, D-062). The core never names a
+	// host — derivation lives behind DerivedDomain.
+	domain, err := DerivedDomain(a.HostProfile, a.Domain, a.ServerURL)
+	if err != nil {
+		return nil, fmt.Errorf("dockyard/runtime/apps: derive domain for %q: %w", a.URI, err)
+	}
 	codec := protocolcodec.CodecFor(protocolcodec.VersionApps20260126)
 	meta, err := codec.EncodeAppsResourceMeta(nil, protocolcodec.AppsResourceMeta{
 		CSP:           a.CSP.toCodec(),
 		Permissions:   a.Permissions.toCodec(),
-		Domain:        a.Domain,
+		Domain:        domain,
 		PrefersBorder: a.PrefersBorder,
 	})
 	if err != nil {

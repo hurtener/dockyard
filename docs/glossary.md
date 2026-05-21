@@ -62,6 +62,12 @@ struct, not inline schema. Resolved to a JSON Schema through the manifest's
 
 ## D
 
+**Dedicated origin** — the stable, per-App sandboxed-iframe origin a host serves
+an App's HTML from (`_meta.ui.domain`), needed by APIs that allowlist origins
+(CORS). Dockyard auto-derives it from a host-agnostic domain label through the
+host-profile seam — including a host's signed form (e.g. Claude's SHA-256
+`claudemcpcontent.com` subdomain). RFC §7.5. D-062, D-063.
+
 **Deny-by-default CSP** — the Content-Security-Policy a UI resource gets when it
 declares no `_meta.ui.csp` domains: zero external origins, so a single-file HTML
 bundle just works. `runtime/apps` encodes it by **omitting** the `_meta.ui` CSP
@@ -87,6 +93,11 @@ RFC §7.2, §7.5. D-059.
 **Dockyard app** — an MCP server (tools + resources) optionally extended with one or
 more `ui://` UI resources. A plain MCP server and an MCP App are the same artifact
 at different levels of completeness. RFC §4.1.
+
+**Domain label** — the host-agnostic domain identifier an App author declares
+(`App.Domain`). It is not carried verbatim onto `_meta.ui.domain`: it is the
+input to host-profile derivation, which turns it into the host's concrete
+dedicated origin. RFC §7.5. D-062.
 
 **Drift cross-check** — the `internal/codegen` library check that hard-fails when
 the generated JSON Schema and the generated TypeScript for a contract desync (a
@@ -169,7 +180,15 @@ docstring instruction. AGENTS.md §5, §13. D-053.
 
 **Host profile** — a pluggable set of host-specific *derivation functions* (e.g.
 deriving Claude's signed `claudemcpcontent.com` iframe origin). A host profile is
-algorithms, not a capability matrix. RFC §7.5. D-012.
+algorithms, not a capability matrix. Implemented as the `apps.HostProfile`
+interface; drivers self-register with the host-profile registry. RFC §7.5.
+D-012, D-062, D-063.
+
+**Host-profile registry** — the process-wide interface + factory + driver
+registry of `HostProfile` derivation drivers in `runtime/apps`. Drivers
+self-register via `init()`; `HostProfileFor` looks one up by host id and an
+empty id resolves to the `generic` verbatim default. It is the seam through
+which a new host is a new driver file, never a core edit. RFC §7.5. D-062.
 
 **HTTP security options** — the explicit security posture of Dockyard's
 streamable-HTTP transport: DNS-rebinding (localhost) protection,
