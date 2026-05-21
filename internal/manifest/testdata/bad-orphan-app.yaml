@@ -1,0 +1,15 @@
+name: bad-orphan-app
+title: Bad Orphan App
+version: 1.0.0
+runtime:
+  transports: [stdio]
+tools:
+  - name: echo
+    description: Echo.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput
+apps:
+  - id: orphan
+    uri: ui://bad-orphan-app/main
+    entry: web/src/apps/orphan.svelte
+    display_modes: [inline]

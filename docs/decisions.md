@@ -988,3 +988,80 @@ origin, including Claude's signed form, is Phase 12's pluggable host profiles
 (RFC §7.5, RFC §18 Q-5). This keeps Phase 09 scoped to the server-side
 registration + capability + CSP surface and keeps host-specific code out of the
 Apps core, exactly as RFC §7.5 mandates.
+
+---
+
+## D-053 — Panic safety is a toolchain-enforced guarantee: every handler-invocation path is recover-wrapped
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §5, AGENTS.md §5/§13, `runtime/server` (`recover.go`,
+`tool.go`, `resource.go`), phase plans 07/08
+**Why:** The "never panic across the MCP boundary" rule (AGENTS.md §5, §13) was
+enforced only on the *registration* path — `addToolSafe`, `addResourceSafe`
+recover a schema-inference or bad-URI panic. The *handler-invocation* path was
+unguarded: `AddTool`, `AddToolWithSchemas`, and `AddResource` called the app
+author's handler directly, and the pinned go-sdk v1.6.0 does not recover handler
+panics either. A single panicking tool or resource handler on a live
+`tools/call` / `resources/read` therefore crashed the whole server process,
+breaking every connected host — the rule was a docstring instruction, not a
+guarantee. This decision makes it a guarantee: a single chokepoint, `guardHandler`,
+wraps every handler-invocation path; a recovered panic becomes a typed error
+(`*panicError`, wrapping the exported `ErrHandlerPanic` sentinel) which the SDK
+turns into a clean `IsError` tool result / resource-read error. The panic is
+logged with its stack via `slog` so the bug stays diagnosable, but it never
+reaches the host and never crashes the process. Because the contract-first
+handler runtime (`runtime/tool`) installs its handler through
+`AddToolWithSchemas`, wrapping the three `runtime/server` entry points covers the
+whole runtime — `runtime/tool` needs no separate guard. The guarantee is proven
+by tests that register a panicking handler, call it over a real transport, and
+assert the server survives and returns an error result.
+
+---
+
+## D-054 — `AddResourceTemplate` is exposed as a typed, panic-recovered runtime surface
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §5.1, brief 03 §2.2, `runtime/server` (`resource.go`),
+phase plan 07
+**Why:** The go-sdk offers `(*Server).AddResourceTemplate`, RFC §5.1 names
+resource templates among the SDK primitives Dockyard builds on, and brief 03
+§2.2 ties them to the `ui://` scheme — a template serves a `ui://` family
+without enumerating every member. Phase 07 exposed `AddResource` but not
+`AddResourceTemplate`, leaving Phase 10's planned `ui://` auto-discovery without
+the typed surface it needs. This decision adds `AddResourceTemplate` consistent
+with `AddResource`: a typed `ResourceTemplateDef` (no raw SDK struct on the
+surface, P3 / RFC §5.4), the same `ResourceFunc` handler shape (the handler
+receives the concrete URI a host requested, since a template addresses a
+family), absolute-URI-template validation that rejects a scheme-less template as
+a Dockyard error rather than an SDK panic, duplicate rejection, and the
+D-053 panic-recovered handler invocation. The runtime surface gains one method;
+the Apps layer composes it rather than reaching past the runtime to the SDK.
+
+---
+
+## D-055 — Manifest validation gains origin, CSP/bundle-coherence, and orphan-app checks
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §4.2, §7.4, §8.6, `internal/manifest` (`validate.go`),
+phase plan 06
+**Why:** The manifest loader validated structure well but skipped three checks a
+depth audit found. (1) `csp.connect` / `csp.resource` values were never checked
+as well-formed origins, and a `bundle: single-file` app declaring external CSP
+origins was accepted despite being internally contradictory — a single-file
+bundle inlines every asset and loads no external origin (RFC §7.4), so the
+opt-out is dead config. (2) The reverse of the `tools[].ui → apps[].id` check
+was missing: an orphan `apps[]` entry referenced by no tool shipped silently.
+(3) `task_support` had no cross-field coherence check. This decision adds all
+three as structural, source-located validations: `validateOrigin` requires a
+`scheme://host[:port]` form with an allowed scheme and no path/query/fragment; a
+single-file bundle with any CSP origin is rejected with a fix hint; an
+unreferenced app is flagged; and tools that wire the *same* `apps[]` entry must
+agree on `task_support`, because an App's UI is built against one task model and
+cannot serve both a synchronous and a task-returning tool on the same surface
+(RFC §8.6). The reference example manifest and the `valid-full` fixture, which
+both carried the single-file-plus-CSP contradiction, are corrected to
+`bundle: multi-file` — the coherent shape for an app that opts into an external
+origin.

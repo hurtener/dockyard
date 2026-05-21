@@ -168,6 +168,130 @@ func TestResourceBlob(t *testing.T) {
 	}
 }
 
+// TestAddResourceTemplate_Registration proves a resource template registers,
+// is reported by ResourceTemplates(), and that ResourceTemplates() hands back a
+// defensive copy.
+func TestAddResourceTemplate_Registration(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t)
+	def := server.ResourceTemplateDef{
+		URITemplate: "ui://customer-health/{view}",
+		Name:        "customer-health-views",
+		Title:       "Customer Health Views",
+		MIMEType:    "text/html",
+	}
+	if err := s.AddResourceTemplate(def, staticResource("<html></html>")); err != nil {
+		t.Fatalf("AddResourceTemplate: %v", err)
+	}
+	got := s.ResourceTemplates()
+	if len(got) != 1 || got[0] != "ui://customer-health/{view}" {
+		t.Fatalf("ResourceTemplates() = %v, want [ui://customer-health/{view}]", got)
+	}
+	got[0] = "mutated"
+	if s.ResourceTemplates()[0] != "ui://customer-health/{view}" {
+		t.Fatal("ResourceTemplates() leaked its internal slice")
+	}
+}
+
+func TestAddResourceTemplate_Errors(t *testing.T) {
+	t.Parallel()
+	t.Run("nil server", func(t *testing.T) {
+		t.Parallel()
+		var s *server.Server
+		if err := s.AddResourceTemplate(
+			server.ResourceTemplateDef{URITemplate: "ui://x/{v}", Name: "x"},
+			staticResource("")); err == nil {
+			t.Fatal("want error for nil server")
+		}
+	})
+	t.Run("empty URI template", func(t *testing.T) {
+		t.Parallel()
+		s := newTestServer(t)
+		if err := s.AddResourceTemplate(
+			server.ResourceTemplateDef{Name: "x"}, staticResource("")); err == nil {
+			t.Fatal("want error for empty URI template")
+		}
+	})
+	t.Run("empty name", func(t *testing.T) {
+		t.Parallel()
+		s := newTestServer(t)
+		if err := s.AddResourceTemplate(
+			server.ResourceTemplateDef{URITemplate: "ui://x/{v}"}, staticResource("")); err == nil {
+			t.Fatal("want error for empty name")
+		}
+	})
+	t.Run("nil handler", func(t *testing.T) {
+		t.Parallel()
+		s := newTestServer(t)
+		if err := s.AddResourceTemplate(
+			server.ResourceTemplateDef{URITemplate: "ui://x/{v}", Name: "x"}, nil); err == nil {
+			t.Fatal("want error for nil handler")
+		}
+	})
+	t.Run("duplicate template", func(t *testing.T) {
+		t.Parallel()
+		s := newTestServer(t)
+		def := server.ResourceTemplateDef{URITemplate: "ui://dup/{v}", Name: "dup"}
+		if err := s.AddResourceTemplate(def, staticResource("a")); err != nil {
+			t.Fatalf("first AddResourceTemplate: %v", err)
+		}
+		if err := s.AddResourceTemplate(def, staticResource("b")); err == nil {
+			t.Fatal("want error for duplicate template")
+		}
+	})
+	t.Run("non-absolute template rejected", func(t *testing.T) {
+		t.Parallel()
+		s := newTestServer(t)
+		err := s.AddResourceTemplate(
+			server.ResourceTemplateDef{URITemplate: "not-a-template/{v}", Name: "x"},
+			staticResource(""))
+		if err == nil {
+			t.Fatal("want error for non-absolute URI template")
+		}
+	})
+}
+
+// TestResourceTemplate_ListAndRead proves a registered template appears in
+// resources/templates/list and serves a concrete URI that matches it.
+func TestResourceTemplate_ListAndRead(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t)
+	const body = "<html><body>view</body></html>"
+	if err := s.AddResourceTemplate(server.ResourceTemplateDef{
+		URITemplate: "ui://app/{view}",
+		Name:        "app-views",
+		MIMEType:    "text/html",
+	}, func(_ context.Context, uri string) (server.ResourceContent, error) {
+		// The handler receives the concrete URI the host requested.
+		if uri != "ui://app/dashboard" {
+			t.Errorf("handler got uri %q, want ui://app/dashboard", uri)
+		}
+		return server.ResourceContent{Text: body}, nil
+	}); err != nil {
+		t.Fatalf("AddResourceTemplate: %v", err)
+	}
+
+	session := connect(t, s)
+	ctx := context.Background()
+
+	list, err := session.ListResourceTemplates(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListResourceTemplates: %v", err)
+	}
+	if len(list.ResourceTemplates) != 1 ||
+		list.ResourceTemplates[0].URITemplate != "ui://app/{view}" {
+		t.Fatalf("ListResourceTemplates = %+v, want one ui://app/{view}", list.ResourceTemplates)
+	}
+
+	read, err := session.ReadResource(ctx, &mcpsdk.ReadResourceParams{URI: "ui://app/dashboard"})
+	if err != nil {
+		t.Fatalf("ReadResource of a templated URI: %v", err)
+	}
+	if len(read.Contents) != 1 || read.Contents[0].Text != body {
+		t.Fatalf("templated read = %+v, want body %q", read.Contents, body)
+	}
+}
+
 // TestResourceHandlerError proves a handler error surfaces to the client
 // rather than panicking across the MCP boundary (AGENTS.md §13).
 func TestResourceHandlerError(t *testing.T) {

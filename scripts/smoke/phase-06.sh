@@ -82,4 +82,18 @@ else
   skip "internal/manifest resolver tests not built"
 fi
 
+# 8. Depth-remediation validations: CSP origins, single-file/CSP coherence,
+#    orphan apps, task_support coherence (D-055).
+if [ -f internal/manifest/validate.go ]; then
+  if grep -q 'func validateOrigin(' internal/manifest/validate.go \
+     && grep -q 'validateTaskSupportCoherence' internal/manifest/validate.go \
+     && grep -q 'referenced by no tool' internal/manifest/validate.go; then
+    ok "manifest CSP/orphan/task_support coherence checks present (D-055)"
+  else
+    fail "depth-remediation manifest validations missing from validate.go"
+  fi
+else
+  skip "internal/manifest/validate.go not built — coherence check deferred"
+fi
+
 smoke_summary

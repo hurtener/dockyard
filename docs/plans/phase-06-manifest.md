@@ -93,6 +93,19 @@ None. Phase 06 implements RFC §4.2 as written and adopts the brief findings abo
 - [x] The example manifest under `examples/` round-trips: load → validate → no
       error.
 - [x] `scripts/smoke/phase-06.sh` reports `OK ≥ 6`, `FAIL = 0`.
+- [x] Structural validation rejects (depth-remediation, 2026-05-21; D-055):
+      a malformed `csp.connect`/`csp.resource` origin, a `bundle: single-file`
+      app declaring external CSP origins (RFC §7.4 contradiction), an orphan
+      `apps[]` entry referenced by no tool, and tools that wire the same
+      `apps[]` entry with disagreeing `task_support` (RFC §8.6).
+
+> **Depth-remediation addendum (2026-05-21).** A 4-way audit found the loader
+> validated structure well but skipped three checks now added in `validate.go`
+> (D-055): CSP-origin well-formedness + single-file/CSP coherence (RFC §7.4),
+> orphan-app detection (the reverse of the existing `tools[].ui → apps[].id`
+> check), and `task_support` cross-field coherence. The reference example
+> manifest and the `valid-full` fixture, which carried the single-file-plus-CSP
+> contradiction, are corrected to `bundle: multi-file`.
 
 ## Files added or changed
 

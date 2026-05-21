@@ -112,6 +112,15 @@ Supporting context: RFC §7 (Apps `_meta` shapes), RFC §8 (Tasks wire layer).
 - [x] Codecs are versioned and selected on `protocolVersion`; an unknown
       version degrades to the default codec (`CodecFor`) or errors
       (`CodecForStrict`).
+- [x] `Codec.Version()` reports the version the codec was *selected as* — the
+      registry key — not a hardcoded default (depth-remediation, 2026-05-21).
+
+> **Depth-remediation addendum (2026-05-21).** A 4-way audit found
+> `v1Codec.Version()` hardcoded `return DefaultVersion`, so
+> `CodecFor(VersionApps20260126).Version()` reported the wrong label. Fixed by
+> giving `v1Codec` an unexported `version` field set to its registry key; no
+> encode/decode method reads it, so the wire behaviour is unchanged. This is a
+> diagnostic-correctness bug fix, not a design change — no decision entry.
 
 ## Files added or changed
 
