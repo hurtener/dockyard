@@ -291,8 +291,9 @@ These enforce P1–P4 (§1). They are binding on every phase.
 - `internal/protocolcodec` is the only package that imports raw MCP extension wire
   types. Codecs are versioned and keyed on the negotiated `protocolVersion`;
   deprecated shapes are tolerated on read, never emitted.
-- The Tasks wire layer is code-generated from the vendored experimental schema, so a
-  spec revision is regenerate-and-diff.
+- The Tasks wire layer is hand-derived from the vendored experimental schema and
+  pinned by golden tests (D-069); a spec revision is re-pin-the-SHA, re-derive, and
+  golden-diff — the golden tests surface every changed wire shape.
 
 ---
 

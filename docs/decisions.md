@@ -1484,7 +1484,8 @@ Node-in-Go harness for the frontend.
 **Status:** Settled
 **Where it lives:** `internal/protocolcodec/tasks.go`,
 `internal/protocolcodec/codec.go`, `internal/protocolcodec/golden_test.go`,
-phase plan `phase-13-tasks-server`
+phase plan `phase-13-tasks-server`, master plan `docs/plans/README.md` (Phase 13
+goal), `AGENTS.md` / `CLAUDE.md` §10
 **Why:** The Phase 13 master-plan goal and brief 02 (§3, §5) describe the Tasks
 wire layer as "code-generated from the vendored experimental schema"
 (`mcp-tasks-experimental.schema.ts`). The settled Phase 02 pattern (D-010)
@@ -1505,4 +1506,8 @@ golden tests surface every changed shape as a visible diff. The
 of this package"; D-069 records that "regenerate" here means re-derive-and-
 golden-diff, not run a generator. A future spec revision that materially grows
 the Tasks surface may revisit this; for V1 the hand-derived layer is the
-decision.
+decision. This decision **supersedes** the prior wording: the master-plan
+Phase 13 goal and `AGENTS.md` / `CLAUDE.md` §10 are corrected in the same PR to
+say "hand-derived … pinned by golden tests" — the §15 way to override a
+specified decision (a visible reconciliation, not a contradiction left to
+drift).
