@@ -1,0 +1,95 @@
+/*
+ * tokens.css — Dockyard design tokens, the single source of visual truth.
+ *
+ * Every visual constant a web/ui component or a Dockyard page uses is one of
+ * these `--dy-*` CSS custom properties — no component carries an ad-hoc hex or
+ * magic spacing number (docs/design/CONVENTIONS.md §5, AGENTS.md §20).
+ *
+ * The palette is derived from the Dockyard logo (docs/design/logo.png) — a
+ * gantry crane lifting a ship — per docs/design/design-spec.md §2.1.
+ *
+ * Theming (design-spec.md §2.4): tokens are scoped to [data-dy-theme]. V1 ships
+ * the light theme; a dark theme is a token-set swap — add a
+ * `[data-dy-theme='dark']` block, change nothing else. The same `--dy-*`
+ * surface a component reads is the surface an MCP host theme overrides via
+ * hostContext.styles.variables (RFC §7.3, brief 01 §2.3).
+ */
+
+:root,
+[data-dy-theme='light'] {
+  /* -- Colour: palette (design-spec.md §2.1) -- */
+  --dy-color-ink: #0e2b33;
+  --dy-color-ink-soft: #3a5159;
+  --dy-color-primary: #2fc4c9;
+  --dy-color-primary-strong: #1b9aa0;
+  --dy-color-mint: #cdede8;
+  --dy-color-accent: #f4a93c;
+  --dy-color-surface: #ffffff;
+  --dy-color-canvas: #f4f7f8;
+  --dy-color-border: #d9e2e4;
+
+  /* -- Colour: semantic state trios (design-spec.md §2.2) -- */
+  --dy-state-ok-fg: #1f7a4d;
+  --dy-state-ok-bg: #e3f4ea;
+  --dy-state-ok-border: #b6e0c6;
+
+  --dy-state-warn-fg: #9a6212;
+  --dy-state-warn-bg: #fcefd9;
+  --dy-state-warn-border: #f3d59b;
+
+  --dy-state-error-fg: #b22f2f;
+  --dy-state-error-bg: #fbe6e6;
+  --dy-state-error-border: #f0bcbc;
+
+  --dy-state-info-fg: #1b6a9a;
+  --dy-state-info-bg: #e1eef6;
+  --dy-state-info-border: #b6d3e6;
+
+  /* -- Spacing: 4px base scale (design-spec.md §2.3) -- */
+  --dy-space-0: 0;
+  --dy-space-1: 4px;
+  --dy-space-2: 8px;
+  --dy-space-3: 12px;
+  --dy-space-4: 16px;
+  --dy-space-5: 24px;
+  --dy-space-6: 32px;
+  --dy-space-7: 48px;
+  --dy-space-8: 64px;
+
+  /* -- Typography (design-spec.md §2.3) -- */
+  --dy-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif;
+  --dy-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono',
+    Menlo, Consolas, 'Liberation Mono', monospace;
+
+  --dy-text-xs: 12px;
+  --dy-text-sm: 13px;
+  --dy-text-base: 14px;
+  --dy-text-md: 16px;
+  --dy-text-lg: 20px;
+  --dy-text-xl: 28px;
+
+  --dy-weight-regular: 400;
+  --dy-weight-medium: 500;
+  --dy-weight-semibold: 600;
+
+  --dy-line-tight: 1.25;
+  --dy-line-normal: 1.5;
+
+  /* -- Radius (design-spec.md §2.3) -- */
+  --dy-radius-sm: 4px;
+  --dy-radius-md: 8px;
+  --dy-radius-lg: 12px;
+  --dy-radius-full: 9999px;
+
+  /* -- Elevation: soft, low-spread shadows (design-spec.md §2.3) -- */
+  --dy-elevation-flat: 0 0 0 1px var(--dy-color-border);
+  --dy-elevation-raised: 0 1px 2px rgba(14, 43, 51, 0.06),
+    0 2px 8px rgba(14, 43, 51, 0.08);
+  --dy-elevation-overlay: 0 4px 12px rgba(14, 43, 51, 0.1),
+    0 12px 32px rgba(14, 43, 51, 0.16);
+
+  /* -- Focus ring: always derived from `primary` (design-spec.md §3.4) -- */
+  --dy-focus-ring: 0 0 0 2px var(--dy-color-surface),
+    0 0 0 4px var(--dy-color-primary);
+}

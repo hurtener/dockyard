@@ -32,16 +32,40 @@ coherent and keeps the cost of a new page low.
 ## 3. The shared component inventory (`web/ui/`)
 
 Shared Svelte components live in `web/ui/` and are the **only** source of these
-building blocks — pages compose them, never re-implement them. Phase 10a delivers
-and documents the inventory here; the planned set:
+building blocks — pages compose them, never re-implement them. Phase 10a delivered
+the inventory below (plain Svelte 5, typed props, token-driven, keyboard-accessible
+with the `primary` focus ring); `docs/design/design-spec.md` §3 is its concrete
+spec.
 
-- **Shell & layout** — `AppShell`, `PageHeader`, `DetailRail`, `RailCard`,
-  `ActionBar`.
-- **Data display** — `DataTable`, `Pagination`, `FilterBar`, `MetricCard`,
-  `StatusChip` / `StatusBadge`, `Timeline`, `JsonInspector`, `ArtifactPreview`.
-- **State** — `PageState` (see §4) and its `LoadingState`, `EmptyState`,
-  `ErrorState`, `PermissionState` panels.
-- **App-pattern** — `ApprovalPanel` and other pattern blocks the templates need.
+- **Shell & layout**
+  - `AppShell` — the outer frame: header / optional rail / main / footer slots.
+  - `PageHeader` — page title + subtitle, with lead, status, and actions slots.
+  - `DetailRail` — the right-hand rail container; stacked or tabbed `RailCard`s.
+  - `RailCard` — one titled, optionally collapsible card within a rail.
+  - `ActionBar` — a layout row that aligns slotted buttons/controls.
+  - `ConnectionFooter` — the status bar: connection, label, transport, live dot.
+- **Data display**
+  - `DataTable` — columns, rows, client-side sort, optional pagination; composes
+    `Pagination` and `PageState`.
+  - `Pagination` — page controls for a `DataTable` (or standalone).
+  - `FilterBar` — the search input + filter chips; the one place a search lives.
+  - `MetricCard` — one KPI: label, value, optional delta/trend.
+  - `StatusChip` — a small semantic state pill (ok / warn / error / info /
+    neutral).
+  - `Timeline` — an ordered sequence of timestamped events.
+  - `JsonInspector` — a collapsible, lightly highlighted, read-only JSON tree.
+  - `CodeBlock` — a read-only monospace block with copy.
+- **State — the four-state `PageState` family**
+  - `PageState` — wraps an async region; routes to exactly one of loading /
+    empty / error / ready (see §4).
+  - `LoadingState`, `EmptyState`, `ErrorState`, `PermissionState` — the
+    individual panels; the empty and error panels carry real copy + a working
+    action.
+
+Pattern blocks a single template needs (e.g. an `ApprovalPanel`) are
+deliberately **not** in the V1 `web/ui` set. They land with their own template
+phase (24–26), composed *from* the primitives above — `docs/design/design-spec.md`
+§3.4 is the authority.
 
 A genuinely new shared component lands in `web/ui/` **and** in this section in the
 same PR. A component that is truly page-specific stays page-local but is **composed

@@ -55,28 +55,43 @@ generate:
 		echo "skip generate: codegen not landed yet"; \
 	fi
 
+# Every web/ project gated by `make web` / installed by `make web-install`.
+# Add a project's directory here when it lands; both targets loop over the set.
+WEB_PROJECTS := web/bridge web/ui
+
 # Frontend gate — type-check + unit tests for every web/ project. Gated like the
 # Go code: CI runs `make web`, the smoke script asserts it passes. No-ops
 # gracefully where npm is absent or no web/ project has landed yet.
 web:
 	@if ! command -v npm >/dev/null 2>&1; then \
 		echo "skip web: npm not installed"; \
-	elif [ -f web/bridge/package.json ]; then \
-		echo "== web/bridge: type-check + unit tests =="; \
-		( cd web/bridge && \
-			if [ ! -d node_modules ]; then npm ci --no-audit --no-fund; fi && \
-			npm run gate ); \
 	else \
-		echo "skip web: no web/ project landed yet"; \
+		any=0; \
+		for p in $(WEB_PROJECTS); do \
+			if [ -f "$$p/package.json" ]; then \
+				any=1; \
+				echo "== $$p: type-check + unit tests =="; \
+				( cd "$$p" && \
+					if [ ! -d node_modules ]; then npm ci --no-audit --no-fund; fi && \
+					npm run gate ) || exit 1; \
+			fi; \
+		done; \
+		[ "$$any" -eq 1 ] || echo "skip web: no web/ project landed yet"; \
 	fi
 
 web-install:
 	@if ! command -v npm >/dev/null 2>&1; then \
 		echo "skip web-install: npm not installed"; \
-	elif [ -f web/bridge/package.json ]; then \
-		( cd web/bridge && npm ci --no-audit --no-fund ); \
 	else \
-		echo "skip web-install: no web/ project landed yet"; \
+		any=0; \
+		for p in $(WEB_PROJECTS); do \
+			if [ -f "$$p/package.json" ]; then \
+				any=1; \
+				echo "== $$p: npm ci =="; \
+				( cd "$$p" && npm ci --no-audit --no-fund ) || exit 1; \
+			fi; \
+		done; \
+		[ "$$any" -eq 1 ] || echo "skip web-install: no web/ project landed yet"; \
 	fi
 
 preflight:
@@ -95,6 +110,6 @@ install-hooks:
 
 clean:
 	@rm -rf bin/ dist/ build/
-	@rm -rf web/bridge/coverage web/bridge/dist
+	@for p in $(WEB_PROJECTS); do rm -rf "$$p/coverage" "$$p/dist"; done
 	@find . -name '*.test' -delete 2>/dev/null || true
 	@find . -name 'coverage.out' -delete 2>/dev/null || true
