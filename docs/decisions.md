@@ -1372,3 +1372,76 @@ keeps the host-profile seam pure (a derivation function over explicit inputs)
 and defers negotiated-host plumbing — wiring the profile id and server URL out
 of the live `initialize` handshake — to a later phase, as the Phase 12 plan's
 non-goals state.
+
+---
+
+## D-065 — Design tokens ship as `--dy-*` CSS custom properties with a typed companion
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** `web/ui/src/tokens.css`, `web/ui/src/tokens.ts`,
+`docs/design/CONVENTIONS.md` §5, `docs/design/design-spec.md` §2, phase plan
+`phase-10a-design-system`
+**Why:** The design system needs one source of visual truth that is *both* what
+a browser actually renders and what an MCP host theme can override. A CSS
+custom property is the only form that satisfies both: brief 01 §2.3 documents
+that an MCP App receives host-themeable CSS variables via
+`hostContext.styles.variables`, so the `--dy-*` surface a `web/ui` component
+reads is the *same* surface a host theme overrides — no translation layer.
+Tokens are therefore the runtime source of truth as a `tokens.css` `:root`
+block (`--dy-` prefix, namespaced so they cannot collide with host or app
+variables), and `tokens.ts` is a *typed companion* — it names every token so
+component code refers to a token by a TypeScript-checked identifier rather than
+a raw string, and `tokenVar()` builds the `var()` reference. The TS layer holds
+token *names*, never values: values live only in CSS, because they are
+theme-dependent. Theming (design-spec.md §2.4) is a token-set swap: the blocks
+are scoped to `[data-dy-theme]`, V1 ships `light`, and a dark theme is a new
+`[data-dy-theme='dark']` block with no component change. The palette is derived
+by eye from `docs/design/logo.png`; a brand correction is a one-file edit to
+`tokens.css`.
+
+---
+
+## D-066 — `web/ui` components use plain-Svelte props + callback props, no SvelteKit
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** `web/ui/` (every `*.svelte` component), `web/ui/svelte.config.js`,
+`docs/design/CONVENTIONS.md` §3, phase plan `phase-10a-design-system`
+**Why:** `web/ui` is consumed by surfaces with different mount stories — the
+inspector, the template App UIs inside a sandboxed iframe, and the docs site.
+D-006 already settles plain Svelte over SvelteKit framework-wide; Phase 10a
+fixes the *component-API* convention that follows from it. Every component is a
+plain Svelte 5 render unit: typed props via the `$props()` rune, content via
+typed `Snippet` slots, and events surfaced as **callback props** (`onretry`,
+`onRowClick`, `onTabChange`) rather than `createEventDispatcher`. Callback props
+are the Svelte 5 idiom, they type-check end to end, and they keep a component a
+pure function of its inputs with no framework-runtime dependency — so a
+component drops into a bare iframe bundle unchanged. Components own only
+transient view state (a tab index, a collapse flag); all data and all async
+state flow in as props, which is what lets `PageState` enforce the four-state
+rule by construction. One consequence recorded for future phases: a prop must
+not be named `state` (it collides with the `$state` rune) — `DataTable` takes
+`pageState`.
+
+---
+
+## D-067 — `web/ui` is a separate npm package gated as its own `web/` project
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** `web/ui/package.json`, `Makefile` (`web` / `web-install`
+targets, `WEB_PROJECTS`), `.github/workflows/ci.yml`, phase plan
+`phase-10a-design-system`
+**Why:** `web/ui` could have been folded into `web/bridge`, but the two are
+distinct artifacts with distinct consumers: `web/bridge` is the `ui/`
+postMessage dialect (View-side protocol), `web/ui` is the visual component
+inventory. Keeping them as separate `@dockyard/*` packages keeps each
+dependency set and gate honest and lets a consumer import only what it needs —
+the docs site wants `web/ui` and not the bridge. To stop the `make web` gate
+from silently covering only the first project, the Makefile now carries an
+explicit `WEB_PROJECTS` list and `web` / `web-install` loop over it, failing
+fast if any project's gate fails; CI's npm cache keys on both lockfiles. The
+rule for a future `web/` project (the multi-server console, etc.): add its
+directory to `WEB_PROJECTS` in the same PR that lands it, so the frontend gate
+never drifts behind the surface.

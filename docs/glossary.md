@@ -30,6 +30,11 @@ inspector. RFC §7.2, §7.3. D-016, D-059, D-060, D-061.
 advertises the extensions and capabilities it supports. Dockyard reads this at run
 time and adapts; it never hardcodes a per-host capability matrix. RFC §7.5. D-011.
 
+**Component inventory** — the shared set of Svelte components in `web/ui/` that
+every Dockyard frontend surface composes rather than re-implementing. Phase 10a
+delivers the V1 inventory; a genuinely new shared component lands in `web/ui/`
+and `docs/design/CONVENTIONS.md` §3 in the same PR. AGENTS.md §20. D-066.
+
 **Conformance suite** — the shared `runtime/store/storetest` test battery every
 `Store` driver must pass. A new persistence guarantee is added to the suite once and
 proven against every driver, never bolted onto one driver. RFC §13. D-025, D-026.
@@ -61,6 +66,13 @@ struct, not inline schema. Resolved to a JSON Schema through the manifest's
 `ContractResolver` seam (the codegen pipeline). RFC §4.2, §6.1. D-037.
 
 ## D
+
+**Design token** — a named, single-source visual constant — colour, spacing,
+typography, radius, or elevation — shipped by Phase 10a as a `--dy-*` CSS custom
+property (`web/ui/src/tokens.css`) with a typed companion (`tokens.ts`). Tokens
+are the single source of visual truth: no `web/ui` component or Dockyard page
+carries an ad-hoc hex or magic spacing number. `docs/design/CONVENTIONS.md` §5.
+D-065.
 
 **Dedicated origin** — the stable, per-App sandboxed-iframe origin a host serves
 an App's HTML from (`_meta.ui.domain`), needed by APIs that allowlist origins
@@ -266,6 +278,12 @@ compatibility (P3). RFC §5.4. D-009.
 **P1 / P2 / P3 / P4** — Dockyard's four binding properties: contract-first;
 observability is a protocol; forward-compatibility by isolation; server-side only.
 RFC §1.
+
+**PageState** — the shared four-state async wrapper in the `web/ui` inventory.
+It routes an async region to exactly one of loading / empty / error / ready; the
+empty and error panels are mandatory and carry real copy plus a working
+retry/action affordance. Every Dockyard page and async region routes through it.
+`docs/design/CONVENTIONS.md` §4. AGENTS.md §20. D-066.
 
 ## Q
 
