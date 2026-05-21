@@ -42,7 +42,7 @@ func TestGolden_CapabilityJSON(t *testing.T) {
 
 	t.Run("list on", func(t *testing.T) {
 		t.Parallel()
-		e := newEngine(t, &Options{AdvertiseList: true})
+		e := newEngine(t, &Options{AdvertiseList: true, RequestorIdentifiable: true})
 		raw, err := e.CapabilityJSON()
 		if err != nil {
 			t.Fatalf("CapabilityJSON: %v", err)
@@ -58,7 +58,7 @@ func TestGolden_CapabilityJSON(t *testing.T) {
 // engine's configuration through the codec.
 func TestCapabilityRoundTrip(t *testing.T) {
 	t.Parallel()
-	e := newEngine(t, &Options{AdvertiseList: true})
+	e := newEngine(t, &Options{AdvertiseList: true, RequestorIdentifiable: true})
 	raw, err := e.CapabilityJSON()
 	if err != nil {
 		t.Fatalf("CapabilityJSON: %v", err)

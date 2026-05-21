@@ -14,7 +14,7 @@ import (
 // Many goroutines create tasks and dispatch tasks/* against the one engine.
 func TestEngineConcurrentReuse(t *testing.T) {
 	t.Parallel()
-	e := newEngine(t, &Options{Logger: quietLogger(), AdvertiseList: true})
+	e := newEngine(t, &Options{Logger: quietLogger(), AdvertiseList: true, RequestorIdentifiable: true})
 	codec := protocolcodec.CodecFor(protocolcodec.DefaultVersion)
 
 	const workers = 24

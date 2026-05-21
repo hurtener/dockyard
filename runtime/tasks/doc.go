@@ -30,13 +30,35 @@
 // seam; an illegal transition is a typed error ([ErrIllegalTransition]), never
 // a panic across the MCP boundary.
 //
-// # The TaskStore seam (Phase 14)
+// # The TaskStore seam
 //
-// Durable task state lives behind the [TaskStore] interface. Phase 13 ships an
-// in-memory stub ([NewInMemoryStore]) sufficient for stdio single-user apps and
-// for tests; Phase 14 supplies the durable Store-backed driver carrying TTL
-// enforcement, per-requestor concurrency caps, the purge sweep, crypto-strong
-// task IDs and auth-context binding. The seam already carries the data those
-// concerns need (TaskRecord.AuthContext, TaskRecord.RequestedTTL) so Phase 14
-// enforces them without reshaping the interface.
+// Durable task state lives behind the [TaskStore] interface. [NewInMemoryStore]
+// is the in-memory driver, sufficient for stdio single-user apps and for tests;
+// [NewStore] is the durable driver — a typed facade over the runtime/store
+// seam, with a forward-only migration (D-070). Both pass the shared TaskStore
+// conformance suite (runtime/tasks/taskstoretest).
+//
+// # The TaskHandle handler API (RFC §8.4)
+//
+// A handler doing genuinely long work takes a [HandleFunc] and receives a
+// [TaskHandle]: progress reporting, status messages, cooperative cancellation,
+// and input_required-driven elicitation. Handlers stay sync-shaped — the handle
+// is how a sync-shaped handler does long async-feeling work. No raw experimental
+// protocol struct reaches the handle (P3).
+//
+// # Lifecycle controls and security (RFC §8.5)
+//
+// The [Lifecycle] options — manifest-tunable max TTL, default TTL, per-requestor
+// concurrency cap and a background TTL purge sweep — bound durable task state.
+// Task IDs are crypto-strong (128-bit crypto/rand, [CryptoID]); [Engine.DispatchAs]
+// binds tasks/get|result|cancel to the requestor's authorization context and
+// scopes tasks/list to the caller, withholding it when requestors are not
+// identifiable.
+//
+// # The transport mount (RFC §8.2)
+//
+// [Mount] routes tasks/* JSON-RPC frames into [Engine.Dispatch] ahead of the SDK
+// server — the go-sdk rejects unknown methods before middleware — and injects
+// the capabilities.tasks block into the initialize handshake, so a real MCP
+// client drives tasks/* end to end over a transport (D-071).
 package tasks
