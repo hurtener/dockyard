@@ -21,6 +21,11 @@ apps:
     csp:
       connect: [https://api.company.com]
     visibility: [model, app]
+tasks:
+  max_ttl_millis: 3600000
+  default_ttl_millis: 900000
+  purge_interval_millis: 60000
+  max_concurrent_per_requestor: 16
 quality:
   require_loading_state: true
   require_empty_state: true

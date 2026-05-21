@@ -18,8 +18,34 @@ type Manifest struct {
 	// Apps is the app's ui:// resources. Optional — a plain MCP server has none
 	// (RFC §4.1: a UI resource is additive, not a requirement).
 	Apps []App `yaml:"apps"`
+	// Tasks holds the app's MCP Tasks lifecycle limits (RFC §8.5). Optional —
+	// an app with no task-supporting tool omits it and the zero value disables
+	// every limit.
+	Tasks Tasks `yaml:"tasks"`
 	// Quality holds the quality.* gates dockyard validate enforces (RFC §9.4).
 	Quality Quality `yaml:"quality"`
+}
+
+// Tasks is the manifest tasks block: the manifest-tunable MCP Tasks lifecycle
+// limits (RFC §8.5). Every field defaults to zero — "no limit" — when omitted,
+// which is the correct posture for an ephemeral single-user stdio app. A
+// durable HTTP/Portico app sets explicit limits so a task leak cannot grow the
+// store unbounded (brief 02 §4.6). The runtime maps these onto the Tasks
+// engine's lifecycle controls.
+type Tasks struct {
+	// MaxTTLMillis is the largest task retention duration the runtime honours,
+	// in milliseconds. A requestor asking for more is clamped down. Zero means
+	// unlimited retention (no clamp).
+	MaxTTLMillis int64 `yaml:"max_ttl_millis"`
+	// DefaultTTLMillis is the retention applied to a task whose requestor
+	// expressed no TTL preference, in milliseconds. Zero means unlimited.
+	DefaultTTLMillis int64 `yaml:"default_ttl_millis"`
+	// PurgeIntervalMillis is how often the background TTL purge sweep runs, in
+	// milliseconds. Zero disables the sweep.
+	PurgeIntervalMillis int64 `yaml:"purge_interval_millis"`
+	// MaxConcurrentPerRequestor caps the number of non-terminal tasks one
+	// authorization context may hold at once. Zero means no cap.
+	MaxConcurrentPerRequestor int `yaml:"max_concurrent_per_requestor"`
 }
 
 // Runtime is the manifest runtime block: which transports the app is deployed

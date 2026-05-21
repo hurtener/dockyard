@@ -87,8 +87,39 @@ func (m *Manifest) validate(source string, pos *positionIndex) error {
 	m.validateRuntime(c, pos)
 	m.validateTools(c, pos)
 	m.validateApps(c, pos)
+	m.validateTasks(c, pos)
 
 	return c.err()
+}
+
+// validateTasks checks the tasks block — the MCP Tasks lifecycle limits
+// (RFC §8.5). Every limit is optional; a present value must be non-negative,
+// and the default TTL must not exceed the max TTL (a default the runtime would
+// immediately clamp is a manifest mistake).
+func (m *Manifest) validateTasks(c *errCollector, pos *positionIndex) {
+	at := func(field string) int { return pos.line(field) }
+	t := m.Tasks
+	if t.MaxTTLMillis < 0 {
+		c.add(at("tasks.max_ttl_millis"), "tasks.max_ttl_millis",
+			"must not be negative")
+	}
+	if t.DefaultTTLMillis < 0 {
+		c.add(at("tasks.default_ttl_millis"), "tasks.default_ttl_millis",
+			"must not be negative")
+	}
+	if t.PurgeIntervalMillis < 0 {
+		c.add(at("tasks.purge_interval_millis"), "tasks.purge_interval_millis",
+			"must not be negative")
+	}
+	if t.MaxConcurrentPerRequestor < 0 {
+		c.add(at("tasks.max_concurrent_per_requestor"), "tasks.max_concurrent_per_requestor",
+			"must not be negative")
+	}
+	if t.MaxTTLMillis > 0 && t.DefaultTTLMillis > t.MaxTTLMillis {
+		c.add(at("tasks.default_ttl_millis"), "tasks.default_ttl_millis",
+			"default TTL %dms exceeds max TTL %dms — the runtime would immediately clamp it",
+			t.DefaultTTLMillis, t.MaxTTLMillis)
+	}
 }
 
 // validateRuntime checks the runtime block (RFC §4.2, §5.2, §7.4).

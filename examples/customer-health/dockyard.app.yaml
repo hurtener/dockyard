@@ -34,6 +34,17 @@ apps:
       connect: [https://api.company.com]
     visibility: [model, app]
 
+tasks:                            # RFC §8.5 — MCP Tasks lifecycle limits
+  # The largest task retention the runtime honours; a longer requested TTL is
+  # clamped down. 0 (or omitted) means unlimited retention.
+  max_ttl_millis: 3600000          # 1 hour
+  # Retention applied to a task whose requestor expressed no TTL preference.
+  default_ttl_millis: 900000       # 15 minutes
+  # How often the background TTL purge sweep reaps expired tasks. 0 disables it.
+  purge_interval_millis: 60000     # 1 minute
+  # Cap on non-terminal tasks one authorization context may hold at once.
+  max_concurrent_per_requestor: 16
+
 quality:                          # RFC §9.4 — enforced by `dockyard validate`
   require_loading_state: true
   require_empty_state: true

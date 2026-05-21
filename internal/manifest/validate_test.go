@@ -36,6 +36,7 @@ func TestValidate_InvalidFixtures(t *testing.T) {
 		{"bad-csp-single-file.yaml", "single-file", true},
 		{"bad-orphan-app.yaml", "referenced by no tool", true},
 		{"bad-task-support-conflict.yaml", "must agree on task_support", true},
+		{"bad-tasks.yaml", "exceeds max TTL", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.file, func(t *testing.T) {
