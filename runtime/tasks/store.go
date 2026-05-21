@@ -47,6 +47,17 @@ type TaskRecord struct {
 	// means the requestor expressed no preference. Phase 14 turns this into the
 	// enforced TTL; Phase 13 records it and reports it back unchanged.
 	RequestedTTL *int64
+	// TTL is the enforced retention duration in milliseconds — the value the
+	// runtime actually honours after clamping RequestedTTL to the manifest max
+	// and substituting the default (RFC §8.5). A nil TTL means unlimited
+	// retention; the purge sweep never reaps a nil-TTL task. Phase 14 sets it;
+	// it is the value [TaskRecord.Task] reports on the wire.
+	TTL *int64
+	// ExpiresAt is the absolute instant the task becomes eligible for the TTL
+	// purge sweep, derived from CreatedAt + TTL. A zero ExpiresAt means the task
+	// never expires (a nil TTL). Phase 14 sets it; the durable driver indexes
+	// on it so PurgeExpired is a bounded scan.
+	ExpiresAt time.Time
 	// PollInterval is the receiver's suggested polling interval in ms; nil
 	// omits it.
 	PollInterval *int64
@@ -63,17 +74,31 @@ type TaskRecord struct {
 }
 
 // Task projects the protocol-facing protocolcodec.Task from a record — the
-// subset a host sees on the wire.
+// subset a host sees on the wire. The wire `ttl` is the *enforced* TTL (the
+// runtime-clamped value, RFC §8.5), falling back to the requested TTL only
+// before Phase 14 enforcement has stamped one — so a host always sees the
+// retention the runtime will actually honour.
 func (r TaskRecord) Task() protocolcodec.Task {
+	ttl := r.TTL
+	if ttl == nil {
+		ttl = r.RequestedTTL
+	}
 	return protocolcodec.Task{
 		ID:            r.ID,
 		Status:        r.Status,
 		StatusMessage: r.StatusMessage,
 		CreatedAt:     r.CreatedAt,
 		LastUpdatedAt: r.UpdatedAt,
-		TTL:           r.RequestedTTL,
+		TTL:           ttl,
 		PollInterval:  r.PollInterval,
 	}
+}
+
+// IsExpired reports whether the task is eligible for the TTL purge sweep at
+// instant now — its ExpiresAt is set and not in the future. A zero ExpiresAt
+// (an unlimited-retention task) never expires.
+func (r TaskRecord) IsExpired(now time.Time) bool {
+	return !r.ExpiresAt.IsZero() && !now.Before(r.ExpiresAt)
 }
 
 // TaskStore is the persistence seam for durable task state — the interface
@@ -114,6 +139,26 @@ type TaskStore interface {
 	// the page is the last). An empty cursor requests the first page. limit
 	// bounds the page size; a limit <= 0 uses the driver default.
 	List(ctx context.Context, cursor string, limit int) ([]TaskRecord, string, error)
+
+	// ListByAuthContext is List scoped to a single authorization context — the
+	// only listing a receiver that identifies its requestors serves, so a
+	// requestor sees its own tasks and no other context's (RFC §8.5; brief 02
+	// §4.5). The page and cursor semantics match List. An empty authContext
+	// scopes to the unauthenticated requestor's own (empty-context) tasks.
+	ListByAuthContext(ctx context.Context, authContext, cursor string, limit int) ([]TaskRecord, string, error)
+
+	// Delete removes a task record. It is a no-op (nil error) when the id names
+	// no task — Delete is idempotent so the purge sweep can run without racing
+	// a concurrent terminal write. It is the durable counterpart of letting an
+	// in-memory record fall out of scope.
+	Delete(ctx context.Context, id string) error
+
+	// PurgeExpired reaps every task whose enforced TTL has elapsed as of now
+	// (TaskRecord.IsExpired) and returns the count removed. It is the storage
+	// half of the background TTL purge sweep (RFC §8.5); the sweep goroutine
+	// lives in lifecycle.go. PurgeExpired is safe to call concurrently with any
+	// other store operation.
+	PurgeExpired(ctx context.Context, now time.Time) (int, error)
 }
 
 // inMemoryStore is the Phase 13 in-memory TaskStore driver. It is sufficient
@@ -171,8 +216,16 @@ func (s *inMemoryStore) Transition(
 	}
 	// A redundant write of the status the task already holds is a no-op
 	// success — the cooperative-cancellation rule: a late terminal transition
-	// onto an already-cancelled (or otherwise-terminal) task must not error.
+	// onto an already-cancelled (or otherwise-terminal) task must not error. A
+	// redundant *non-terminal* write (working→working) instead refreshes the
+	// status message: that is how a TaskHandle reports progress without moving
+	// the lifecycle (RFC §8.4).
 	if rec.Status == to {
+		if !to.IsTerminal() && msg != "" && msg != rec.StatusMessage {
+			rec.StatusMessage = msg
+			rec.UpdatedAt = time.Now().UTC()
+			s.tasks[id] = rec
+		}
 		return rec, nil
 	}
 	if !rec.Status.CanTransitionTo(to) {
@@ -231,4 +284,80 @@ func (s *inMemoryStore) List(_ context.Context, cursor string, limit int) ([]Tas
 		out = append(out, s.tasks[id])
 	}
 	return out, next, nil
+}
+
+// ListByAuthContext pages over the records whose AuthContext equals
+// authContext, in stable insertion order. The cursor is a 1-past-the-end index
+// into the *filtered* sequence — opaque to the caller, decoded only here.
+func (s *inMemoryStore) ListByAuthContext(
+	_ context.Context, authContext, cursor string, limit int,
+) ([]TaskRecord, string, error) {
+	if limit <= 0 {
+		limit = defaultPageSize
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Build the auth-scoped view in insertion order.
+	scoped := make([]TaskRecord, 0, len(s.order))
+	for _, id := range s.order {
+		if rec := s.tasks[id]; rec.AuthContext == authContext {
+			scoped = append(scoped, rec)
+		}
+	}
+	start := 0
+	if cursor != "" {
+		i, err := decodeCursor(cursor)
+		if err != nil || i < 0 || i > len(scoped) {
+			return nil, "", fmt.Errorf("%w: bad cursor", ErrInvalidParams)
+		}
+		start = i
+	}
+	end := start + limit
+	next := ""
+	if end < len(scoped) {
+		next = encodeCursor(end)
+	} else {
+		end = len(scoped)
+	}
+	out := make([]TaskRecord, 0, end-start)
+	out = append(out, scoped[start:end]...)
+	return out, next, nil
+}
+
+// Delete removes a task from the in-memory store. It is idempotent: removing an
+// absent task is a nil-error no-op.
+func (s *inMemoryStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.tasks[id]; !ok {
+		return nil
+	}
+	delete(s.tasks, id)
+	for i, oid := range s.order {
+		if oid == id {
+			s.order = append(s.order[:i], s.order[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
+
+// PurgeExpired reaps every record expired as of now and returns the count.
+func (s *inMemoryStore) PurgeExpired(_ context.Context, now time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.order[:0:0]
+	purged := 0
+	for _, id := range s.order {
+		rec := s.tasks[id]
+		if rec.IsExpired(now) {
+			delete(s.tasks, id)
+			purged++
+			continue
+		}
+		kept = append(kept, id)
+	}
+	s.order = kept
+	return purged, nil
 }
