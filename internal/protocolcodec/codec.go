@@ -105,6 +105,43 @@ type Codec interface {
 	// DecodeTasksServerCapability parses a `capabilities.tasks` block. A
 	// nil/empty input yields a zero value and ok == false.
 	DecodeTasksServerCapability(raw json.RawMessage) (c TasksServerCapability, ok bool, err error)
+
+	// ---- MCP Tasks method envelopes (tasks/* JSON-RPC shapes) ----
+
+	// EncodeCreateTaskResult returns the JSON of a `CreateTaskResult` — the
+	// result a receiver returns for an accepted task-augmented request.
+	EncodeCreateTaskResult(r CreateTaskResult) (json.RawMessage, error)
+
+	// DecodeCreateTaskResult parses a `CreateTaskResult`.
+	DecodeCreateTaskResult(raw json.RawMessage) (CreateTaskResult, error)
+
+	// EncodeTaskIDParams returns the JSON of the params object shared by
+	// `tasks/get`, `tasks/result` and `tasks/cancel` (`{ "taskId": ... }`).
+	EncodeTaskIDParams(p TaskID) (json.RawMessage, error)
+
+	// DecodeTaskIDParams parses the `{ "taskId": ... }` params object. An empty
+	// `taskId` is a malformed-meta error — the field is required.
+	DecodeTaskIDParams(raw json.RawMessage) (TaskID, error)
+
+	// EncodeGetTaskResult returns the JSON of a `GetTaskResult` /
+	// `CancelTaskResult` — the flat `Result & Task` shape.
+	EncodeGetTaskResult(t Task) (json.RawMessage, error)
+
+	// DecodeGetTaskResult parses a `GetTaskResult` / `CancelTaskResult`.
+	DecodeGetTaskResult(raw json.RawMessage) (Task, error)
+
+	// EncodeListTasksParams returns the JSON of the `tasks/list` request params.
+	EncodeListTasksParams(p ListTasksParams) (json.RawMessage, error)
+
+	// DecodeListTasksParams parses the `tasks/list` request params. A nil/empty
+	// input yields a zero value (first page) and a nil error.
+	DecodeListTasksParams(raw json.RawMessage) (ListTasksParams, error)
+
+	// EncodeListTasksResult returns the JSON of a `ListTasksResult`.
+	EncodeListTasksResult(r ListTasksResult) (json.RawMessage, error)
+
+	// DecodeListTasksResult parses a `ListTasksResult`.
+	DecodeListTasksResult(raw json.RawMessage) (ListTasksResult, error)
 }
 
 // v1Codec is the codec for every protocol version Dockyard V1 supports. The
@@ -300,15 +337,7 @@ func (v1Codec) DecodeAppsExtensionCapability(raw json.RawMessage) (AppsExtension
 // ---- MCP Tasks ----
 
 func (v1Codec) EncodeTask(t Task) (json.RawMessage, error) {
-	return json.Marshal(taskWire{
-		TaskID:        t.ID,
-		Status:        t.Status,
-		StatusMessage: t.StatusMessage,
-		CreatedAt:     t.CreatedAt.UTC().Format(time.RFC3339Nano),
-		LastUpdatedAt: t.LastUpdatedAt.UTC().Format(time.RFC3339Nano),
-		TTL:           t.TTL,
-		PollInterval:  t.PollInterval,
-	})
+	return json.Marshal(taskToWire(t))
 }
 
 func (v1Codec) DecodeTask(raw json.RawMessage) (Task, error) {
@@ -316,26 +345,7 @@ func (v1Codec) DecodeTask(raw json.RawMessage) (Task, error) {
 	if err := json.Unmarshal(raw, &w); err != nil {
 		return Task{}, fmt.Errorf("%w: task: %w", ErrMalformedMeta, err)
 	}
-	if !w.Status.Valid() {
-		return Task{}, fmt.Errorf("%w: task: unknown status %q", ErrMalformedMeta, w.Status)
-	}
-	created, err := parseTaskTime("createdAt", w.CreatedAt)
-	if err != nil {
-		return Task{}, err
-	}
-	updated, err := parseTaskTime("lastUpdatedAt", w.LastUpdatedAt)
-	if err != nil {
-		return Task{}, err
-	}
-	return Task{
-		ID:            w.TaskID,
-		Status:        w.Status,
-		StatusMessage: w.StatusMessage,
-		CreatedAt:     created,
-		LastUpdatedAt: updated,
-		TTL:           w.TTL,
-		PollInterval:  w.PollInterval,
-	}, nil
+	return taskFromWire(w)
 }
 
 func parseTaskTime(field, v string) (time.Time, error) {
@@ -444,4 +454,135 @@ func (v1Codec) DecodeTasksServerCapability(raw json.RawMessage) (TasksServerCapa
 		c.ToolsCall = true
 	}
 	return c, true, nil
+}
+
+// ---- MCP Tasks method envelopes ----
+
+// taskToWire converts a domain Task to its wire struct. It is the single
+// conversion used by every Tasks envelope encoder so timestamp formatting and
+// the never-omitempty `ttl` rule live in one place.
+func taskToWire(t Task) taskWire {
+	return taskWire{
+		TaskID:        t.ID,
+		Status:        t.Status,
+		StatusMessage: t.StatusMessage,
+		CreatedAt:     t.CreatedAt.UTC().Format(time.RFC3339Nano),
+		LastUpdatedAt: t.LastUpdatedAt.UTC().Format(time.RFC3339Nano),
+		TTL:           t.TTL,
+		PollInterval:  t.PollInterval,
+	}
+}
+
+// taskFromWire converts a wire struct back to a domain Task, validating the
+// status and the two required timestamps.
+func taskFromWire(w taskWire) (Task, error) {
+	if !w.Status.Valid() {
+		return Task{}, fmt.Errorf("%w: task: unknown status %q", ErrMalformedMeta, w.Status)
+	}
+	created, err := parseTaskTime("createdAt", w.CreatedAt)
+	if err != nil {
+		return Task{}, err
+	}
+	updated, err := parseTaskTime("lastUpdatedAt", w.LastUpdatedAt)
+	if err != nil {
+		return Task{}, err
+	}
+	return Task{
+		ID:            w.TaskID,
+		Status:        w.Status,
+		StatusMessage: w.StatusMessage,
+		CreatedAt:     created,
+		LastUpdatedAt: updated,
+		TTL:           w.TTL,
+		PollInterval:  w.PollInterval,
+	}, nil
+}
+
+func (v1Codec) EncodeCreateTaskResult(r CreateTaskResult) (json.RawMessage, error) {
+	return json.Marshal(createTaskResultWire{
+		Task: taskToWire(r.Task),
+		Meta: r.Meta,
+	})
+}
+
+func (v1Codec) DecodeCreateTaskResult(raw json.RawMessage) (CreateTaskResult, error) {
+	var w createTaskResultWire
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return CreateTaskResult{}, fmt.Errorf("%w: CreateTaskResult: %w", ErrMalformedMeta, err)
+	}
+	task, err := taskFromWire(w.Task)
+	if err != nil {
+		return CreateTaskResult{}, err
+	}
+	return CreateTaskResult{Task: task, Meta: w.Meta}, nil
+}
+
+func (v1Codec) EncodeTaskIDParams(p TaskID) (json.RawMessage, error) {
+	return json.Marshal(taskIDParamsWire{TaskID: p.ID})
+}
+
+func (v1Codec) DecodeTaskIDParams(raw json.RawMessage) (TaskID, error) {
+	var w taskIDParamsWire
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return TaskID{}, fmt.Errorf("%w: taskId params: %w", ErrMalformedMeta, err)
+	}
+	if w.TaskID == "" {
+		return TaskID{}, fmt.Errorf("%w: taskId params: taskId is required", ErrMalformedMeta)
+	}
+	return TaskID{ID: w.TaskID}, nil
+}
+
+func (v1Codec) EncodeGetTaskResult(t Task) (json.RawMessage, error) {
+	return json.Marshal(taskToWire(t))
+}
+
+func (v1Codec) DecodeGetTaskResult(raw json.RawMessage) (Task, error) {
+	var w getTaskResultWire
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return Task{}, fmt.Errorf("%w: GetTaskResult: %w", ErrMalformedMeta, err)
+	}
+	return taskFromWire(w)
+}
+
+func (v1Codec) EncodeListTasksParams(p ListTasksParams) (json.RawMessage, error) {
+	return json.Marshal(listTasksParamsWire(p))
+}
+
+func (v1Codec) DecodeListTasksParams(raw json.RawMessage) (ListTasksParams, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ListTasksParams{}, nil
+	}
+	var w listTasksParamsWire
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return ListTasksParams{}, fmt.Errorf("%w: tasks/list params: %w", ErrMalformedMeta, err)
+	}
+	return ListTasksParams(w), nil
+}
+
+func (v1Codec) EncodeListTasksResult(r ListTasksResult) (json.RawMessage, error) {
+	w := listTasksResultWire{NextCursor: r.NextCursor}
+	// Emit an explicit empty array, never JSON null: `tasks` is a required
+	// field of the schema's PaginatedResult-derived ListTasksResult.
+	w.Tasks = make([]taskWire, 0, len(r.Tasks))
+	for _, t := range r.Tasks {
+		w.Tasks = append(w.Tasks, taskToWire(t))
+	}
+	return json.Marshal(w)
+}
+
+func (v1Codec) DecodeListTasksResult(raw json.RawMessage) (ListTasksResult, error) {
+	var w listTasksResultWire
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return ListTasksResult{}, fmt.Errorf("%w: ListTasksResult: %w", ErrMalformedMeta, err)
+	}
+	out := ListTasksResult{NextCursor: w.NextCursor}
+	out.Tasks = make([]Task, 0, len(w.Tasks))
+	for _, tw := range w.Tasks {
+		t, err := taskFromWire(tw)
+		if err != nil {
+			return ListTasksResult{}, err
+		}
+		out.Tasks = append(out.Tasks, t)
+	}
+	return out, nil
 }
