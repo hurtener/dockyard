@@ -811,8 +811,17 @@ Dockyard's compliance must survive a moving protocol (G8, P3). The mechanisms:
 3. **Versioned codecs.** `protocolcodec` keys its encoders/decoders on the
    negotiated `protocolVersion`; deprecated shapes (the flat `_meta["ui/resourceUri"]`)
    are tolerated on read, never emitted.
-4. **Code-generated Tasks wire layer.** Tasks types are generated from the vendored
-   schema, so a spec revision is regenerate-and-diff, not a refactor (§8.2).
+4. **Schema-pinned Tasks wire layer.** The Tasks wire layer is built against the
+   vendored, SHA-pinned experimental schema (§8.1, §8.2). For V1 the Go wire types
+   are **hand-written** against that snapshot and guarded by golden tests, so a
+   spec revision still surfaces as a visible diff — the regenerate-and-diff
+   discipline holds even though the regeneration is manual. A schema → Go
+   *generator* is a deliberate deferral (decision D-024): standing it up now would
+   be premature, and the small `_meta`-borne / capability subset V1 needs does not
+   warrant it. When the generator lands it replaces the hand-written types behind
+   the unchanged `protocolcodec` interface; the forward-compatibility property —
+   one isolation seam, a pinned snapshot, a diffable update — is preserved either
+   way.
 5. **SDK currency.** Dockyard pins a recent SDK version and runs an SDK-version
    compatibility check in CI, because the SDK's security defaults shift between
    releases (§5.2, Brief 03 R4/R7).

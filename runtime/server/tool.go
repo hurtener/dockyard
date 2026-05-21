@@ -112,8 +112,18 @@ func AddTool[In, Out any](s *Server, def ToolDef, fn ToolFunc[In, Out]) error {
 	// Adapt the Dockyard handler to the SDK's ToolHandlerFor shape. The SDK
 	// auto-populates CallToolResult.Content with JSON text of the typed Out
 	// and sets StructuredContent; Phase 08 refines the content split (RFC §6.3).
+	//
+	// The handler invocation is wrapped in guardHandler: an app author's
+	// handler that panics on a live tools/call becomes a typed error result,
+	// never a process crash — the "no panic across the MCP boundary" rule made
+	// a toolchain guarantee (AGENTS.md §5, §13; D-053).
 	handler := func(ctx context.Context, _ *mcpsdk.CallToolRequest, in In) (*mcpsdk.CallToolResult, Out, error) {
-		out, err := fn(ctx, in)
+		var out Out
+		err := guardHandler(ctx, s.log, "tool", def.Name, func() error {
+			var herr error
+			out, herr = fn(ctx, in)
+			return herr
+		})
 		if err != nil {
 			var zero Out
 			return nil, zero, err
@@ -183,7 +193,15 @@ func AddToolWithSchemas[In, Out any](
 		if req != nil && req.Params != nil {
 			ctx = WithRawArguments(ctx, req.Params.Arguments)
 		}
-		out, err := fn(ctx, arg)
+		// guardHandler converts a panic in the app author's handler into a
+		// typed error result — the server survives a panicking tool on a live
+		// tools/call (AGENTS.md §5, §13; D-053).
+		var out ToolOutput[Out]
+		err := guardHandler(ctx, s.log, "tool", def.Name, func() error {
+			var herr error
+			out, herr = fn(ctx, arg)
+			return herr
+		})
 		if err != nil {
 			var zero Out
 			return nil, zero, err

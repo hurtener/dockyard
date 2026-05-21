@@ -1,0 +1,21 @@
+name: bad-csp-origin
+title: Bad CSP Origin
+version: 1.0.0
+runtime:
+  transports: [stdio]
+  ui:
+    framework: svelte
+    bundle: multi-file
+tools:
+  - name: echo
+    description: Echo.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput
+    ui: widget
+apps:
+  - id: widget
+    uri: ui://bad-csp-origin/main
+    entry: web/src/apps/widget.svelte
+    display_modes: [inline]
+    csp:
+      connect: [api.company.com]

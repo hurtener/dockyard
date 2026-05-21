@@ -34,12 +34,14 @@ var ErrUnknownVersion = errors.New("protocolcodec: no codec registered for proto
 // codecRegistry maps a recognised protocol version to its codec. The wire
 // shapes of the Apps (2026-01-26) and Tasks (experimental) extensions are
 // stable across the versions Dockyard V1 supports, so every known version maps
-// to the same [v1Codec] today. The registry exists so that the day a spec bump
-// changes a shape, a NEW codec is registered for the new version and old peers
-// keep their old codec — the forward-compatibility mechanism, made concrete.
+// to the same [v1Codec] implementation today — but each registry entry carries
+// the version it is keyed under so [Codec.Version] is a trustworthy diagnostic
+// (D-055). The registry exists so that the day a spec bump changes a shape, a
+// NEW codec is registered for the new version and old peers keep their old
+// codec — the forward-compatibility mechanism, made concrete.
 var codecRegistry = map[ProtocolVersion]Codec{
-	VersionMCP20251125:  v1Codec{},
-	VersionApps20260126: v1Codec{},
+	VersionMCP20251125:  v1Codec{version: VersionMCP20251125},
+	VersionApps20260126: v1Codec{version: VersionApps20260126},
 }
 
 // CodecFor returns the [Codec] for a negotiated protocol version, falling back

@@ -1,0 +1,23 @@
+name: bad-task-support-conflict
+title: Bad Task Support Conflict
+version: 1.0.0
+runtime:
+  transports: [stdio]
+tools:
+  - name: open_widget
+    description: Open the widget synchronously.
+    input: internal/contracts.OpenInput
+    output: internal/contracts.OpenOutput
+    ui: widget
+    task_support: forbidden
+  - name: refresh_widget
+    description: Refresh the widget as a long-running task.
+    input: internal/contracts.RefreshInput
+    output: internal/contracts.RefreshOutput
+    ui: widget
+    task_support: required
+apps:
+  - id: widget
+    uri: ui://bad-task-support-conflict/main
+    entry: web/src/apps/widget.svelte
+    display_modes: [inline]

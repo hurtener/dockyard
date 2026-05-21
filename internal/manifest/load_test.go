@@ -30,8 +30,11 @@ func TestLoadFile_ValidFull(t *testing.T) {
 	if m.Runtime.UI == nil {
 		t.Fatal("Runtime.UI is nil, want populated")
 	}
-	if m.Runtime.UI.Framework != UIFrameworkSvelte || m.Runtime.UI.Bundle != BundleSingleFile {
-		t.Errorf("Runtime.UI = %+v, want svelte/single-file", *m.Runtime.UI)
+	// valid-full.yaml uses bundle: multi-file because its app opts into an
+	// external csp.connect origin — a single-file bundle loads no external
+	// origin, so the two are mutually exclusive (RFC §7.4).
+	if m.Runtime.UI.Framework != UIFrameworkSvelte || m.Runtime.UI.Bundle != BundleMultiFile {
+		t.Errorf("Runtime.UI = %+v, want svelte/multi-file", *m.Runtime.UI)
 	}
 	if len(m.Tools) != 1 {
 		t.Fatalf("len(Tools) = %d, want 1", len(m.Tools))

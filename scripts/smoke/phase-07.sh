@@ -90,4 +90,30 @@ else
   skip "runtime/server/server.go not built — D-021 check deferred"
 fi
 
+# 9. Panic safety: every handler-invocation path is recover-wrapped (D-053).
+if [ -f runtime/server/recover.go ]; then
+  if grep -q 'func guardHandler(' runtime/server/recover.go \
+     && grep -q 'ErrHandlerPanic' runtime/server/recover.go \
+     && grep -q 'guardHandler(' runtime/server/tool.go \
+     && grep -q 'guardHandler(' runtime/server/resource.go; then
+    ok "handler panic recovery wired on tool + resource paths (D-053)"
+  else
+    fail "guardHandler not wired into every handler-invocation path"
+  fi
+else
+  skip "runtime/server/recover.go not built — panic-safety check deferred"
+fi
+
+# 10. AddResourceTemplate is exposed as a typed runtime surface (D-054).
+if [ -f runtime/server/resource.go ]; then
+  if grep -q 'func (s \*Server) AddResourceTemplate(' runtime/server/resource.go \
+     && grep -q 'type ResourceTemplateDef struct' runtime/server/resource.go; then
+    ok "AddResourceTemplate typed surface exposed (D-054)"
+  else
+    fail "AddResourceTemplate missing from resource.go"
+  fi
+else
+  skip "runtime/server/resource.go not built — template check deferred"
+fi
+
 smoke_summary

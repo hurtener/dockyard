@@ -111,12 +111,31 @@ type Codec interface {
 // Apps (2026-01-26) and Tasks (experimental) wire shapes are stable across
 // those versions, so one implementation serves them all; a future spec bump
 // adds a sibling codec rather than editing this one (RFC §16).
-type v1Codec struct{}
+//
+// The wire behaviour is stateless, but the codec carries the protocol version
+// it was *selected as* so Version() is a trustworthy diagnostic: CodecFor keys
+// the registry on a version, and the codec it returns must report that key, not
+// a hardcoded default (D-055). The field does not change any encode/decode
+// behaviour — every method has a value receiver and ignores it.
+type v1Codec struct {
+	// version is the registry key this codec was selected as. It is reported by
+	// Version() and never read by an encode/decode method.
+	version ProtocolVersion
+}
 
 // compile-time assertion that v1Codec satisfies the seam.
 var _ Codec = v1Codec{}
 
-func (v1Codec) Version() ProtocolVersion { return DefaultVersion }
+// Version reports the protocol version this codec was selected as — the
+// registry key CodecFor / CodecForStrict matched, or DefaultVersion when the
+// codec was constructed without one (the zero value). It is a diagnostic only;
+// the wire behaviour is identical across every V1 version.
+func (c v1Codec) Version() ProtocolVersion {
+	if c.version == "" {
+		return DefaultVersion
+	}
+	return c.version
+}
 
 // remarshal round-trips v through JSON into dst. It is the single conversion
 // primitive used to move between domain values and the unexported wire

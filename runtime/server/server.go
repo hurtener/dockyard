@@ -102,11 +102,12 @@ func (o *Options) serverCapabilities() (*mcpsdk.ServerCapabilities, error) {
 // (RFC §5). A Server is safe to construct once and serve repeatedly; tool and
 // resource registration happens before Run.
 type Server struct {
-	info      Info
-	log       *slog.Logger
-	mcp       *mcpsdk.Server
-	tools     []string // registered tool names, in registration order
-	resources []string // registered resource URIs, in registration order
+	info              Info
+	log               *slog.Logger
+	mcp               *mcpsdk.Server
+	tools             []string // registered tool names, in registration order
+	resources         []string // registered resource URIs, in registration order
+	resourceTemplates []string // registered resource-template URI templates, in registration order
 }
 
 // New constructs a Dockyard MCP server. It returns an error rather than

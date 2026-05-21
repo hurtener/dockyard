@@ -5,7 +5,7 @@ runtime:
   transports: [stdio, http]
   ui:
     framework: svelte
-    bundle: single-file
+    bundle: multi-file
 tools:
   - name: show_customer_health
     description: Show an interactive customer health dashboard.
