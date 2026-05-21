@@ -28,13 +28,33 @@ func TestCodecFor_UnknownFallsBackToDefault(t *testing.T) {
 		t.Fatal("CodecFor should never return nil")
 	}
 	// The fallback must hand back the exact codec the registry holds for the
-	// default version — not merely a codec whose Version() happens to match
-	// (v1Codec.Version() always returns DefaultVersion, so that would be
-	// vacuous). Comparing against the registry entry proves the fallback
+	// default version. Comparing against the registry entry proves the fallback
 	// branch in CodecFor actually selected DefaultVersion.
 	want := codecRegistry[DefaultVersion]
 	if c != want {
 		t.Errorf("unknown version did not fall back to the default-registry codec: got %#v want %#v", c, want)
+	}
+	// And the fallback codec reports the default version, not the unknown one.
+	if got := c.Version(); got != DefaultVersion {
+		t.Errorf("fallback codec Version() = %q, want %q", got, DefaultVersion)
+	}
+}
+
+// TestCodecFor_VersionReportsSelectedKey proves the D-055 fix: the codec
+// CodecFor returns reports the protocol version it was selected as — the
+// registry key — not a hardcoded DefaultVersion.
+func TestCodecFor_VersionReportsSelectedKey(t *testing.T) {
+	for _, v := range KnownVersions() {
+		if got := CodecFor(v).Version(); got != v {
+			t.Errorf("CodecFor(%q).Version() = %q, want %q", v, got, v)
+		}
+		strict, err := CodecForStrict(v)
+		if err != nil {
+			t.Fatalf("CodecForStrict(%q): %v", v, err)
+		}
+		if got := strict.Version(); got != v {
+			t.Errorf("CodecForStrict(%q).Version() = %q, want %q", v, got, v)
+		}
 	}
 }
 

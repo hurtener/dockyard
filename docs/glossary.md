@@ -133,6 +133,14 @@ raises routing flags for oversized or misrouted payloads. Built once per tool by
 `Builder.Register`; safe for concurrent tool calls. RFC §5, §6.3. D-043, D-044,
 D-045.
 
+**Handler panic recovery** — the toolchain-enforced guarantee that an app
+author's tool or resource handler that panics on a live MCP request becomes a
+typed error result, never a server-process crash. Every handler-invocation path
+in `runtime/server` routes through `guardHandler`, which `recover()`s a panic
+into a `*panicError` (wrapping the `ErrHandlerPanic` sentinel) and logs the
+stack. The "never panic across the MCP boundary" rule made a guarantee, not a
+docstring instruction. AGENTS.md §5, §13. D-053.
+
 **Host profile** — a pluggable set of host-specific *derivation functions* (e.g.
 deriving Claude's signed `claudemcpcontent.com` iframe origin). A host profile is
 algorithms, not a capability matrix. RFC §7.5. D-012.
@@ -216,6 +224,13 @@ the app opts into. `internal/manifest` parses and shape-checks the `quality`
 block; the gates are *enforced* by `dockyard validate`. RFC §4.2, §9.4. D-035.
 
 ## R
+
+**Resource template** — a server registration that serves a *family* of
+resources addressed by an RFC 6570 URI template (e.g. `ui://app/{view}`) rather
+than one fixed URI. Exposed as `runtime/server.Server.AddResourceTemplate` with
+a typed `ResourceTemplateDef`; the handler receives the concrete URI a host
+requested. The typed surface Phase 10's `ui://` auto-discovery composes. RFC
+§5.1. D-054.
 
 **Routing flag** — a typed, non-fatal signal the handler runtime raises when a
 tool's output is oversized (`FlagOversizeOutput` — serialized `structuredContent`

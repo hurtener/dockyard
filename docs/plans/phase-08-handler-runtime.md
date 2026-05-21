@@ -88,6 +88,16 @@ None.
       typed `tool.Flag`.
 - [ ] The handler runtime is safe under concurrent tool calls, proven under
       `-race`.
+- [ ] A panicking handler does not crash the server process — the panic is
+      recovered into a typed error result (D-053).
+
+> **Depth-remediation addendum (2026-05-21).** A 4-way audit found the
+> handler-invocation path was not panic-guarded: `handlerRuntime.serve` calls
+> the app author's handler directly. Panic safety is fixed one layer down, at
+> the `runtime/server` boundary the handler runtime installs through —
+> `AddToolWithSchemas`'s handler wrapper now routes the invocation through
+> `guardHandler` (D-053). The handler runtime needs no separate guard: every
+> tool it registers reaches the server through that wrapped path.
 
 ## Files added or changed
 

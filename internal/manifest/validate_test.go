@@ -32,6 +32,10 @@ func TestValidate_InvalidFixtures(t *testing.T) {
 		{"bad-visibility.yaml", "unknown value \"everyone\"", true},
 		{"bad-contract-ref.yaml", "not a Go type reference", true},
 		{"bad-no-tools.yaml", "at least one tool is required", true},
+		{"bad-csp-origin.yaml", "must carry an explicit scheme", true},
+		{"bad-csp-single-file.yaml", "single-file", true},
+		{"bad-orphan-app.yaml", "referenced by no tool", true},
+		{"bad-task-support-conflict.yaml", "must agree on task_support", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.file, func(t *testing.T) {
@@ -179,6 +183,77 @@ func TestValidate_DuplicateAppID(t *testing.T) {
 	err := m.Validate()
 	if err == nil || !strings.Contains(err.Error(), "duplicate app id") {
 		t.Errorf("want a duplicate app id fault, got %v", err)
+	}
+}
+
+// TestValidateOrigin pins the CSP origin well-formedness check.
+func TestValidateOrigin(t *testing.T) {
+	good := []string{
+		"https://api.company.com",
+		"http://localhost:8080",
+		"wss://stream.company.com",
+		"https://api.company.com:8443",
+	}
+	for _, o := range good {
+		if reason := validateOrigin(o); reason != "" {
+			t.Errorf("validateOrigin(%q) = %q, want accepted", o, reason)
+		}
+	}
+	bad := []string{
+		"",                             // empty
+		"api.company.com",              // no scheme
+		"ftp://files.company.com",      // disallowed scheme
+		"https://api.company.com/path", // carries a path
+		"https://api.company.com?q=1",  // carries a query
+		"https://api.company.com#frag", // carries a fragment
+		"https://",                     // no host
+	}
+	for _, o := range bad {
+		if reason := validateOrigin(o); reason == "" {
+			t.Errorf("validateOrigin(%q) = accepted, want rejected", o)
+		}
+	}
+}
+
+// TestValidate_SingleFileBundleAllowsEmptyCSP confirms the bundle/CSP coherence
+// check does not fire on the secure default: a single-file bundle with no CSP
+// origins is exactly the RFC §7.4 recommended shape and must validate cleanly.
+func TestValidate_SingleFileBundleAllowsEmptyCSP(t *testing.T) {
+	m := &Manifest{
+		Name: "single-clean", Title: "Single Clean", Version: "1.0.0",
+		Runtime: Runtime{
+			Transports: []Transport{TransportStdio},
+			UI:         &RuntimeUI{Framework: UIFrameworkSvelte, Bundle: BundleSingleFile},
+		},
+		Tools: []Tool{{Name: "t", Description: "d", Input: "p.In", Output: "p.Out", UI: "w"}},
+		Apps: []App{{
+			ID: "w", URI: "ui://single-clean/main", Entry: "w.svelte",
+			DisplayModes: []DisplayMode{DisplayModeInline},
+		}},
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("single-file bundle with no CSP origins should validate: %v", err)
+	}
+}
+
+// TestValidate_TaskSupportAgreementOnSameApp confirms tools that wire the same
+// app with the SAME task_support validate cleanly — the coherence check flags
+// only a genuine disagreement.
+func TestValidate_TaskSupportAgreementOnSameApp(t *testing.T) {
+	m := &Manifest{
+		Name: "task-agree", Title: "Task Agree", Version: "1.0.0",
+		Runtime: Runtime{Transports: []Transport{TransportStdio}},
+		Tools: []Tool{
+			{Name: "a", Description: "d", Input: "p.In", Output: "p.Out", UI: "w", TaskSupport: TaskSupportRequired},
+			{Name: "b", Description: "d", Input: "p.In", Output: "p.Out", UI: "w", TaskSupport: TaskSupportRequired},
+		},
+		Apps: []App{{
+			ID: "w", URI: "ui://task-agree/main", Entry: "w.svelte",
+			DisplayModes: []DisplayMode{DisplayModeInline},
+		}},
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("tools agreeing on task_support should validate: %v", err)
 	}
 }
 

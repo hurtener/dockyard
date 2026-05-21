@@ -30,6 +30,15 @@
 // retires the temporary exported MCP() SDK seam (D-021, D-042): the
 // Dockyard-owned registration and transport surface is now complete.
 //
+// Panic safety is a toolchain-enforced guarantee, not a docstring instruction
+// (AGENTS.md §5, §13; D-053): every tool and resource handler invocation is
+// routed through guardHandler, which recovers a panicking app-author handler
+// into a typed error (ErrHandlerPanic) so a bad handler on a live tools/call or
+// resources/read degrades into a clean error result instead of crashing the
+// server process. AddResourceTemplate (D-054) registers an RFC 6570 URI-template
+// family — the typed surface the Apps layer's ui:// auto-discovery composes —
+// with the same panic-recovered handler invocation as AddResource.
+//
 // The Apps and Tasks extension layers and the obs/v1 stream land in later
 // phases (RFC §5.3, §7, §8, §11); the seams here are kept deliberately small so
 // those phases extend without reshaping this package.

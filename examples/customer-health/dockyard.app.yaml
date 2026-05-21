@@ -11,7 +11,11 @@ runtime:
   transports: [stdio, http]      # which deployment modes this app supports
   ui:
     framework: svelte            # V1: svelte only
-    bundle: single-file          # default; deny-by-default CSP (RFC §7.4)
+    # single-file is the default — zero external origins, deny-by-default CSP
+    # just works (RFC §7.4). This example uses multi-file precisely because it
+    # opts into an external csp.connect origin below; a single-file bundle
+    # loads no external origin, so the two are mutually exclusive.
+    bundle: multi-file
 
 tools:
   - name: show_customer_health

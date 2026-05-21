@@ -1,0 +1,21 @@
+name: bad-csp-single-file
+title: Bad CSP Single File
+version: 1.0.0
+runtime:
+  transports: [stdio]
+  ui:
+    framework: svelte
+    bundle: single-file
+tools:
+  - name: echo
+    description: Echo.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput
+    ui: widget
+apps:
+  - id: widget
+    uri: ui://bad-csp-single-file/main
+    entry: web/src/apps/widget.svelte
+    display_modes: [inline]
+    csp:
+      connect: [https://api.company.com]

@@ -80,6 +80,19 @@ None. Phase 07 implements brief 03's transport and security guidance directly.
 - [ ] The `InMemoryTransport` path is tested.
 - [ ] A concurrent-reuse test proves the server is safe under concurrent use.
 - [ ] D-021 resolved: `Server.MCP()` is unexported (no external consumer).
+- [ ] Resource templates register and read back over a transport (D-054).
+- [ ] A panicking tool or resource handler, called over a real transport,
+      returns an error result and the server process survives (D-053).
+
+> **Depth-remediation addendum (2026-05-21).** A 4-way audit found two gaps in
+> the surface this phase shipped. (1) Panic safety was enforced only on the
+> registration path (`addToolSafe`/`addResourceSafe`); the handler-invocation
+> path was unguarded, so a panicking tool/resource handler crashed the server
+> process — fixed by `guardHandler` (`recover.go`), which `recover()`s every
+> tool and resource handler invocation into a typed error (D-053). (2)
+> `AddResourceTemplate` was not exposed despite the SDK offering it and Phase 10
+> needing it for `ui://` auto-discovery — added as a typed, panic-recovered
+> surface consistent with `AddResource` (D-054).
 
 ## Files added or changed
 
@@ -107,6 +120,14 @@ type ResourceContent struct { MIMEType string; Text string; Blob []byte }
 type ResourceFunc func(ctx context.Context, uri string) (ResourceContent, error)
 func (s *Server) AddResource(def ResourceDef, fn ResourceFunc) error
 func (s *Server) Resources() []string
+
+// Resource templates — RFC 6570 URI-template families (resource.go; D-054)
+type ResourceTemplateDef struct { URITemplate, Name, Title, Description, MIMEType string }
+func (s *Server) AddResourceTemplate(def ResourceTemplateDef, fn ResourceFunc) error
+func (s *Server) ResourceTemplates() []string
+
+// Panic safety — every handler-invocation path is recover-wrapped (recover.go; D-053)
+var ErrHandlerPanic error
 
 // Streamable-HTTP transport + explicit security (http.go)
 type HTTPSecurity struct {
