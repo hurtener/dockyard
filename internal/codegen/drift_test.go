@@ -1,6 +1,7 @@
 package codegen_test
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -109,6 +110,85 @@ func TestCrossCheck_NonObjectSchema(t *testing.T) {
 	scalar := mustScalarSchema(t)
 	assertDrift(t, codegen.CrossCheck(scalar, "X", []byte("export interface X {\n  y: string;\n}")),
 		"not an object")
+}
+
+// --- CrossCheck: value-type drift (finding 6 / D-051) -----------------------
+
+func TestCrossCheck_TypeDivergence(t *testing.T) {
+	t.Parallel()
+	schema, err := codegen.SchemaFor[showRevenueOutput]()
+	if err != nil {
+		t.Fatalf("SchemaFor: %v", err)
+	}
+	// `total` is a number in the schema but rendered as a string in this TS —
+	// exactly the value-type divergence findings 1–4 produce. The name set and
+	// optionality all match, so only the new type check can catch it.
+	ts := []byte("export interface ShowRevenueOutput {\n" +
+		"  headline: string;\n" +
+		"  total: string;\n" +
+		"  lines: number[];\n" +
+		"  currency?: string;\n" +
+		"}\n")
+	err = codegen.CrossCheck(schema, "ShowRevenueOutput", ts)
+	assertDrift(t, err, "total")
+	if !strings.Contains(err.Error(), "number in the schema but string in TypeScript") {
+		t.Errorf("error should describe the type divergence, got %v", err)
+	}
+}
+
+func TestCrossCheck_ArrayVsObjectDivergence(t *testing.T) {
+	t.Parallel()
+	schema, err := codegen.SchemaFor[showRevenueOutput]()
+	if err != nil {
+		t.Fatalf("SchemaFor: %v", err)
+	}
+	// `lines` is an array in the schema but an index object in this TS.
+	ts := []byte("export interface ShowRevenueOutput {\n" +
+		"  headline: string;\n" +
+		"  total: number;\n" +
+		"  lines: { [key: string]: number};\n" +
+		"  currency?: string;\n" +
+		"}\n")
+	assertDrift(t, codegen.CrossCheck(schema, "ShowRevenueOutput", ts), "lines")
+}
+
+func TestCrossCheck_TygoIntAnnotationIsNotDrift(t *testing.T) {
+	t.Parallel()
+	// tygo renders an int as `number /* int */`; the `/* int */` annotation
+	// must not be mistaken for a divergent type.
+	schema, err := codegen.SchemaFor[nestedOutput]()
+	if err != nil {
+		t.Fatalf("SchemaFor: %v", err)
+	}
+	ts := []byte("export interface NestedOutput {\n" +
+		"  summary: string;\n" +
+		"  score: number /* int */;\n" +
+		"  signals: HealthSignal[];\n" +
+		"}\n")
+	if err := codegen.CrossCheck(schema, "NestedOutput", ts); err != nil {
+		t.Errorf("a tygo `/* int */` annotation should not be read as drift, got: %v", err)
+	}
+}
+
+func TestCrossCheck_UnconstrainedTypeIsNeverDrift(t *testing.T) {
+	t.Parallel()
+	// A json.RawMessage property is an unconstrained schema; whatever TS type it
+	// is paired with, it must not report a type drift.
+	type rawCarrier struct {
+		Note    string          `json:"note"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	schema, err := codegen.SchemaFor[rawCarrier]()
+	if err != nil {
+		t.Fatalf("SchemaFor: %v", err)
+	}
+	ts := []byte("export interface RawCarrier {\n" +
+		"  note: string;\n" +
+		"  payload: any;\n" +
+		"}\n")
+	if err := codegen.CrossCheck(schema, "RawCarrier", ts); err != nil {
+		t.Errorf("an unconstrained (json.RawMessage) property should not drift, got: %v", err)
+	}
 }
 
 // --- CrossCheck: the documented WithNullOptional limitation ------------------

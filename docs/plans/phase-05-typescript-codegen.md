@@ -180,12 +180,21 @@ var ErrStaleGenerated = errors.New(...)
   surfaces as a tygo parse/convert error wrapped by Phase 05. Mitigation: keep
   contract structs simple (boring generated code is the mandate anyway) and
   golden-test the supported shapes.
-- **R2 — cross-check fidelity.** `CrossCheck` compares property name sets and
-  optionality, not full structural type equality — a same-named property with a
-  divergent value type is not caught structurally. This is bounded: both
-  artifacts derive from the same Go field, so a type divergence would be a tygo
-  or jsonschema-go bug, and golden tests pin each generator independently. Full
-  type-graph equality is a possible later hardening (noted in D-034).
+- **R2 — cross-check fidelity.** `CrossCheck` compares property name sets,
+  optionality, and a coarse value-type *kind* (string/number/boolean/array/
+  object) — extended in the depth-remediation (D-051) after the original
+  name-and-optionality-only check was found structurally blind to the value-type
+  divergences the depth audit's findings 1–4 produced. It still does not walk the
+  full type graph: it does not descend into nested objects or array element
+  types, and a property typed by a named type or an unconstrained schema is
+  treated as kind-compatible. Full type-graph equality remains a possible later
+  hardening (noted in D-034).
+- **R2a — embedded structs (depth-remediation, D-051).** tygo emits an embedded
+  (anonymous) struct field as a *named property*, but the JSON Schema — and Go's
+  own `encoding/json` — inline the embedded struct's fields. `typeDeclSource` now
+  flattens embedded struct fields at the AST level before tygo runs, so the
+  TypeScript matches the schema. An embedded type from another package is left
+  for tygo (its fields are not visible to the flattener).
 - **R3 — RFC §18 Q-6.** The `google/jsonschema-go` version is kept in lockstep
   with the SDK (D-030); unchanged by this phase.
 

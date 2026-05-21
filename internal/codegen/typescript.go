@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -162,6 +163,14 @@ func TypeScriptForDir(dir string, opts ...TSOption) ([]byte, error) {
 // passing it a full file with a package clause fails to parse, and passing it
 // functions or imports produces noise. Re-printing through go/printer also
 // normalises formatting, which keeps the generated TypeScript deterministic.
+//
+// Before re-rendering, embedded (anonymous) struct fields are flattened: an
+// anonymous field whose type is another struct declared in the same source is
+// replaced, in place, by that struct's fields (D-051). tygo otherwise emits an
+// embedded type as a *named property* (`Base: Base;`), but the JSON Schema
+// generator — and Go's own encoding/json — *inline* an embedded struct's
+// fields. Flattening makes the TypeScript artifact agree with the schema and
+// with the wire format the UI actually deserializes.
 func typeDeclSource(goSource string) (string, error) {
 	src := goSource
 	// A bare fragment (no package clause) is not a valid Go file; wrap it so the
@@ -174,6 +183,8 @@ func typeDeclSource(goSource string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parse contract source: %w", err)
 	}
+
+	flattenEmbeddedStructs(file)
 
 	var out bytes.Buffer
 	pcfg := printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
@@ -193,6 +204,147 @@ func typeDeclSource(goSource string) (string, error) {
 		}
 	}
 	return out.String(), nil
+}
+
+// flattenEmbeddedStructs rewrites every struct type declared in file so that
+// each embedded (anonymous) field referencing another locally declared struct
+// is replaced by that struct's own fields (D-051).
+//
+// The rewrite matches Go's encoding/json semantics:
+//   - An embedded struct's fields are promoted into the embedding struct.
+//   - A field of the outer struct shadows a promoted field of the same JSON
+//     name ("outer wins"); the promoted duplicate is dropped.
+//   - Promotion is transitive: an embedded struct that itself embeds another is
+//     flattened first, so its already-promoted fields carry through.
+//
+// Only embedded *structs declared in the same source* are flattened — an
+// embedded type from another package (e.g. an SDK type) is left as tygo's
+// named property, since its fields are not visible here. Embedded named types
+// of a non-struct kind are likewise left untouched.
+func flattenEmbeddedStructs(file *ast.File) {
+	structs := make(map[string]*ast.StructType)
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			ts, ok := spec.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+			if st, ok := ts.Type.(*ast.StructType); ok {
+				structs[ts.Name.Name] = st
+			}
+		}
+	}
+	done := make(map[string]bool)
+	for name := range structs {
+		flattenStruct(name, structs, done, make(map[string]bool))
+	}
+}
+
+// flattenStruct flattens one named struct in place, recursing into any embedded
+// struct first so promotion is transitive. inProgress guards a defensive cycle
+// (a recursive struct never reaches the TypeScript path with a schema, but the
+// guard keeps this walk total regardless).
+func flattenStruct(name string, structs map[string]*ast.StructType, done, inProgress map[string]bool) {
+	if done[name] || inProgress[name] {
+		return
+	}
+	st := structs[name]
+	if st == nil || st.Fields == nil {
+		done[name] = true
+		return
+	}
+	inProgress[name] = true
+
+	flattened := make([]*ast.Field, 0, len(st.Fields.List))
+	for _, f := range st.Fields.List {
+		embeddedName, ok := embeddedStructName(f)
+		if !ok {
+			flattened = append(flattened, f)
+			continue
+		}
+		if _, isLocalStruct := structs[embeddedName]; !isLocalStruct {
+			// Embedded type is not a locally declared struct — leave it for tygo.
+			flattened = append(flattened, f)
+			continue
+		}
+		flattenStruct(embeddedName, structs, done, inProgress)
+		flattened = append(flattened, structs[embeddedName].Fields.List...)
+	}
+
+	// Apply "outer wins": a later field with the same JSON name shadows an
+	// earlier (promoted) one. Walk back-to-front, keeping the last occurrence.
+	seen := make(map[string]bool)
+	deduped := make([]*ast.Field, 0, len(flattened))
+	for i := len(flattened) - 1; i >= 0; i-- {
+		key := fieldJSONKey(flattened[i])
+		if key != "" && seen[key] {
+			continue
+		}
+		if key != "" {
+			seen[key] = true
+		}
+		deduped = append(deduped, flattened[i])
+	}
+	for l, r := 0, len(deduped)-1; l < r; l, r = l+1, r-1 {
+		deduped[l], deduped[r] = deduped[r], deduped[l]
+	}
+
+	st.Fields.List = deduped
+	inProgress[name] = false
+	done[name] = true
+}
+
+// embeddedStructName returns the type name of an embedded (anonymous) field —
+// unwrapping a leading pointer — and true when f is such a field. A field with
+// explicit names, or an anonymous field of a non-ident type, returns false.
+func embeddedStructName(f *ast.Field) (string, bool) {
+	if len(f.Names) != 0 {
+		return "", false
+	}
+	expr := f.Type
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	if ident, ok := expr.(*ast.Ident); ok {
+		return ident.Name, true
+	}
+	return "", false
+}
+
+// fieldJSONKey returns the JSON property name a struct field renders to — the
+// `json` tag name when present and non-empty, otherwise the Go field name. It
+// returns "" for an embedded field that survived flattening (no JSON identity
+// to dedupe on) or a `json:"-"` field.
+func fieldJSONKey(f *ast.Field) string {
+	if len(f.Names) == 0 {
+		return ""
+	}
+	goName := f.Names[0].Name
+	if f.Tag == nil {
+		return goName
+	}
+	// f.Tag.Value is the raw literal including its back-quotes; reflect.StructTag
+	// expects the unquoted tag body.
+	tag := reflect.StructTag(strings.Trim(f.Tag.Value, "`")).Get("json")
+	if tag == "" {
+		return goName
+	}
+	name := tag
+	if i := strings.IndexByte(tag, ','); i >= 0 {
+		name = tag[:i]
+	}
+	switch name {
+	case "-":
+		return ""
+	case "":
+		return goName
+	default:
+		return name
+	}
 }
 
 // hasPackageClause reports whether src already opens with a `package` clause,

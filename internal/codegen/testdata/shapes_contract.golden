@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "properties": {
+    "when": {
+      "type": "string",
+      "description": "the event timestamp",
+      "format": "date-time"
+    },
+    "payload": {
+      "description": "arbitrary embedded JSON"
+    },
+    "level": {
+      "type": "string",
+      "description": "the event severity",
+      "enum": [
+        "info",
+        "warn",
+        "error"
+      ]
+    },
+    "levels": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "string",
+        "enum": [
+          "info",
+          "warn",
+          "error"
+        ]
+      }
+    }
+  },
+  "required": [
+    "when",
+    "payload",
+    "level"
+  ],
+  "additionalProperties": false
+}
