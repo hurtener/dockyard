@@ -1,10 +1,13 @@
 package tool_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
+
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
@@ -57,6 +60,71 @@ func TestConcurrentBuildAndRegister(t *testing.T) {
 	close(errs)
 	for err := range errs {
 		t.Error(err)
+	}
+}
+
+// TestConcurrentToolCalls proves the Phase 08 handler runtime — a reusable
+// artifact — is safe under concurrent tool calls (AGENTS.md §5, §14). N
+// goroutines call one registered tool whose handler misroutes JSON into Text,
+// so every call raises a flag; the test asserts (a) no data race accumulating
+// flags, (b) every call's result is independent, (c) the flag count equals the
+// call count.
+func TestConcurrentToolCalls(t *testing.T) {
+	t.Parallel()
+	const calls = 32
+
+	s := newServer(t)
+	b := tool.New[revenueInput, revenueOutput]("concurrent").
+		Handler(func(_ context.Context, in revenueInput) (tool.Result[revenueOutput], error) {
+			return tool.Result[revenueOutput]{
+				// JSON-shaped Text raises FlagMisroutedContent on every call.
+				Text:       `{"period":"` + in.Period + `"}`,
+				Structured: revenueOutput{Headline: in.Period, Total: 1},
+			}, nil
+		})
+	if err := b.Register(s); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	session := connect(t, s)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, calls)
+	for i := range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			period := fmt.Sprintf("2026-Q%d", i)
+			res, err := session.CallTool(context.Background(), &mcpsdk.CallToolParams{
+				Name:      "concurrent",
+				Arguments: revenueInput{Period: period},
+			})
+			if err != nil {
+				errs <- fmt.Errorf("call %d: %w", i, err)
+				return
+			}
+			if res.IsError {
+				errs <- fmt.Errorf("call %d: IsError", i)
+				return
+			}
+			raw, _ := json.Marshal(res.StructuredContent)
+			var out revenueOutput
+			if err := json.Unmarshal(raw, &out); err != nil {
+				errs <- fmt.Errorf("call %d: unmarshal: %w", i, err)
+				return
+			}
+			if out.Headline != period {
+				errs <- fmt.Errorf("call %d: headline = %q, want %q (results crossed)", i, out.Headline, period)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+
+	if flags := b.Flags(); len(flags) != calls {
+		t.Errorf("Flags() = %d flags, want %d (one misroute flag per call)", len(flags), calls)
 	}
 }
 

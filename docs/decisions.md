@@ -787,3 +787,81 @@ The SDK `*mcp.Server` is now reached only through the unexported `s.mcp` field,
 restoring RFC §5.4 / P3 — the runtime surface exposes no raw SDK or protocol
 structs. This decision supersedes D-021; the bounded leak D-021 tracked is
 closed.
+
+---
+
+## D-043 — The empty `TextContent` block is suppressed with a non-nil empty `Content` slice
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §6.3, `runtime/server` (`tool.go`), phase plan
+`phase-08-handler-runtime`
+**Why:** The Wave 2 checkpoint audit flagged that `runtime/server`'s
+`AddToolWithSchemas` emitted an empty `TextContent` block whenever a handler
+returned no model-facing text — its handler unconditionally set
+`res.Content = []Content{&TextContent{Text: out.Text}}`, so an empty `Text`
+produced a `TextContent{Text: ""}` block. An empty text block is noise in the
+model context and a wire-shape defect. The naive fix — leaving `res.Content`
+nil when `Text` is empty — is wrong: the go-sdk auto-fills a nil `Content` with
+the JSON of the typed output (`server.go`, "If the Content field isn't being
+used …"), which would route the entire UI-facing `structuredContent` payload
+into `content[]` and pollute the model context — exactly the RFC §6.3 misroute.
+Phase 08 therefore sets `res.Content` to a **non-nil but empty** slice
+(`[]mcpsdk.Content{}`) when `Text == ""`: a non-nil slice still suppresses the
+SDK's auto-fill (the SDK only auto-fills when `Content == nil`), so no payload
+leaks, and no empty `TextContent` block is emitted either. A non-empty `Text`
+yields exactly one `TextContent` block, unchanged.
+
+---
+
+## D-044 — Edge argument validation is a typed Dockyard pass layered over the SDK's wire validation
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §5, §6.3, `runtime/tool` (`runtime.go`), `runtime/server`
+(`tool.go`), phase plan `phase-08-handler-runtime`
+**Why:** Phase 08's acceptance criterion requires invalid tool-call arguments to
+produce a *typed* error, not a panic and not a vague failure. The go-sdk
+already validates incoming arguments against the input schema at the wire and
+rejects a violation as a `CallToolResult` error before a typed handler runs —
+so the no-panic guarantee already holds. What the SDK does not give is a *typed
+Dockyard* error a contract-first in-process caller (the inspector, a contract
+test, a future obs bridge) can branch on. Phase 08 adds that layer: the
+`runtime/tool` handler runtime resolves the tool's generated input JSON Schema
+once at registration and validates incoming arguments against it at the catalog
+edge, before the handler runs, producing a typed `*ArgumentError` that wraps the
+`ErrInvalidArguments` sentinel. The raw, undecoded wire arguments are reached
+through a new `runtime/server` seam — `WithRawArguments` / `RawArguments` on the
+handler context — because validating the raw JSON catches violations that do
+not survive Go's decode (a missing required field decodes to a zero value; a
+type mismatch is silently coerced or dropped). When no raw arguments are present
+(an in-process invocation), the runtime re-serializes the decoded value to JSON
+and validates that — the `jsonschema-go` validator validates JSON-shaped data,
+not Go structs directly (upstream issue #23). The SDK pass remains as
+defense-in-depth at the wire; the Dockyard pass is the authoritative typed
+edge-validation surface for the contract-first handler runtime.
+
+---
+
+## D-045 — Oversized and misrouted payloads are non-fatal typed runtime flags, not errors
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §6.3, `runtime/tool` (`flag.go`, `runtime.go`), phase
+plan `phase-08-handler-runtime`
+**Why:** RFC §6.3 and brief 01 §3 (finding 7) warn that routing UI-shaped data
+into `content[]` pollutes and inflates the model context, and the braindump
+cautions against oversized output payloads. Phase 08 makes both observable as a
+**runtime** signal — complementing the static `dockyard validate` warning. The
+signal is a typed `tool.Flag` (`FlagOversizeOutput`, `FlagMisroutedContent`),
+not an error: a flag never fails the tool call. A large output may be entirely
+legitimate, and a host, not Dockyard, owns the decision to truncate or reject;
+failing the call would break a working tool over a heuristic. The oversize
+threshold is `DefaultOutputSizeBudget` = 256 KiB — a conservative default, not
+an MCP protocol limit. Misroute detection is high-confidence only: it fires when
+the model-facing `Text` parses whole as a JSON object or array; a bare JSON
+string, number, or boolean is legitimate model-facing text and is not flagged.
+Flags accumulate on the tool's `Builder` and are read through `Builder.Flags()`;
+a future `obs/v1` bridge consumes the same typed values. This mirrors brief 03
+R7's principle for `_meta`: a payload-routing defect surfaces in Dockyard's own
+typed surfaces before a host ever sees the result.
