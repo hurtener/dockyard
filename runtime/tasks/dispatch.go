@@ -144,7 +144,9 @@ func (e *Engine) handleCancel(ctx context.Context, params json.RawMessage) (json
 }
 
 // handleList serves tasks/list — a cursor-paginated listing (vendored spec,
-// "Listing Tasks"). It is reached only when tasks/list is advertised.
+// "Listing Tasks"). It is reached only when tasks/list is advertised. This
+// unscoped listing is used by the inspector and the unauthenticated path;
+// DispatchAs serves the auth-scoped listing for an identified requestor.
 func (e *Engine) handleList(ctx context.Context, params json.RawMessage) (json.RawMessage, error) {
 	p, err := e.codec.DecodeListTasksParams(params)
 	if err != nil {
@@ -154,6 +156,13 @@ func (e *Engine) handleList(ctx context.Context, params json.RawMessage) (json.R
 	if err != nil {
 		return nil, err
 	}
+	return e.encodeList(recs, next)
+}
+
+// encodeList projects a page of records into a ListTasksResult and encodes it
+// through the codec — the single encode path shared by the unscoped handleList
+// and the auth-scoped handleListScoped.
+func (e *Engine) encodeList(recs []TaskRecord, next string) (json.RawMessage, error) {
 	out := protocolcodec.ListTasksResult{NextCursor: next}
 	out.Tasks = make([]protocolcodec.Task, 0, len(recs))
 	for _, r := range recs {

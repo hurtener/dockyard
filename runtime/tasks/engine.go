@@ -55,9 +55,24 @@ type Options struct {
 	// AdvertiseList controls whether the tasks capability advertises tasks/list
 	// (and whether Dispatch serves it). The vendored spec requires a receiver
 	// that cannot identify requestors NOT to advertise tasks/list — Phase 14
-	// owns identifiability, so Phase 13 defaults this off and lets a caller
-	// that knows it can identify requestors opt in.
+	// owns identifiability, so this defaults off.
+	//
+	// AdvertiseList alone is not sufficient: tasks/list is served only when the
+	// engine can also identify requestors (RequestorIdentifiable). A receiver
+	// that opts AdvertiseList on but leaves RequestorIdentifiable off — the
+	// unauthenticated single-user stdio case — still does not advertise or
+	// serve tasks/list (brief 02 §4.5).
 	AdvertiseList bool
+	// RequestorIdentifiable declares that the deployment can identify the
+	// authorization context of each requestor — true for an authenticated HTTP
+	// deployment, false for unauthenticated single-user stdio. It gates both the
+	// tasks/list advertisement and auth-context binding: when false the engine
+	// withholds tasks/list entirely (RFC §8.5; brief 02 §4.5 "Avoid").
+	RequestorIdentifiable bool
+	// Lifecycle holds the manifest-tunable task-lifecycle limits — max TTL,
+	// default TTL, per-requestor concurrency cap, purge interval (RFC §8.5).
+	// The zero value disables every limit.
+	Lifecycle Lifecycle
 }
 
 // Engine is the server-side Tasks router and lifecycle owner (RFC §8.2). It is
@@ -65,16 +80,28 @@ type Options struct {
 // goroutines — every task created by [Engine.CreateForToolCall] runs on its
 // own goroutine and concurrent [Engine.Dispatch] calls are independent.
 type Engine struct {
-	store  TaskStore
-	codec  protocolcodec.Codec
-	log    *slog.Logger
-	genID  IDFunc
-	pollMS int64
-	listOn bool
+	store       TaskStore
+	codec       protocolcodec.Codec
+	log         *slog.Logger
+	genID       IDFunc
+	pollMS      int64
+	listOn      bool
+	identifiabl bool
+	life        Lifecycle
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc // taskID → cancel of its run goroutine
 	waiters map[string][]chan struct{}    // taskID → terminal-status signal channels
+	elicits map[string]*elicitation       // taskID → outstanding input_required prompt
+
+	sweep *purgeSweep // background TTL purge sweep; nil when no interval set
+}
+
+// elicitation is one outstanding input_required round-trip — the prompt the
+// handler raised and the live taskHandle waiting on the reply.
+type elicitation struct {
+	prompt InputPrompt
+	handle *taskHandle
 }
 
 // NewEngine constructs a Tasks engine over store. store must be non-nil — it is
@@ -88,6 +115,8 @@ func NewEngine(store TaskStore, opts *Options) (*Engine, error) {
 	genID := CryptoID
 	pollMS := defaultPollInterval
 	listOn := false
+	identifiable := false
+	var life Lifecycle
 	if opts != nil {
 		if opts.Logger != nil {
 			log = opts.Logger
@@ -99,17 +128,42 @@ func NewEngine(store TaskStore, opts *Options) (*Engine, error) {
 			pollMS = opts.PollInterval
 		}
 		listOn = opts.AdvertiseList
+		identifiable = opts.RequestorIdentifiable
+		life = opts.Lifecycle
 	}
-	return &Engine{
-		store:   store,
-		codec:   protocolcodec.CodecFor(protocolcodec.DefaultVersion),
-		log:     log,
-		genID:   genID,
-		pollMS:  pollMS,
-		listOn:  listOn,
-		cancels: make(map[string]context.CancelFunc),
-		waiters: make(map[string][]chan struct{}),
-	}, nil
+	// tasks/list is served only when it is BOTH opted-in AND the deployment can
+	// identify requestors — a receiver that cannot identify requestors must not
+	// advertise tasks/list (RFC §8.5; brief 02 §4.5).
+	e := &Engine{
+		store:       store,
+		codec:       protocolcodec.CodecFor(protocolcodec.DefaultVersion),
+		log:         log,
+		genID:       genID,
+		pollMS:      pollMS,
+		listOn:      listOn && identifiable,
+		identifiabl: identifiable,
+		life:        life,
+		cancels:     make(map[string]context.CancelFunc),
+		waiters:     make(map[string][]chan struct{}),
+		elicits:     make(map[string]*elicitation),
+	}
+	e.sweep = newPurgeSweep(store, life.PurgeInterval, log)
+	return e, nil
+}
+
+// StartSweep launches the background TTL purge sweep bound to ctx, if a purge
+// interval was configured (RFC §8.5). It is idempotent; the sweep stops when
+// ctx is cancelled or [Engine.StopSweep] is called. A no-op when no interval
+// was set — the in-memory single-user case.
+func (e *Engine) StartSweep(ctx context.Context) {
+	e.sweep.Start(ctx)
+}
+
+// StopSweep cancels the background TTL purge sweep and blocks until its
+// goroutine has exited. It is idempotent and safe even if StartSweep was never
+// called — the clean-shutdown half of the reusable-artifact contract.
+func (e *Engine) StopSweep() {
+	e.sweep.Stop()
 }
 
 // CreateToolCallParams names a task-augmented tools/call the engine should
@@ -121,11 +175,17 @@ type CreateToolCallParams struct {
 	// TaskMeta is the requestor's task-augmentation metadata (the `task` field
 	// of the request params) — currently just the requested TTL.
 	TaskMeta protocolcodec.TaskMeta
-	// AuthContext is an opaque requestor-identity token. Phase 13 records it on
-	// the task; Phase 14 binds access to it. Empty means unauthenticated.
+	// AuthContext is an opaque requestor-identity token. The engine records it
+	// on the task, binds tasks/get|result|cancel to it, and scopes tasks/list
+	// to it (RFC §8.5). Empty means an unauthenticated requestor.
 	AuthContext string
-	// Run is the underlying tool work. Required.
+	// Run is the underlying tool work, the simple sync-shaped handler shape.
+	// Exactly one of Run or Handle must be set.
 	Run RunFunc
+	// Handle is the TaskHandle-bearing handler shape — for a handler that needs
+	// progress, status, cooperative cancellation or input_required elicitation
+	// (RFC §8.4). Exactly one of Run or Handle must be set.
+	Handle HandleFunc
 }
 
 // CreateForToolCall accepts a task-augmented tools/call: it generates a task
@@ -138,28 +198,49 @@ type CreateToolCallParams struct {
 // internal/protocolcodec. The actual tool result is fetched later through
 // tasks/result once the task reaches a terminal status.
 func (e *Engine) CreateForToolCall(ctx context.Context, p CreateToolCallParams) (json.RawMessage, error) {
-	if p.Run == nil {
-		return nil, fmt.Errorf("%w: CreateForToolCall requires a non-nil Run", ErrInvalidParams)
+	if (p.Run == nil) == (p.Handle == nil) {
+		return nil, fmt.Errorf("%w: CreateForToolCall requires exactly one of Run or Handle", ErrInvalidParams)
 	}
+
+	// Enforce the per-requestor concurrent-task cap before anything durable is
+	// written — the brief 02 §4.6 resource-exhaustion guard (RFC §8.5).
+	if err := e.checkConcurrencyCap(ctx, p.AuthContext); err != nil {
+		return nil, err
+	}
+
 	id, err := e.genID()
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
 	poll := e.pollMS
+	// Clamp the requested TTL to the manifest max and apply the default; the
+	// enforced TTL fixes the task's expiry, which the purge sweep reaps on.
+	ttl := e.life.enforcedTTL(p.TaskMeta.TTL)
 	rec := TaskRecord{
 		ID:           id,
 		Status:       protocolcodec.TaskWorking,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		RequestedTTL: p.TaskMeta.TTL,
+		TTL:          ttl,
 		PollInterval: &poll,
 		Method:       "tools/call",
 		ToolName:     p.ToolName,
 		AuthContext:  p.AuthContext,
 	}
+	if ttl != nil {
+		rec.ExpiresAt = now.Add(time.Duration(*ttl) * time.Millisecond)
+	}
 	if err := e.store.Create(ctx, rec); err != nil {
 		return nil, fmt.Errorf("dockyard/runtime/tasks: create task: %w", err)
+	}
+
+	// Resolve the handler shape: a HandleFunc is adapted into a RunFunc bound to
+	// the task's TaskHandle, so the engine's single run path serves both shapes.
+	run := p.Run
+	if run == nil {
+		run = e.asRunFunc(id, p.Handle)
 	}
 
 	// The run goroutine is bound to a context the engine cancels on
@@ -174,7 +255,7 @@ func (e *Engine) CreateForToolCall(ctx context.Context, p CreateToolCallParams) 
 	// runTask owns runCtx for its whole lifetime and always releases cancel on
 	// exit; tasks/cancel may also call it early. Calling a CancelFunc twice is
 	// safe, so both paths are correct.
-	go e.runTask(runCtx, cancel, id, p.Run)
+	go e.runTask(runCtx, cancel, id, run)
 
 	e.log.InfoContext(ctx, "task created",
 		slog.String("taskId", id), slog.String("tool", p.ToolName))
@@ -257,12 +338,107 @@ func (e *Engine) waitChan(id string) chan struct{} {
 // Capability returns the protocolcodec.TasksServerCapability the engine
 // advertises — capability-driven, never a host matrix (AGENTS.md §6). It
 // always advertises cancel and task-augmented tools/call; tasks/list is
-// advertised only when AdvertiseList was set, honouring the vendored spec's
-// rule that a receiver unable to identify requestors must not advertise it.
+// advertised only when it was opted in AND the deployment can identify
+// requestors, honouring the vendored spec's rule that a receiver unable to
+// identify requestors must not advertise it (RFC §8.5; brief 02 §4.5).
 func (e *Engine) Capability() protocolcodec.TasksServerCapability {
 	return protocolcodec.TasksServerCapability{
 		List:      e.listOn,
 		Cancel:    true,
 		ToolsCall: true,
 	}
+}
+
+// checkConcurrencyCap rejects a task creation that would push authContext over
+// the per-requestor concurrent-task cap (RFC §8.5; brief 02 §4.6). A zero cap,
+// or an unidentifiable requestor (empty authContext under an engine that does
+// not identify requestors), is uncapped — the cap is a per-authorization-
+// context limit and is meaningless without an identity. Non-terminal tasks
+// count against the cap; terminal tasks have released their resources.
+func (e *Engine) checkConcurrencyCap(ctx context.Context, authContext string) error {
+	limit := e.life.MaxConcurrentPerRequestor
+	if limit <= 0 {
+		return nil
+	}
+	if authContext == "" && !e.identifiabl {
+		return nil
+	}
+	active := 0
+	cursor := ""
+	for {
+		recs, next, err := e.store.ListByAuthContext(ctx, authContext, cursor, 0)
+		if err != nil {
+			return fmt.Errorf("dockyard/runtime/tasks: concurrency-cap check: %w", err)
+		}
+		for _, r := range recs {
+			if !r.Status.IsTerminal() {
+				active++
+			}
+		}
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+	if active >= limit {
+		return fmt.Errorf("%w: requestor has %d active tasks, the per-requestor cap is %d",
+			ErrConcurrencyCap, active, limit)
+	}
+	return nil
+}
+
+// beginElicitation registers an outstanding input_required round-trip and moves
+// the task to the input_required status so a tasks/get poller sees it is
+// waiting (RFC §8.4). It is called by a taskHandle's RequireInput.
+func (e *Engine) beginElicitation(ctx context.Context, id string, prompt InputPrompt, h *taskHandle) error {
+	if _, err := e.store.Transition(ctx, id, protocolcodec.TaskInputRequired,
+		prompt.Message); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	e.elicits[id] = &elicitation{prompt: prompt, handle: h}
+	e.mu.Unlock()
+	return nil
+}
+
+// endElicitation clears an outstanding elicitation for id. It is idempotent.
+func (e *Engine) endElicitation(id string) {
+	e.mu.Lock()
+	delete(e.elicits, id)
+	e.mu.Unlock()
+}
+
+// PendingInput returns the prompt of the input_required elicitation outstanding
+// on task id, and true, or a zero prompt and false when none is outstanding. It
+// is the read side of the input_required round-trip — the transport mount or a
+// test driver polls it to discover a task is waiting for input.
+func (e *Engine) PendingInput(id string) (InputPrompt, bool) {
+	e.mu.Lock()
+	el, ok := e.elicits[id]
+	e.mu.Unlock()
+	if !ok {
+		return InputPrompt{}, false
+	}
+	return el.prompt, true
+}
+
+// SupplyInput delivers a requestor's reply to the input_required elicitation
+// outstanding on task id, unblocking the handler's RequireInput call. It
+// returns ErrTaskNotFound when id names no task and ErrNoPendingInput when the
+// task has no outstanding elicitation. It is the write side of the
+// input_required round-trip (RFC §8.4).
+func (e *Engine) SupplyInput(ctx context.Context, id string, resp InputResponse) error {
+	if _, err := e.store.Get(ctx, id); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	el, ok := e.elicits[id]
+	e.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("%w: task %q", ErrNoPendingInput, id)
+	}
+	if !el.handle.deliver(resp) {
+		return fmt.Errorf("%w: task %q is not waiting on input", ErrNoPendingInput, id)
+	}
+	return nil
 }

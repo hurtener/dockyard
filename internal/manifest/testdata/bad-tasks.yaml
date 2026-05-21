@@ -1,0 +1,16 @@
+name: bad-tasks
+title: Bad Tasks
+version: 1.0.0
+runtime:
+  transports: [stdio]
+tools:
+  - name: echo
+    description: Echo.
+    input: internal/contracts.EchoInput
+    output: internal/contracts.EchoOutput
+    task_support: optional
+tasks:
+  # A default TTL larger than the max TTL — the runtime would immediately clamp
+  # it, so the manifest is rejected (RFC §8.5).
+  max_ttl_millis: 60000
+  default_ttl_millis: 3600000

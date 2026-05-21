@@ -31,6 +31,24 @@ var (
 	// ErrInvalidParams is returned when a request's params are malformed.
 	// JSON-RPC -32602 (Invalid params).
 	ErrInvalidParams = errors.New("dockyard/runtime/tasks: invalid params")
+
+	// ErrConcurrencyCap is returned by task creation when the requestor is at
+	// the per-requestor concurrent-task cap (RFC §8.5; brief 02 §4.6). JSON-RPC
+	// -32602 (Invalid params): the requestor must retire a task before creating
+	// another — a request the receiver cannot currently honour.
+	ErrConcurrencyCap = errors.New("dockyard/runtime/tasks: per-requestor task concurrency cap reached")
+
+	// ErrNoPendingInput is returned by [Engine.SupplyInput] when the named task
+	// has no outstanding input_required elicitation. JSON-RPC -32602.
+	ErrNoPendingInput = errors.New("dockyard/runtime/tasks: task has no pending input_required elicitation")
+
+	// ErrCrossContext is returned when a tasks/get|result|cancel names a task
+	// that exists but belongs to a different authorization context — the
+	// auth-context binding rejection (RFC §8.5; brief 02 §4.5). It is
+	// deliberately indistinguishable to the caller from ErrTaskNotFound at the
+	// JSON-RPC layer (both map to -32602): the receiver must not leak the
+	// existence of another context's task. JSON-RPC -32602 (Invalid params).
+	ErrCrossContext = errors.New("dockyard/runtime/tasks: task not found")
 )
 
 // JSON-RPC error codes used by the Tasks engine, per the vendored spec's
@@ -56,6 +74,9 @@ func JSONRPCCode(err error) int {
 	case errors.Is(err, ErrTaskNotFound),
 		errors.Is(err, ErrAlreadyTerminal),
 		errors.Is(err, ErrInvalidParams),
+		errors.Is(err, ErrConcurrencyCap),
+		errors.Is(err, ErrNoPendingInput),
+		errors.Is(err, ErrCrossContext),
 		errors.Is(err, protocolcodec.ErrMalformedMeta):
 		return CodeInvalidParams
 	default:

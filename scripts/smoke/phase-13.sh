@@ -82,16 +82,26 @@ else
   skip "runtime/tasks/capability.go not built — capability check deferred"
 fi
 
-# 7. Every tasks/* wire shape goes through internal/protocolcodec (P3):
+# 7. Every tasks/* WIRE shape goes through internal/protocolcodec (P3):
 #    runtime/tasks imports protocolcodec and hand-builds no raw envelope keys.
 #    A struct-tagged `json:"..."` for a Tasks envelope key outside the seam is
 #    the drift this guards; a slog field name is not a wire shape, so the check
 #    matches only JSON struct tags. The mechanical, module-wide P3 guard is
 #    TestNoRawWireTypeImportsOutsideSeam in internal/protocolcodec.
+#
+#    Two exclusions: (a) *_test.go — a test legitimately DECODES a wire shape
+#    into a local struct, which is not the runtime hand-building one; (b)
+#    storedriver.go — Phase 14's durable TaskStore persists task rows as a
+#    versioned, driver-owned on-disk JSON format (taskRow) that is deliberately
+#    NOT a protocol wire shape: it is an internal persistence format, distinct
+#    from protocolcodec.Task, and never crosses the MCP boundary. P3 for
+#    storedriver.go is enforced by the import guard above (it imports no raw
+#    wire types) and by D-070.
 if [ -f runtime/tasks/dispatch.go ]; then
+  wire_files=$(ls runtime/tasks/*.go | grep -v '_test\.go$' | grep -v 'storedriver\.go$')
   if grep -rq 'internal/protocolcodec' runtime/tasks/*.go \
-     && ! grep -rEq 'json:"(taskId|nextCursor|statusMessage|pollInterval|createdAt|lastUpdatedAt)"' \
-          runtime/tasks/*.go; then
+     && ! grep -lE 'json:"(taskId|nextCursor|statusMessage|pollInterval|createdAt|lastUpdatedAt)"' \
+          $wire_files >/dev/null 2>&1; then
     ok "runtime/tasks routes wire shapes through protocolcodec — no raw keys (P3)"
   else
     fail "runtime/tasks constructs a raw Tasks envelope shape (P3 violation)"

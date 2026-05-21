@@ -293,7 +293,7 @@ func TestTasksList_NotAdvertisedIsMethodNotFound(t *testing.T) {
 // tasks and a cursor when advertised.
 func TestTasksList_PaginatesWhenAdvertised(t *testing.T) {
 	t.Parallel()
-	e := newEngine(t, &Options{AdvertiseList: true})
+	e := newEngine(t, &Options{AdvertiseList: true, RequestorIdentifiable: true})
 	for i := 0; i < 3; i++ {
 		taskIDOf(t, e, instantRun(json.RawMessage(`{}`), nil))
 	}
@@ -342,7 +342,7 @@ func TestEngineCapability(t *testing.T) {
 	if !off.Cancel || !off.ToolsCall {
 		t.Error("cancel + tools.call must always be advertised")
 	}
-	on := newEngine(t, &Options{AdvertiseList: true}).Capability()
+	on := newEngine(t, &Options{AdvertiseList: true, RequestorIdentifiable: true}).Capability()
 	if !on.List {
 		t.Error("AdvertiseList did not enable the list capability")
 	}
