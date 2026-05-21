@@ -1239,6 +1239,9 @@ pointing at an App not yet discovered — the natural pre-discovery state, which
 `Load`'s cross-reference check would reject — `WriteDiscoveredApps` parses
 without the cross-reference checks and applies full validation only to the
 merged result. A comment-preserving manifest editor is a deliberate deferral.
+
+--
+
 ## D-059 — The bridge shell negotiates display modes by capability, never a host matrix
 
 **Date:** 2026-05-21
@@ -1295,6 +1298,9 @@ codegen lands, its generated `contracts.ts` must structurally satisfy
 `ToolContract` (a `contracts` object of `ToolContract` values keyed by tool name)
 for the typed `structuredContent` path to hold — recorded here so the obligation
 is not lost.
+
+--
+
 ## D-062 — `_meta.ui.domain` is auto-derived through a pluggable host-profile seam
 
 **Date:** 2026-05-21
