@@ -230,7 +230,15 @@ func (c *captureWriter) Write(b []byte) (int, error) { return c.body.Write(b) }
 // result's `capabilities` object before relaying it to the client. The SDK has
 // no native capabilities.tasks field (the Tasks extension is experimental —
 // RFC §8.2), so the mount injects it here; the value comes from the engine's
-// codec (P3). A non-JSON or streamed (SSE) response is relayed unchanged.
+// codec (P3).
+//
+// The go-sdk's streamable-HTTP transport frames the initialize response in one
+// of two ways: a plain `application/json` body, or a `text/event-stream` (SSE)
+// body carrying the JSON-RPC response in a `data:` line. The mount handles
+// BOTH — a real streamable-HTTP deployment uses SSE framing, so injecting only
+// into the plain-JSON case would silently drop the capability on the wire
+// (the wiring gap the Wave 5 checkpoint surfaced; see D-072). A response shape
+// the mount does not recognise is relayed unchanged rather than corrupted.
 func (m *Mount) serveInitialize(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	capW := newCaptureWriter()
 	next.ServeHTTP(capW, r)
@@ -247,23 +255,72 @@ func (m *Mount) serveInitialize(w http.ResponseWriter, r *http.Request, next htt
 
 	ct := capW.header.Get("Content-Type")
 	body := capW.body.Bytes()
-	// Only a plain JSON response body carries an inline initialize result; an
-	// SSE-framed response is relayed untouched.
-	if capW.status != http.StatusOK || ct == "" ||
-		!bytes.HasPrefix([]byte(ct), []byte("application/json")) {
+	if capW.status != http.StatusOK || ct == "" {
 		relay(body)
 		return
 	}
-	merged, err := mergeTasksCapability(body, m.engine)
-	if err != nil {
-		// The result shape was unexpected — relay the SDK response as-is
-		// rather than corrupt the handshake.
+
+	switch {
+	case bytes.HasPrefix([]byte(ct), []byte("application/json")):
+		merged, err := mergeTasksCapability(body, m.engine)
+		if err != nil {
+			// The result shape was unexpected — relay the SDK response as-is
+			// rather than corrupt the handshake.
+			relay(body)
+			return
+		}
+		// The body length changed, so drop any stale Content-Length.
+		capW.header.Del("Content-Length")
+		relay(merged)
+	case bytes.HasPrefix([]byte(ct), []byte("text/event-stream")):
+		merged, err := mergeTasksCapabilitySSE(body, m.engine)
+		if err != nil {
+			relay(body)
+			return
+		}
+		capW.header.Del("Content-Length")
+		relay(merged)
+	default:
 		relay(body)
-		return
 	}
-	// The body length changed, so drop any stale Content-Length.
-	capW.header.Del("Content-Length")
-	relay(merged)
+}
+
+// mergeTasksCapabilitySSE injects the engine's `capabilities.tasks` block into
+// an SSE-framed initialize response. The go-sdk streamable-HTTP transport
+// writes the JSON-RPC response as one SSE event — lines of `field: value`,
+// blank-line-separated, the JSON-RPC envelope carried on the `data:` field.
+// This rewrites the single `data:` payload that decodes as the initialize
+// response and leaves every other line (event ids, comments, other events)
+// untouched. It returns an error when no `data:` line carries an initialize
+// response, so serveInitialize can relay the original body unchanged.
+func mergeTasksCapabilitySSE(body []byte, e *Engine) ([]byte, error) {
+	lines := bytes.Split(body, []byte("\n"))
+	merged := false
+	for i, line := range lines {
+		// An SSE data field is `data:` optionally followed by a space then the
+		// value; a continuation line is rare for a single-line JSON payload.
+		const prefix = "data:"
+		if !bytes.HasPrefix(line, []byte(prefix)) {
+			continue
+		}
+		payload := bytes.TrimPrefix(line, []byte(prefix))
+		payload = bytes.TrimPrefix(payload, []byte(" "))
+		trimmed := bytes.TrimSpace(payload)
+		if len(trimmed) == 0 || trimmed[0] != '{' {
+			continue
+		}
+		rewritten, err := mergeTasksCapability(trimmed, e)
+		if err != nil {
+			// Not an initialize response — leave this data line as-is.
+			continue
+		}
+		lines[i] = append([]byte("data: "), rewritten...)
+		merged = true
+	}
+	if !merged {
+		return nil, errors.New("no initialize-response data line in the SSE body")
+	}
+	return bytes.Join(lines, []byte("\n")), nil
 }
 
 // mergeTasksCapability injects the engine's `capabilities.tasks` block into a

@@ -276,6 +276,70 @@ func TestMount_HTTPMiddleware_InjectsTasksCapability(t *testing.T) {
 	}
 }
 
+// TestMount_HTTPMiddleware_InjectsTasksCapability_SSE proves the middleware
+// merges the capabilities.tasks block into an SSE-framed (text/event-stream)
+// initialize response — the framing the real go-sdk streamable-HTTP transport
+// uses. The plain-JSON case alone left a real wiring gap: the capability was
+// silently dropped on the wire of a real HTTP deployment (D-072).
+func TestMount_HTTPMiddleware_InjectsTasksCapability_SSE(t *testing.T) {
+	t.Parallel()
+	e, err := NewEngine(NewInMemoryStore(), &Options{
+		Logger:                quietLogger(),
+		AdvertiseList:         true,
+		RequestorIdentifiable: true,
+	})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	m := NewMount(e)
+
+	// A stand-in SDK handler that frames the initialize result as SSE — exactly
+	// the go-sdk streamable-HTTP shape: `event: message` then a `data:` line.
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"event: message\n" +
+				`data: {"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{}},"serverInfo":{"name":"x"}}}` +
+				"\n\n"))
+	})
+	srv := httptest.NewServer(m.HTTPMiddleware(inner))
+	defer srv.Close()
+
+	frame := rpcFrame(t, 1, "initialize", json.RawMessage(`{"protocolVersion":"2025-06-18"}`))
+	resp, err := http.Post(srv.URL, "application/json", bytes.NewReader(frame))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+
+	// Extract the JSON-RPC envelope from the SSE data line.
+	var dataLine []byte
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		if d := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:"))); len(d) > 0 && d[0] == '{' {
+			dataLine = d
+			break
+		}
+	}
+	if dataLine == nil {
+		t.Fatalf("SSE initialize response carries no data line: %s", body)
+	}
+	var envelope struct {
+		Result struct {
+			Capabilities map[string]json.RawMessage `json:"capabilities"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(dataLine, &envelope); err != nil {
+		t.Fatalf("decode SSE initialize envelope: %v", err)
+	}
+	if _, ok := envelope.Result.Capabilities["tasks"]; !ok {
+		t.Fatalf("capabilities.tasks not injected into the SSE initialize response: %s", body)
+	}
+	if _, ok := envelope.Result.Capabilities["tools"]; !ok {
+		t.Fatal("the SDK's own capabilities were dropped during SSE injection")
+	}
+}
+
 // TestMount_ServeStdioFrames proves the stdio frame pump intercepts a tasks/*
 // frame and forwards a non-tasks frame.
 func TestMount_ServeStdioFrames(t *testing.T) {

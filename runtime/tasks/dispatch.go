@@ -121,8 +121,27 @@ func (e *Engine) handleCancel(ctx context.Context, params json.RawMessage) (json
 			ErrAlreadyTerminal, p.ID, rec.Status)
 	}
 
-	// Signal the running handler's context (cooperative cancellation) before
-	// the transition, so a handler that checks ctx promptly stops.
+	// Record the cancelled outcome and flip the status to `cancelled` BEFORE
+	// signalling the handler's context. Cancelling the run context first would
+	// race the handler's cooperative unwind: a handler that observes ctx.Done()
+	// promptly can return and drive finish() to `failed` before this transition
+	// runs, leaving tasks/cancel with an illegal `failed → cancelled` move (the
+	// race the Wave 5 checkpoint surfaced — D-072). Transitioning first makes
+	// the store terminal-`cancelled` immediately; the handler's later finish()
+	// then sees an already-terminal task and is a cooperative no-op.
+	//
+	// The result is written before the transition so a tasks/result waiter,
+	// which unblocks the instant it sees a terminal status, always finds the
+	// payload already present.
+	_ = e.store.SetResult(ctx, p.ID, TaskResult{Err: "task cancelled"})
+	rec, err = e.store.Transition(ctx, p.ID, protocolcodec.TaskCancelled,
+		"The task was cancelled by request.")
+	if err != nil {
+		return nil, err
+	}
+
+	// Now signal the running handler's context (cooperative cancellation) so a
+	// handler that checks ctx promptly stops and unwinds.
 	e.mu.Lock()
 	cancel := e.cancels[p.ID]
 	e.mu.Unlock()
@@ -130,14 +149,6 @@ func (e *Engine) handleCancel(ctx context.Context, params json.RawMessage) (json
 		cancel()
 	}
 
-	rec, err = e.store.Transition(ctx, p.ID, protocolcodec.TaskCancelled,
-		"The task was cancelled by request.")
-	if err != nil {
-		return nil, err
-	}
-	// Record a cancelled result so a later tasks/result has a terminal payload
-	// and wake any waiters.
-	_ = e.store.SetResult(ctx, p.ID, TaskResult{Err: "task cancelled"})
 	e.wake(p.ID)
 
 	return e.codec.EncodeGetTaskResult(rec.Task())
