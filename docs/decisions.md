@@ -1173,6 +1173,75 @@ origin.
 
 ---
 
+## D-056 — Discovery surfaces the App; the tool↔UI link stays an explicit manifest field
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §7.6, `runtime/apps` (`discovery.go`),
+`internal/manifest` (`wiring.go`), phase plan 10
+**Why:** mcp-use's widget-by-convention binds a widget to a tool *implicitly*
+by matching the component file stem to the tool name (brief 04 §2.4). Adopting
+that wholesale would re-introduce exactly the hidden-architecture problem
+RFC §7.6 rejects — "convenience without hiding the architecture." Phase 10
+therefore splits the convention in two: `apps.Discover` finds a `.svelte` file
+under `web/src/apps/` and lifts it into a `DiscoveredApp`, and
+`manifest.WriteDiscoveredApps` writes the corresponding `apps[]` entry into
+`dockyard.app.yaml` — but the `tools[].ui` reference that actually wires a tool
+to that App stays a developer-authored manifest field. Discovery removes the
+boilerplate of hand-registering the resource; it never silently invents the
+tool↔UI mapping. The wiring is always visible and inspectable in the manifest,
+and `dockyard validate` (Phase 18) guides the developer to add the
+`tools[].ui` line — the manifest's orphan-app check (D-055) names any App no
+tool has wired yet.
+
+---
+
+## D-057 — One embed.FS backs the ui:// resource handler; an empty bundle is a typed error
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §14, `runtime/apps` (`embed.go`, `bundlefs.go`),
+phase plan 10
+**Why:** RFC §14 and brief 06 §2.2 settle that a Dockyard app embeds its built
+Svelte UI via `//go:embed all:dist` and that the *same* `embed.FS` backs both
+the `ui://` MCP resource handler and the inspector's HTTP preview — never a
+second copy. Phase 10 ships the `apps.Bundle` type: a read-only,
+`embed.FS`-backed view of the built `dist/` tree, immutable after construction
+and safe for concurrent use, from which `RegisterDiscovered` reads each App's
+HTML. A missing `dist/` directory makes the Go *build* fail at the `//go:embed`
+directive itself — the clean build-time failure the acceptance criterion
+requires. Its runtime-side analogue — an embed target that resolved but holds
+no built files — is `Bundle.Validate` returning a typed error wrapping
+`ErrEmptyBundle`; the runtime never panics on an empty bundle. The `all:`
+prefix on the directive is load-bearing: without it `//go:embed` skips
+`_`/`.`-prefixed files, which a multi-file Vite build can emit as hashed chunk
+names (brief 06 §2.2).
+
+---
+
+## D-058 — WriteDiscoveredApps re-marshals the manifest; inline comments are not preserved
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §7.6, `internal/manifest` (`wiring.go`), phase plan 10
+**Why:** Writing the discovered wiring back into `dockyard.app.yaml` (RFC §7.6)
+means rewriting the file. `WriteDiscoveredApps` parses the manifest into the
+typed `Manifest` struct, merges the discovered `apps[]` entries, structurally
+validates the merged result, and re-marshals through `gopkg.in/yaml.v3`.
+`yaml.v3` re-marshalling normalises formatting and does **not** preserve inline
+comments. This is accepted for V1: the manifest is machine-authored by
+`dockyard new` and machine-maintained by discovery, the merge is conservative
+(a developer-authored `apps[]` entry is never overwritten) and idempotent (a
+re-run with the same discovery set is a no-op), and the merged result is
+validated before any byte is written — `WriteDiscoveredApps` never writes an
+invalid manifest. To read a manifest that legitimately carries a `tools[].ui`
+pointing at an App not yet discovered — the natural pre-discovery state, which
+`Load`'s cross-reference check would reject — `WriteDiscoveredApps` parses
+without the cross-reference checks and applies full validation only to the
+merged result. A comment-preserving manifest editor is a deliberate deferral.
+
+--
+
 ## D-059 — The bridge shell negotiates display modes by capability, never a host matrix
 
 **Date:** 2026-05-21
@@ -1229,6 +1298,9 @@ codegen lands, its generated `contracts.ts` must structurally satisfy
 `ToolContract` (a `contracts` object of `ToolContract` values keyed by tool name)
 for the typed `structuredContent` path to hold — recorded here so the obligation
 is not lost.
+
+--
+
 ## D-062 — `_meta.ui.domain` is auto-derived through a pluggable host-profile seam
 
 **Date:** 2026-05-21

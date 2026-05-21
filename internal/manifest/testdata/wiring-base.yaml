@@ -1,0 +1,29 @@
+name: storefront
+title: Storefront
+version: 0.1.0
+runtime:
+  transports: [stdio, http]
+  ui:
+    framework: svelte
+    bundle: multi-file
+tools:
+  - name: show_customer_health
+    description: Show the interactive customer health dashboard.
+    input: internal/contracts.ShowCustomerHealthInput
+    output: internal/contracts.ShowCustomerHealthOutput
+    ui: customer-health
+  - name: show_order_status
+    description: Show the interactive order status panel.
+    input: internal/contracts.ShowOrderStatusInput
+    output: internal/contracts.ShowOrderStatusOutput
+    ui: order-status
+apps:
+  - id: customer-health
+    uri: ui://storefront/customer-health
+    entry: web/src/apps/customer-health.svelte
+    display_modes: [inline, fullscreen]
+    csp:
+      connect: [https://api.company.com]
+    visibility: [model, app]
+quality:
+  require_loading_state: true

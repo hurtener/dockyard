@@ -1,0 +1,3 @@
+A multi-file build emits hashed assets here. The `all:` prefix on the
+//go:embed directive ensures assets in this directory are embedded even
+when a future build emits underscore-prefixed chunk names.

@@ -115,6 +115,12 @@ generated input JSON Schema *before* the typed handler runs, so a schema-violati
 argument becomes a typed `tool.ArgumentError` (wrapping `ErrInvalidArguments`)
 rather than a panic or a vague failure. RFC §5, §6.3. D-044.
 
+**Embedded UI bundle** — the built Svelte `dist/` tree compiled into the Go
+binary via `//go:embed all:dist`. One `embed.FS` backs both the `ui://` MCP
+resource handler and (Phase 22) the inspector's HTTP preview — there is never a
+second copy of the UI assets. Surfaced at runtime as an `apps.Bundle`. RFC §14.
+D-057.
+
 **Embedded-struct flattening** — the `internal/codegen` step that inlines an
 embedded (anonymous) struct's fields into the embedding interface's generated
 TypeScript, matching how the JSON Schema and Go's own `encoding/json` promote
@@ -329,6 +335,15 @@ app-facing surface (RFC §6, brief 04 §3). D-029.
 in `tools/list`). RFC §8.4.
 
 ## U
+
+**UI auto-discovery** — the RFC §7.6 convention by which a `.svelte` file under
+`web/src/apps/` becomes a `ui://` resource without a manual registration call:
+`apps.Discover` walks the convention directory and lifts each file into a
+`DiscoveredApp`, and `manifest.WriteDiscoveredApps` writes the resulting
+`apps[]` entry back into `dockyard.app.yaml` so the tool↔UI wiring stays
+visible and inspectable — convenience without hiding the architecture. The
+`tools[].ui` link itself stays an explicit developer-authored field. RFC §7.6.
+D-056.
 
 **UI resource** — a resource served under the `ui://` scheme with MIME type
 `text/html;profile=mcp-app`, containing the App's HTML bundle. RFC §7.1.
