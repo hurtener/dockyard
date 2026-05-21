@@ -372,8 +372,34 @@ routes `tasks/*` itself behind the engine (RFC §8.2, brief 03).
 
 **`TaskStore`** — the persistence seam for durable task state
 (`runtime/tasks.TaskStore`). Phase 13 ships an in-memory driver; Phase 14
-supplies the durable `Store`-backed driver with TTL enforcement, per-requestor
-concurrency caps, and a purge sweep (RFC §8.5).
+supplies the durable `Store`-backed driver — a typed facade over the `Store`
+seam (`tasks.NewStore`, D-070) with its own forward-only migration, TTL
+enforcement, per-requestor concurrency caps, and a purge sweep (RFC §8.5).
+Proven against every backing by the shared `TaskStore` conformance suite
+(`runtime/tasks/taskstoretest`).
+
+**`TaskHandle`** — the handler-facing API for a long-running task
+(`runtime/tasks.TaskHandle`, RFC §8.4): progress reporting, status messages,
+cooperative cancellation, and `input_required`-driven elicitation. Handlers stay
+sync-shaped — the `TaskHandle` is how a sync-shaped handler does long
+async-feeling work. It exposes only clean Dockyard types; no raw experimental
+protocol struct reaches it (P3).
+
+**TTL purge sweep** — the background goroutine that reaps expired tasks from the
+`TaskStore` on a manifest-tunable interval (RFC §8.5). It honours context
+cancellation and shuts down cleanly — a reusable concurrent artifact.
+
+**Auth-context binding** — the task-security rule (RFC §8.5, brief 02 §4.5) that
+scopes `tasks/*` access to the requestor's authorization context: `tasks/get`/
+`result`/`cancel` reject a task created under a different context (a typed
+rejection indistinguishable from "not found", so the task's existence does not
+leak), and `tasks/list` scopes to the caller and is withheld entirely when the
+deployment cannot identify requestors.
+
+**Tasks transport mount** — `runtime/tasks.Mount`, the seam that routes `tasks/*`
+JSON-RPC frames into `Engine.Dispatch` ahead of the SDK server (the go-sdk
+rejects unknown methods before middleware) and injects the `capabilities.tasks`
+block into the `initialize` handshake. RFC §8.2's "shim, by necessity"; D-071.
 
 **Tool builder** — the `runtime/tool` fluent, typed API an app author uses to
 declare an MCP tool: `tool.New[In, Out](name)` binds the input and output

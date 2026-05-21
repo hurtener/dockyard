@@ -1511,3 +1511,62 @@ Phase 13 goal and `AGENTS.md` / `CLAUDE.md` §10 are corrected in the same PR to
 say "hand-derived … pinned by golden tests" — the §15 way to override a
 specified decision (a visible reconciliation, not a contradiction left to
 drift).
+
+---
+
+## D-070 — The durable TaskStore is a typed facade over the Store seam, proven by its own conformance suite
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** `runtime/tasks/storedriver.go`,
+`runtime/tasks/taskstoretest/conformance.go`, `runtime/tasks/store.go`,
+phase plan `phase-14-taskstore`
+**Why:** Brief 02 §3 sketches the `TaskStore` as a *new* `Store`-level driver
+alongside `inmem` and `sqlite`. The settled `Store` seam (D-025) is instead a
+generic namespaced key-value primitive, with sub-stores (the `TaskStore`, the
+future `ObsStore`) built as **thin typed facades over a `Store`** — each owning
+its own forward-only migrations. Phase 14 follows D-025: the durable `TaskStore`
+(`tasks.NewStore`) is a facade constructed over any `store.Store`, persisting
+task rows as versioned JSON KV values in the `dockyard_tasks` namespace and
+registering one forward-only migration through `store.AddMigration`. It is not a
+`store.Register`'d driver. This means the durable `TaskStore` automatically
+inherits every `Store` driver — the `modernc.org/sqlite` driver for durable
+HTTP/Portico apps, the in-memory driver for tests — with no new CGo dependency
+(`modernc.org/sqlite` is pure-Go; D-026). CLAUDE.md §9's rule that a new
+persistence concern is "proven by the shared conformance suite, never bolted
+onto one driver" is honoured at the sub-store layer: a dedicated **`TaskStore`
+conformance suite** (`runtime/tasks/taskstoretest`) is run against every backing
+— the Phase 13 in-memory stub, the durable facade over the in-memory `Store`,
+and the durable facade over the `sqlite` `Store` — so the seam's guarantees
+(lifecycle enforcement, auth-context-scoped listing, idempotent delete, the TTL
+purge sweep) are proven uniformly. The alternative — a second `store.Register`'d
+driver — would duplicate the KV machinery the `Store` seam already provides and
+fork the migration runner, which is exactly the bolt-on D-025 exists to prevent.
+
+## D-071 — Phase 14 folds in the tasks/* transport mount Phase 13 deferred
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** `runtime/tasks/transport.go`, phase plan
+`phase-14-taskstore`, master plan `docs/plans/README.md` (Phase 14 block)
+**Why:** Phase 13 found (and recorded in its plan's Risks section) that the
+go-sdk routes receiving methods through a fixed package-level dispatch table; an
+unknown method — `tasks/get`, `tasks/result`, … — is rejected by the SDK before
+any middleware runs, so a `tasks/*` frame never reaches `Engine.Dispatch` over a
+real transport. Phase 13 shipped the engine and its transport-agnostic
+`Dispatch` but **deferred the actual transport mount**, leaving it as a
+documented Phase 14 seam. The Wave 5 master-plan Phase 14 block, written before
+this was discovered, does not list the transport mount. Phase 14 folds it in by
+an explicit, documented project decision: `runtime/tasks.Mount` routes `tasks/*`
+JSON-RPC frames into `Engine.DispatchAs` ahead of the SDK server (an
+`http.Handler` middleware for streamable-HTTP, a frame pump for stdio) and
+injects the `capabilities.tasks` block into the `initialize` handshake response,
+so a real MCP client drives `tasks/get`/`result`/`cancel`/`list` end to end over
+the wire — RFC §8.2's "shim, by necessity". The mount operates at the raw
+JSON-RPC frame layer (the SDK's `jsonrpc.Message` types are unexported behind
+`internal/`, so interception at the SDK layer is impossible); the JSON-RPC v2
+envelope types it uses are protocol-neutral, not MCP extension wire types — the
+MCP Tasks wire shapes stay inside `internal/protocolcodec` (P3). The master-plan
+Phase 14 block is updated in the same PR to name the transport mount in its
+Goal and Acceptance — the CLAUDE.md §4.3 way to record a reasonable plan
+deviation, not a silent scope change.

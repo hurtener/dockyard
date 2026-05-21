@@ -251,8 +251,13 @@ five-status lifecycle.
 **Goal.** The durable `TaskStore` on the `Store` seam; the `TaskHandle` handler API
 (progress, status, cooperative cancellation, `input_required` elicitation); TTL,
 per-requestor concurrency caps, purge sweep; crypto-strong IDs + auth binding.
+Also (folded in after Wave 5 planning — D-071) the `tasks/*` transport mount:
+routing `tasks/*` JSON-RPC frames into `Engine.Dispatch` ahead of the SDK server
+on stdio + streamable-HTTP, and injecting the `tasks` capability into the
+`initialize` handshake (RFC §8.2 — the shim Phase 13 deferred).
 **Acceptance.** A long handler reports progress and is cancellable; TTL purge
-works; cross-context task access rejected; `tasks/list` withheld when unauthed.
+works; cross-context task access rejected; `tasks/list` withheld when unauthed;
+**a real MCP client drives `tasks/*` end to end over a real transport**.
 **Briefs.** 02, 06. **Deps.** 13, 03.
 
 ### Wave 6 — Observability
