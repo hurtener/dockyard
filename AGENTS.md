@@ -152,6 +152,8 @@ make build         # build the dockyard binary (CGo-free static)
 make test          # go test -race ./...
 make vet           # go vet ./...
 make lint          # golangci-lint run
+make web           # frontend gate: type-check + unit tests for web/ (svelte-check/tsc/vitest)
+make web-install   # install web/ frontend dependencies
 make drift-audit   # design-coherence checks (RFC/plans/briefs/mirror/forbidden names)
 make check-mirror  # verify AGENTS.md == CLAUDE.md
 make preflight     # build + smoke checks + drift-audit

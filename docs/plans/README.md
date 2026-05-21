@@ -203,13 +203,17 @@ remediation (`docs/design/CONVENTIONS.md`, `AGENTS.md` §20). Deliver: the desig
 tokens (colour, spacing, typography, radius); the shared Svelte `web/ui/` component
 inventory (`AppShell`, `PageHeader`, `FilterBar`, `DataTable`, `Pagination`,
 `RailCard`, `StatusChip`, the four-state `PageState` + its `Loading`/`Empty`/
-`Error`/`Permission` panels, `MetricCard`, `JsonInspector`, `ApprovalPanel`, …);
-and the filled `docs/design/CONVENTIONS.md` §3 inventory + the spec→mockup→build
-process. The Dockyard logo and brand are produced here.
+`Error`/`Permission` panels, `MetricCard`, `JsonInspector`, …); and the filled
+`docs/design/CONVENTIONS.md` §3 inventory + the spec→mockup→build process. The
+concrete spec is `docs/design/design-spec.md`. The Dockyard logo and brand are
+produced here. Template-specific blocks (e.g. an `ApprovalPanel`) are NOT in the V1
+`web/ui` inventory — they land with their template phase.
 **Acceptance.** Every component in the `web/ui/` inventory exists and is documented
 in CONVENTIONS.md §3; design tokens are the single source of visual truth; the
-logo + approved visual mockups exist for the inspector and the three V1 templates;
-the `AGENTS.md` §20 hygiene rule is in force and reflected in the §14 checklist.
+logo + an approved visual mockup of the **inspector** exist (template mockups are
+deferred to their own phases 24–26, since the template set may be reworked before
+Wave 9); the `AGENTS.md` §20 hygiene rule is in force and reflected in the §14
+checklist.
 **Briefs.** 04 (DX). **Deps.** 10.
 
 #### 11 — Svelte bridge shell library (RFC §7.2, §7.3)
