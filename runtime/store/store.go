@@ -12,8 +12,9 @@
 // accessors directly (which would force this package to define out-of-scope
 // sub-store types), Store exposes a namespaced, transactional key-value
 // primitive. Future sub-stores — the TaskStore and ObsStore — are thin typed
-// facades constructed over a Store, each owning its own forward-only migrations
-// registered through AddMigration. See decision D-025.
+// facades constructed over a Store, each owning its own forward-only
+// migrations, which the application composes into a [MigrationSet] and passes
+// to Store.Migrate. See decisions D-025 and D-073.
 //
 // Every driver must pass the shared conformance suite in
 // runtime/store/storetest; a new persistence concern adds a migration and is
@@ -31,13 +32,17 @@ import (
 // single value must be safe for concurrent use by multiple goroutines
 // (AGENTS.md §5).
 type Store interface {
-	// Migrate applies every registered migration that has not yet been
-	// applied, in registration order. Migrations are forward-only and
-	// idempotent: a clean run and any later re-run are both safe and leave
-	// identical schema state. Migrate returns ErrMigrationMutated or
-	// ErrMigrationOutOfOrder if the registered sequence diverges from what was
-	// previously applied.
-	Migrate(ctx context.Context) error
+	// Migrate applies every migration of set that has not yet been applied, in
+	// the set's order. Migrations are forward-only and idempotent: a clean run
+	// and any later re-run are both safe and leave identical schema state. A
+	// nil set is a valid no-op. Migrate returns ErrMigrationMutated or
+	// ErrMigrationOutOfOrder if the set diverges from what was previously
+	// applied.
+	//
+	// set is supplied explicitly — not read from a process global — so two
+	// stores can migrate concurrently from independent sets with no shared
+	// state and no external locking (D-073).
+	Migrate(ctx context.Context, set *MigrationSet) error
 
 	// View runs fn inside a read-only transaction. A non-nil error from fn is
 	// returned to the caller; no writes are possible.

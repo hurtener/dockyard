@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sync"
 )
 
 // migrationNamespace is the reserved KV namespace the migration runner uses to
@@ -16,7 +15,7 @@ const migrationNamespace = "__store_migrations__"
 
 // Migration is one forward-only schema or data step. Migrations are
 // append-only: once a Migration has merged its Up function is never edited
-// (AGENTS.md §9). The runner detects a mutation and refuses to proceed.
+// (CLAUDE.md §9). The runner detects a reorder/removal and refuses to proceed.
 type Migration struct {
 	// ID uniquely identifies the migration and fixes its order. Use a
 	// zero-padded numeric prefix, e.g. "0001_init", "0002_add_obs".
@@ -29,63 +28,98 @@ type Migration struct {
 }
 
 // fingerprint is a content hash of a migration, used to detect post-merge
-// edits. It hashes the ID and the Up function's runtime identity is not
-// stable, so the fingerprint covers the ID and the migration's ordinal
-// position; combined with the recorded sequence-prefix check this catches
-// reordering and removal. A migration whose Up body changes without an ID
-// change cannot be hashed from a closure, so the runner additionally treats
-// any divergence in the applied ID sequence as a mutation.
+// reordering. It hashes the migration's ordinal position and ID; combined with
+// the recorded sequence-prefix check this catches reordering and removal.
 func (m Migration) fingerprint(ordinal int) string {
 	h := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s", ordinal, m.ID)))
 	return hex.EncodeToString(h[:])
 }
 
-var (
-	migrationsMu sync.Mutex
-	migrations   []Migration
-	migrationIDs = map[string]struct{}{}
-)
+// MigrationSet is an explicit, caller-owned, ordered collection of migrations
+// (D-073). It REPLACES the former process-global migration registry: a
+// MigrationSet is a plain value a caller constructs, populates, and passes to
+// [Store.Migrate], so there is no mutable shared state and no panic-on-duplicate
+// global. Two goroutines — or two t.Parallel() test fixtures — each build their
+// own MigrationSet and migrate independent stores with no cross-talk and no
+// external locking.
+//
+// Registration order is application order. A MigrationSet is NOT safe for
+// concurrent mutation (it is built once, by its owner, before use); it is safe
+// to pass a fully-built set to many concurrent [Store.Migrate] calls because
+// Migrate only reads it.
+type MigrationSet struct {
+	migrations []Migration
+	ids        map[string]struct{}
+}
 
-// AddMigration registers a forward-only migration. Registration order is
-// application order. It is called from package init blocks — typically a
-// sub-store package registers its own migrations. Registering the same ID
-// twice panics: a duplicate migration ID is a programming error.
-func AddMigration(m Migration) {
+// NewMigrationSet returns an empty [MigrationSet] ready for [MigrationSet.Add].
+func NewMigrationSet() *MigrationSet {
+	return &MigrationSet{ids: map[string]struct{}{}}
+}
+
+// Add appends a migration. It returns [ErrDuplicateMigration] for a repeated
+// ID, and a descriptive error for an empty ID or a nil Up — a duplicate or
+// malformed migration is a programming error, but Add returns it rather than
+// panicking so a caller (a sub-store assembling its set, a test) handles it
+// cleanly (CLAUDE.md §5: never panic for control flow). Add returns the
+// receiver so calls chain.
+func (s *MigrationSet) Add(m Migration) (*MigrationSet, error) {
 	if m.ID == "" {
-		panic("store: AddMigration called with an empty ID")
+		return s, fmt.Errorf("store: MigrationSet.Add with an empty ID")
 	}
 	if m.Up == nil {
-		panic(fmt.Sprintf("store: AddMigration %q has a nil Up function", m.ID))
+		return s, fmt.Errorf("store: MigrationSet.Add %q has a nil Up function", m.ID)
 	}
-	migrationsMu.Lock()
-	defer migrationsMu.Unlock()
-	if _, dup := migrationIDs[m.ID]; dup {
-		panic(fmt.Errorf("%w: %q", ErrDuplicateMigration, m.ID))
+	if _, dup := s.ids[m.ID]; dup {
+		return s, fmt.Errorf("%w: %q", ErrDuplicateMigration, m.ID)
 	}
-	migrationIDs[m.ID] = struct{}{}
-	migrations = append(migrations, m)
+	s.ids[m.ID] = struct{}{}
+	s.migrations = append(s.migrations, m)
+	return s, nil
 }
 
-// registeredMigrations returns a snapshot of the registered migrations in
-// order. Exported within the package for the runner and for tests.
-func registeredMigrations() []Migration {
-	migrationsMu.Lock()
-	defer migrationsMu.Unlock()
-	out := make([]Migration, len(migrations))
-	copy(out, migrations)
-	return out
+// MustAdd is [MigrationSet.Add] for a caller that treats a duplicate/malformed
+// migration as a build-time invariant — typically a sub-store assembling its
+// own fixed set in a constructor. It panics on error. It is not used on any
+// request path, so a panic here never crosses the MCP boundary (CLAUDE.md §13).
+func (s *MigrationSet) MustAdd(m Migration) *MigrationSet {
+	if _, err := s.Add(m); err != nil {
+		panic(err)
+	}
+	return s
 }
 
-// ResetMigrationsForTest clears the global migration registry. It exists
-// solely so tests — including the cross-package conformance suite in
-// runtime/store/storetest — can register migrations and stay isolated from one
-// another. It is not part of the runtime API and must not be called outside
-// tests.
-func ResetMigrationsForTest() {
-	migrationsMu.Lock()
-	defer migrationsMu.Unlock()
-	migrations = nil
-	migrationIDs = map[string]struct{}{}
+// Extend appends every migration of other into s, preserving order. It is how a
+// caller composes the migration sets of several sub-stores (e.g. the TaskStore
+// set plus a future ObsStore set) into the one set it hands [Store.Migrate]. A
+// duplicate ID across the sets yields [ErrDuplicateMigration].
+func (s *MigrationSet) Extend(other *MigrationSet) (*MigrationSet, error) {
+	if other == nil {
+		return s, nil
+	}
+	for _, m := range other.migrations {
+		if _, err := s.Add(m); err != nil {
+			return s, err
+		}
+	}
+	return s, nil
+}
+
+// Len reports the number of migrations in the set.
+func (s *MigrationSet) Len() int {
+	if s == nil {
+		return 0
+	}
+	return len(s.migrations)
+}
+
+// list returns the migrations in application order. The caller must not mutate
+// the returned slice.
+func (s *MigrationSet) list() []Migration {
+	if s == nil {
+		return nil
+	}
+	return s.migrations
 }
 
 // appliedRecord is the JSON value stored per applied migration.
@@ -94,18 +128,18 @@ type appliedRecord struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
-// RunMigrations applies every registered migration not yet recorded in s,
-// inside s's own transactions. It is the shared implementation every driver's
-// Migrate method delegates to, so migration semantics are identical across
-// drivers (AGENTS.md §9). It is forward-only and idempotent:
+// RunMigrations applies every migration of set not yet recorded in s, inside
+// s's own transactions. It is the shared implementation every driver's Migrate
+// method delegates to, so migration semantics are identical across drivers
+// (CLAUDE.md §9). A nil set is a valid no-op. It is forward-only and idempotent:
 //
 //   - A migration already recorded with a matching fingerprint is skipped.
 //   - A recorded migration whose fingerprint no longer matches the registered
-//     one yields ErrMigrationMutated (a migration was edited after merge).
+//     one yields ErrMigrationMutated (a migration was reordered after merge).
 //   - A registered sequence that does not extend the applied sequence as a
 //     prefix yields ErrMigrationOutOfOrder.
-func RunMigrations(ctx context.Context, s Store) error {
-	regs := registeredMigrations()
+func RunMigrations(ctx context.Context, s Store, set *MigrationSet) error {
+	regs := set.list()
 
 	// Load the applied set.
 	applied := map[string]appliedRecord{}
@@ -127,7 +161,7 @@ func RunMigrations(ctx context.Context, s Store) error {
 	}
 
 	// Verify the registered sequence extends the applied sequence as a prefix
-	// and that no applied migration was mutated.
+	// and that no applied migration was reordered.
 	for ordinal, m := range regs {
 		rec, ok := applied[m.ID]
 		if !ok {

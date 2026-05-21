@@ -83,19 +83,16 @@ type wave5ReportOutput struct {
 
 // ---- shared Wave 5 fixtures --------------------------------------------------
 
-// migrationSetupMu serializes the global Store migration-registry mutation in
-// newWave5Engine. tasks.RegisterMigrations / store.ResetMigrationsForTest mutate
-// process-global state (store.AddMigration panics on a duplicate ID), so the
-// reset → register → Migrate sequence of one engine must complete before
-// another parallel test's begins. Holding it across Migrate is sufficient: once
-// a Store has run its migrations the registry can be reset for the next test.
-var migrationSetupMu sync.Mutex
-
 // newWave5Engine builds a real tasks.Engine over the real durable TaskStore
 // layered on a real modernc.org/sqlite Store — the V1 durable backing, no mocks
 // at the Store seam. It returns the engine and the backing Store; the caller
-// closes the Store. The global migration-registry mutation is serialized so the
-// fixture is safe under t.Parallel().
+// closes the Store.
+//
+// The durable TaskStore migration is supplied as a caller-owned
+// store.MigrationSet (tasks.Migrations()); there is no process-global migration
+// registry, so the fixture needs no serialization and is t.Parallel()-safe by
+// construction. This replaces the former migrationSetupMu mutex workaround the
+// Wave 5 checkpoint filed as S1 — see D-073.
 func newWave5Engine(t *testing.T, opts *tasks.Options) (*tasks.Engine, store.Store) {
 	t.Helper()
 
@@ -103,14 +100,8 @@ func newWave5Engine(t *testing.T, opts *tasks.Options) (*tasks.Engine, store.Sto
 	if err != nil {
 		t.Fatalf("sqlitestore.Open: %v", err)
 	}
-	migrationSetupMu.Lock()
-	store.ResetMigrationsForTest()
-	tasks.RegisterMigrations()
-	migrateErr := st.Migrate(context.Background())
-	store.ResetMigrationsForTest()
-	migrationSetupMu.Unlock()
-	if migrateErr != nil {
-		t.Fatalf("Store.Migrate: %v", migrateErr)
+	if err := st.Migrate(context.Background(), tasks.Migrations()); err != nil {
+		t.Fatalf("Store.Migrate: %v", err)
 	}
 
 	ts, err := tasks.NewStore(st)

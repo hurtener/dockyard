@@ -25,11 +25,12 @@ else
 fi
 
 # 2. The durable TaskStore is a facade over the Store seam (RFC §13, D-070):
-#    storedriver.go imports runtime/store and registers a forward-only migration.
+#    storedriver.go imports runtime/store and owns a forward-only migration set
+#    (D-073 — Migrations() returns a caller-owned store.MigrationSet).
 if [ -f runtime/tasks/storedriver.go ]; then
   if grep -q 'runtime/store' runtime/tasks/storedriver.go \
-     && grep -q 'RegisterMigrations' runtime/tasks/storedriver.go \
-     && grep -q 'AddMigration' runtime/tasks/storedriver.go; then
+     && grep -q 'func Migrations' runtime/tasks/storedriver.go \
+     && grep -q 'NewMigrationSet' runtime/tasks/storedriver.go; then
     ok "durable TaskStore is a Store-seam facade with a forward-only migration"
   else
     fail "durable TaskStore is not built on the Store seam"

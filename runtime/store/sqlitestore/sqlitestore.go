@@ -97,8 +97,8 @@ func (s *sqliteStore) isClosed() bool {
 	return s.closed
 }
 
-func (s *sqliteStore) Migrate(ctx context.Context) error {
-	return store.RunMigrations(ctx, s)
+func (s *sqliteStore) Migrate(ctx context.Context, set *store.MigrationSet) error {
+	return store.RunMigrations(ctx, s, set)
 }
 
 func (s *sqliteStore) View(ctx context.Context, fn func(store.Tx) error) error {

@@ -44,8 +44,8 @@ func New() store.Store {
 	return &memStore{data: map[string]map[string][]byte{}}
 }
 
-func (s *memStore) Migrate(ctx context.Context) error {
-	return store.RunMigrations(ctx, s)
+func (s *memStore) Migrate(ctx context.Context, set *store.MigrationSet) error {
+	return store.RunMigrations(ctx, s, set)
 }
 
 func (s *memStore) View(ctx context.Context, fn func(store.Tx) error) error {

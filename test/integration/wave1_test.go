@@ -280,7 +280,7 @@ func TestWave1SurfacesCompose(t *testing.T) {
 					t.Errorf("Close: %v", err)
 				}
 			})
-			if err := st.Migrate(ctx); err != nil {
+			if err := st.Migrate(ctx, nil); err != nil {
 				t.Fatalf("Migrate: %v", err)
 			}
 			if err := st.Ping(ctx); err != nil {
@@ -424,7 +424,7 @@ func TestWave1ConcurrencyStress(t *testing.T) {
 		if err != nil {
 			t.Fatalf("store.Open(%q): %v", drv.name, err)
 		}
-		if err := st.Migrate(ctx); err != nil {
+		if err := st.Migrate(ctx, nil); err != nil {
 			t.Fatalf("Migrate(%q): %v", drv.name, err)
 		}
 		stores = append(stores, drvStore{drv.name, st})

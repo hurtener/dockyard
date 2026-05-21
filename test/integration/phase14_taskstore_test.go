@@ -32,18 +32,18 @@ import (
 )
 
 // newDurableEngine builds a tasks.Engine over the durable TaskStore layered on
-// a real in-memory-file sqlite Store — the V1 durable backing.
+// a real in-memory-file sqlite Store — the V1 durable backing. The durable
+// TaskStore migration is supplied as a caller-owned store.MigrationSet
+// (tasks.Migrations()), so this fixture needs no migration-registry isolation
+// and is t.Parallel()-safe by construction (D-073, the S1 fix).
 func newDurableEngine(t *testing.T, opts *tasks.Options) (*tasks.Engine, store.Store) {
 	t.Helper()
-	store.ResetMigrationsForTest()
-	t.Cleanup(store.ResetMigrationsForTest)
-	tasks.RegisterMigrations()
 
 	st, err := sqlitestore.Open(context.Background(), ":memory:")
 	if err != nil {
 		t.Fatalf("sqlitestore.Open: %v", err)
 	}
-	if err := st.Migrate(context.Background()); err != nil {
+	if err := st.Migrate(context.Background(), tasks.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 	ts, err := tasks.NewStore(st)

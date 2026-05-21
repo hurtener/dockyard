@@ -21,7 +21,9 @@ func newFake() *fakeStore {
 	return &fakeStore{data: map[string]map[string][]byte{}}
 }
 
-func (s *fakeStore) Migrate(ctx context.Context) error { return RunMigrations(ctx, s) }
+func (s *fakeStore) Migrate(ctx context.Context, set *MigrationSet) error {
+	return RunMigrations(ctx, s, set)
+}
 
 func (s *fakeStore) View(_ context.Context, fn func(Tx) error) error {
 	s.mu.Lock()
@@ -169,40 +171,48 @@ func TestOpenFactoryError(t *testing.T) {
 	}
 }
 
-// --- Migration runner tests -------------------------------------------------
+// --- Migration runner + MigrationSet tests ----------------------------------
+//
+// The migration registry is a caller-owned [MigrationSet] value, not a process
+// global (D-073). Every test below builds its own set; there is no shared
+// state, so every one is t.Parallel()-safe — which is itself the S1 fix the
+// Wave 5 checkpoint filed (a t.Parallel()-unsafe global registry). The
+// concurrency test TestMigrationSet_ConcurrentMigrate proves it under -race.
 
 func TestMigrateAppliesInOrderAndIsIdempotent(t *testing.T) {
-	ResetMigrationsForTest()
-	t.Cleanup(ResetMigrationsForTest)
-
+	t.Parallel()
 	var order []string
-	AddMigration(Migration{ID: "0001_a", Up: func(_ context.Context, tx Tx) error {
-		order = append(order, "0001_a")
-		return tx.Put("data", "a", []byte("1"))
-	}})
-	AddMigration(Migration{ID: "0002_b", Up: func(_ context.Context, tx Tx) error {
+	set, err := NewMigrationSet().
+		Add(Migration{ID: "0001_a", Up: func(_ context.Context, tx Tx) error {
+			order = append(order, "0001_a")
+			return tx.Put("data", "a", []byte("1"))
+		}})
+	if err != nil {
+		t.Fatalf("Add 0001_a: %v", err)
+	}
+	if _, err := set.Add(Migration{ID: "0002_b", Up: func(_ context.Context, tx Tx) error {
 		order = append(order, "0002_b")
 		return tx.Put("data", "b", []byte("2"))
-	}})
+	}}); err != nil {
+		t.Fatalf("Add 0002_b: %v", err)
+	}
 
 	s := newFake()
-	if err := s.Migrate(context.Background()); err != nil {
+	if err := s.Migrate(context.Background(), set); err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
 	if len(order) != 2 || order[0] != "0001_a" || order[1] != "0002_b" {
 		t.Fatalf("migrations ran out of order: %v", order)
 	}
 
-	// Re-run: no migration should execute again.
 	before := len(order)
-	if err := s.Migrate(context.Background()); err != nil {
+	if err := s.Migrate(context.Background(), set); err != nil {
 		t.Fatalf("re-run Migrate: %v", err)
 	}
 	if len(order) != before {
 		t.Fatalf("re-run applied migrations again: %v", order)
 	}
 
-	// Schema state must be intact and identical.
 	if err := s.View(context.Background(), func(tx Tx) error {
 		a, err := tx.Get("data", "a")
 		if err != nil {
@@ -222,23 +232,22 @@ func TestMigrateAppliesInOrderAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrateAppendOnlyExtension(t *testing.T) {
-	ResetMigrationsForTest()
-	t.Cleanup(ResetMigrationsForTest)
-
-	AddMigration(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
+	t.Parallel()
+	set := NewMigrationSet().MustAdd(
+		Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
 
 	s := newFake()
-	if err := s.Migrate(context.Background()); err != nil {
+	if err := s.Migrate(context.Background(), set); err != nil {
 		t.Fatalf("Migrate #1: %v", err)
 	}
 
-	// Appending a new migration and re-running is allowed and applies only it.
+	// Appending a new migration and re-running applies only the new one.
 	applied := false
-	AddMigration(Migration{ID: "0002_b", Up: func(_ context.Context, _ Tx) error {
+	set.MustAdd(Migration{ID: "0002_b", Up: func(_ context.Context, _ Tx) error {
 		applied = true
 		return nil
 	}})
-	if err := s.Migrate(context.Background()); err != nil {
+	if err := s.Migrate(context.Background(), set); err != nil {
 		t.Fatalf("Migrate #2: %v", err)
 	}
 	if !applied {
@@ -247,79 +256,71 @@ func TestMigrateAppendOnlyExtension(t *testing.T) {
 }
 
 func TestMigrateRejectsRemovedMigration(t *testing.T) {
-	ResetMigrationsForTest()
-
-	AddMigration(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
-	AddMigration(Migration{ID: "0002_b", Up: func(_ context.Context, _ Tx) error { return nil }})
+	t.Parallel()
+	full := NewMigrationSet().
+		MustAdd(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }}).
+		MustAdd(Migration{ID: "0002_b", Up: func(_ context.Context, _ Tx) error { return nil }})
 	s := newFake()
-	if err := s.Migrate(context.Background()); err != nil {
+	if err := s.Migrate(context.Background(), full); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	// Simulate a migration being removed after merge: re-register only 0001.
-	ResetMigrationsForTest()
-	t.Cleanup(ResetMigrationsForTest)
-	AddMigration(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
-
-	err := s.Migrate(context.Background())
-	if !errors.Is(err, ErrMigrationOutOfOrder) {
+	// A set missing a previously-applied migration is rejected.
+	shrunk := NewMigrationSet().
+		MustAdd(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
+	if err := s.Migrate(context.Background(), shrunk); !errors.Is(err, ErrMigrationOutOfOrder) {
 		t.Fatalf("removed migration: got %v want ErrMigrationOutOfOrder", err)
 	}
 }
 
 func TestMigrateRejectsReordering(t *testing.T) {
-	ResetMigrationsForTest()
-
-	AddMigration(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
-	AddMigration(Migration{ID: "0002_b", Up: func(_ context.Context, _ Tx) error { return nil }})
+	t.Parallel()
+	ordered := NewMigrationSet().
+		MustAdd(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }}).
+		MustAdd(Migration{ID: "0002_b", Up: func(_ context.Context, _ Tx) error { return nil }})
 	s := newFake()
-	if err := s.Migrate(context.Background()); err != nil {
+	if err := s.Migrate(context.Background(), ordered); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	// Re-register in swapped order: ordinals no longer match what was applied.
-	ResetMigrationsForTest()
-	t.Cleanup(ResetMigrationsForTest)
-	AddMigration(Migration{ID: "0002_b", Up: func(_ context.Context, _ Tx) error { return nil }})
-	AddMigration(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
-
-	err := s.Migrate(context.Background())
-	if !errors.Is(err, ErrMigrationOutOfOrder) {
+	// A set with swapped order: ordinals no longer match what was applied.
+	swapped := NewMigrationSet().
+		MustAdd(Migration{ID: "0002_b", Up: func(_ context.Context, _ Tx) error { return nil }}).
+		MustAdd(Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
+	if err := s.Migrate(context.Background(), swapped); !errors.Is(err, ErrMigrationOutOfOrder) {
 		t.Fatalf("reordered migrations: got %v want ErrMigrationOutOfOrder", err)
 	}
 }
 
 func TestMigrateFailureLeavesCleanPrefix(t *testing.T) {
-	ResetMigrationsForTest()
-	t.Cleanup(ResetMigrationsForTest)
-
+	t.Parallel()
 	sentinel := errors.New("migration failed")
-	AddMigration(Migration{ID: "0001_ok", Up: func(_ context.Context, tx Tx) error {
-		return tx.Put("data", "ok", []byte("done"))
-	}})
-	AddMigration(Migration{ID: "0002_bad", Up: func(_ context.Context, _ Tx) error {
-		return sentinel
-	}})
+	bad := NewMigrationSet().
+		MustAdd(Migration{ID: "0001_ok", Up: func(_ context.Context, tx Tx) error {
+			return tx.Put("data", "ok", []byte("done"))
+		}}).
+		MustAdd(Migration{ID: "0002_bad", Up: func(_ context.Context, _ Tx) error {
+			return sentinel
+		}})
 
 	s := newFake()
-	err := s.Migrate(context.Background())
-	if !errors.Is(err, sentinel) {
+	if err := s.Migrate(context.Background(), bad); !errors.Is(err, sentinel) {
 		t.Fatalf("Migrate: got %v want the sentinel", err)
 	}
 
-	// 0001 committed; 0002 did not. A subsequent run with 0002 fixed must
-	// apply only 0002.
-	ResetMigrationsForTest()
+	// 0001 committed; 0002 did not. A recovery set with 0002 fixed applies
+	// only 0002.
 	rerun := false
-	AddMigration(Migration{ID: "0001_ok", Up: func(_ context.Context, _ Tx) error {
-		t.Fatal("0001_ok should not re-run — it already committed")
-		return nil
-	}})
-	AddMigration(Migration{ID: "0002_bad", Up: func(_ context.Context, _ Tx) error {
-		rerun = true
-		return nil
-	}})
-	if err := s.Migrate(context.Background()); err != nil {
+	fixed := NewMigrationSet().
+		MustAdd(Migration{ID: "0001_ok", Up: func(_ context.Context, _ Tx) error {
+			t.Fatal("0001_ok should not re-run — it already committed")
+			return nil
+		}}).
+		MustAdd(Migration{ID: "0002_bad", Up: func(_ context.Context, _ Tx) error {
+			rerun = true
+			return nil
+		}})
+	if err := s.Migrate(context.Background(), fixed); err != nil {
 		t.Fatalf("recovery Migrate: %v", err)
 	}
 	if !rerun {
@@ -327,62 +328,148 @@ func TestMigrateFailureLeavesCleanPrefix(t *testing.T) {
 	}
 }
 
-func TestMigrateNoMigrationsIsNoop(t *testing.T) {
-	ResetMigrationsForTest()
-	t.Cleanup(ResetMigrationsForTest)
+func TestMigrateNilSetIsNoop(t *testing.T) {
+	t.Parallel()
 	s := newFake()
-	if err := s.Migrate(context.Background()); err != nil {
-		t.Fatalf("Migrate with no registered migrations: %v", err)
+	if err := s.Migrate(context.Background(), nil); err != nil {
+		t.Fatalf("Migrate with a nil set: %v", err)
+	}
+	if err := s.Migrate(context.Background(), NewMigrationSet()); err != nil {
+		t.Fatalf("Migrate with an empty set: %v", err)
 	}
 }
 
-func TestAddMigrationDuplicatePanics(t *testing.T) {
-	ResetMigrationsForTest()
-	t.Cleanup(ResetMigrationsForTest)
-	AddMigration(Migration{ID: "dup", Up: func(_ context.Context, _ Tx) error { return nil }})
+func TestMigrationSetAddDuplicateReturnsError(t *testing.T) {
+	t.Parallel()
+	set := NewMigrationSet().MustAdd(
+		Migration{ID: "dup", Up: func(_ context.Context, _ Tx) error { return nil }})
+	_, err := set.Add(Migration{ID: "dup", Up: func(_ context.Context, _ Tx) error { return nil }})
+	if !errors.Is(err, ErrDuplicateMigration) {
+		t.Fatalf("duplicate Add: got %v want ErrDuplicateMigration", err)
+	}
+	if set.Len() != 1 {
+		t.Fatalf("rejected duplicate still mutated the set: Len=%d want 1", set.Len())
+	}
+}
+
+func TestMigrationSetAddEmptyIDAndNilUp(t *testing.T) {
+	t.Parallel()
+	set := NewMigrationSet()
+	if _, err := set.Add(Migration{ID: "", Up: func(_ context.Context, _ Tx) error { return nil }}); err == nil {
+		t.Fatal("Add with an empty ID should return an error")
+	}
+	if _, err := set.Add(Migration{ID: "no-up", Up: nil}); err == nil {
+		t.Fatal("Add with a nil Up should return an error")
+	}
+	if set.Len() != 0 {
+		t.Fatalf("malformed Add mutated the set: Len=%d want 0", set.Len())
+	}
+}
+
+func TestMigrationSetMustAddPanicsOnDuplicate(t *testing.T) {
+	t.Parallel()
+	set := NewMigrationSet().MustAdd(
+		Migration{ID: "dup", Up: func(_ context.Context, _ Tx) error { return nil }})
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Fatal("duplicate AddMigration should panic")
+			t.Fatal("MustAdd of a duplicate should panic")
 		}
 		if err, ok := r.(error); !ok || !errors.Is(err, ErrDuplicateMigration) {
 			t.Fatalf("panic value %v, want ErrDuplicateMigration", r)
 		}
 	}()
-	AddMigration(Migration{ID: "dup", Up: func(_ context.Context, _ Tx) error { return nil }})
+	set.MustAdd(Migration{ID: "dup", Up: func(_ context.Context, _ Tx) error { return nil }})
 }
 
-func TestAddMigrationEmptyIDPanics(t *testing.T) {
-	ResetMigrationsForTest()
-	t.Cleanup(ResetMigrationsForTest)
-	defer func() {
-		if recover() == nil {
-			t.Fatal("AddMigration with an empty ID should panic")
-		}
-	}()
-	AddMigration(Migration{ID: "", Up: func(_ context.Context, _ Tx) error { return nil }})
-}
-
-func TestAddMigrationNilUpPanics(t *testing.T) {
-	ResetMigrationsForTest()
-	t.Cleanup(ResetMigrationsForTest)
-	defer func() {
-		if recover() == nil {
-			t.Fatal("AddMigration with a nil Up should panic")
-		}
-	}()
-	AddMigration(Migration{ID: "no-up", Up: nil})
+func TestMigrationSetExtend(t *testing.T) {
+	t.Parallel()
+	a := NewMigrationSet().MustAdd(
+		Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
+	b := NewMigrationSet().MustAdd(
+		Migration{ID: "0002_b", Up: func(_ context.Context, _ Tx) error { return nil }})
+	if _, err := a.Extend(b); err != nil {
+		t.Fatalf("Extend: %v", err)
+	}
+	if a.Len() != 2 {
+		t.Fatalf("after Extend Len=%d want 2", a.Len())
+	}
+	// A clashing ID across sets is rejected.
+	c := NewMigrationSet().MustAdd(
+		Migration{ID: "0001_a", Up: func(_ context.Context, _ Tx) error { return nil }})
+	if _, err := a.Extend(c); !errors.Is(err, ErrDuplicateMigration) {
+		t.Fatalf("Extend with a clashing ID: got %v want ErrDuplicateMigration", err)
+	}
+	// Extending with nil is a no-op.
+	if _, err := a.Extend(nil); err != nil {
+		t.Fatalf("Extend(nil): %v", err)
+	}
 }
 
 func TestMigrateHonoursContextCancellation(t *testing.T) {
-	ResetMigrationsForTest()
-	t.Cleanup(ResetMigrationsForTest)
-	AddMigration(Migration{ID: "0001", Up: func(_ context.Context, _ Tx) error { return nil }})
-
+	t.Parallel()
+	set := NewMigrationSet().MustAdd(
+		Migration{ID: "0001", Up: func(_ context.Context, _ Tx) error { return nil }})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	s := newFake()
-	if err := s.Migrate(ctx); !errors.Is(err, context.Canceled) {
+	if err := s.Migrate(ctx, set); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Migrate with a cancelled ctx: got %v want context.Canceled", err)
+	}
+}
+
+// TestMigrationSet_ConcurrentMigrate is the S1 fix proof (D-073, Wave 5
+// checkpoint follow-up). The former process-global migration registry forced
+// test fixtures to serialize the reset→register→Migrate sequence with an
+// external mutex; concurrent fixtures otherwise raced the global and the
+// duplicate-ID panic fired on timing luck alone.
+//
+// With the registry replaced by a caller-owned MigrationSet there is no shared
+// state: N goroutines each build their own set and migrate their own store
+// with zero coordination. Run under -race, this proves the fix — no race, no
+// panic, every store correctly migrated.
+func TestMigrationSet_ConcurrentMigrate(t *testing.T) {
+	t.Parallel()
+	const goroutines = 32
+	var wg sync.WaitGroup
+	errs := make([]error, goroutines)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			// Each goroutine builds its OWN set — no global, no lock.
+			set := NewMigrationSet().MustAdd(Migration{
+				ID: "0001_concurrent",
+				Up: func(_ context.Context, tx Tx) error {
+					return tx.Put("concurrent", "seed", []byte("ok"))
+				},
+			})
+			s := newFake()
+			if err := s.Migrate(context.Background(), set); err != nil {
+				errs[idx] = err
+				return
+			}
+			// Re-migrate the same store from the same set: idempotent.
+			if err := s.Migrate(context.Background(), set); err != nil {
+				errs[idx] = err
+				return
+			}
+			errs[idx] = s.View(context.Background(), func(tx Tx) error {
+				v, err := tx.Get("concurrent", "seed")
+				if err != nil {
+					return err
+				}
+				if string(v) != "ok" {
+					return errors.New("migration effect missing")
+				}
+				return nil
+			})
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: %v", i, err)
+		}
 	}
 }

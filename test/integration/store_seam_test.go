@@ -45,7 +45,7 @@ func TestStoreSeamBothDrivers(t *testing.T) {
 				}
 			})
 
-			if err := s.Migrate(ctx); err != nil {
+			if err := s.Migrate(ctx, nil); err != nil {
 				t.Fatalf("Migrate: %v", err)
 			}
 			if err := s.Ping(ctx); err != nil {

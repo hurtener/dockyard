@@ -35,7 +35,8 @@ var (
 	// driver name that is already registered.
 	ErrDuplicateDriver = errors.New("store: driver registered twice")
 
-	// ErrDuplicateMigration is the panic value when AddMigration is called
-	// with a migration ID that is already registered.
+	// ErrDuplicateMigration is returned by MigrationSet.Add (and MigrationSet.
+	// Extend) when a migration ID is already present in the set. MustAdd panics
+	// with it.
 	ErrDuplicateMigration = errors.New("store: migration registered twice")
 )
