@@ -60,6 +60,13 @@ struct, not inline schema. Resolved to a JSON Schema through the manifest's
 
 ## D
 
+**Deny-by-default CSP** — the Content-Security-Policy a UI resource gets when it
+declares no `_meta.ui.csp` domains: zero external origins, so a single-file HTML
+bundle just works. `runtime/apps` encodes it by **omitting** the `_meta.ui` CSP
+rather than emitting an empty allowlist — a host applies its deny-by-default
+policy when no CSP is present. A host may further restrict it but never loosen
+it. RFC §7.4. D-048.
+
 **Deployment mode** — one of the three run-time modes a single Dockyard app binary
 supports: local **stdio** subprocess, **HTTP** service, or **Portico-managed**.
 Selected at run time, not baked in. RFC §14.
@@ -169,6 +176,20 @@ forks the SDK. RFC §5. D-019, D-020.
 **MCP App** — at the protocol level, an MCP tool carrying `_meta.ui` metadata that
 links it to a `ui://` resource the host renders as a sandboxed iframe. Not a new
 wire primitive — a convention over tools + resources. RFC §7.1.
+
+**MCP Apps extension** — the MCP extension Dockyard implements server-side,
+identified `io.modelcontextprotocol/ui` (SEP-1865, spec revision 2026-01-26).
+It defines the `ui://` resource convention, the `_meta.ui` tool/resource
+metadata, and the `postMessage` bridge dialect. Negotiated through the core
+`extensions` capability; a host that does not advertise it still gets a fully
+working plain MCP server. RFC §7. D-047.
+
+**`_meta.ui`** — the nested MCP Apps metadata object. On a **tool** definition it
+carries `{resourceUri, visibility}` linking the tool to its `ui://` resource; on
+a **`resources/read` response** it carries `{csp, permissions, domain,
+prefersBorder}`. Dockyard emits only this nested form, never the deprecated flat
+`_meta["ui/resourceUri"]` form; all encoding goes through `internal/protocolcodec`.
+RFC §7.1. D-047, D-048.
 
 ## O
 

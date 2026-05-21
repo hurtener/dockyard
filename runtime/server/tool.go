@@ -26,6 +26,14 @@ type ToolFunc[In, Out any] func(ctx context.Context, in In) (Out, error)
 type ToolDef struct {
 	Name        string
 	Description string
+	// Meta is the tool definition's `_meta` object — the metadata a host sees
+	// in tools/list, distinct from a CallToolResult's `_meta`. The Apps layer
+	// (runtime/apps, Phase 09) supplies `_meta.ui` here to link a tool to its
+	// ui:// resource (RFC §7.1). The map is opaque wire metadata built through
+	// internal/protocolcodec; the runtime copies it verbatim onto the
+	// registered tool and never inspects it (P3, RFC §5.4). A nil map leaves
+	// the tool with no `_meta`.
+	Meta map[string]any
 }
 
 // ToolOutput is the result of a contract-first tool handler. It splits the two
@@ -119,6 +127,7 @@ func AddTool[In, Out any](s *Server, def ToolDef, fn ToolFunc[In, Out]) error {
 	if err := addToolSafe(s.mcp, &mcpsdk.Tool{
 		Name:        def.Name,
 		Description: def.Description,
+		Meta:        cloneMeta(def.Meta),
 	}, handler); err != nil {
 		return fmt.Errorf("dockyard/runtime/server: register tool %q: %w", def.Name, err)
 	}
@@ -200,7 +209,11 @@ func AddToolWithSchemas[In, Out any](
 		return res, out.Structured, nil
 	}
 
-	tool := &mcpsdk.Tool{Name: def.Name, Description: def.Description}
+	tool := &mcpsdk.Tool{
+		Name:        def.Name,
+		Description: def.Description,
+		Meta:        cloneMeta(def.Meta),
+	}
 	if in != nil {
 		tool.InputSchema = in
 	}
@@ -214,6 +227,20 @@ func AddToolWithSchemas[In, Out any](
 
 	s.tools = append(s.tools, def.Name)
 	return nil
+}
+
+// cloneMeta returns a shallow copy of m, or nil if m is nil/empty. Registration
+// copies a caller's `_meta` map so a later mutation of the caller's map cannot
+// reach the registered tool or resource.
+func cloneMeta(m map[string]any) mcpsdk.Meta {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(mcpsdk.Meta, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 func addToolSafe[In, Out any](
