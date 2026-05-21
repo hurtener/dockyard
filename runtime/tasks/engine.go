@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hurtener/dockyard/internal/protocolcodec"
+	"github.com/hurtener/dockyard/runtime/obs"
 )
 
 // Tasks JSON-RPC method names — the four operations the server-side receiver
@@ -73,6 +74,17 @@ type Options struct {
 	// default TTL, per-requestor concurrency cap, purge interval (RFC §8.5).
 	// The zero value disables every limit.
 	Lifecycle Lifecycle
+
+	// Obs is the obs/v1 observability emitter the engine emits task lifecycle
+	// events to (RFC §11.2, P2). A nil emitter disables emission; the engine is
+	// headless either way. The runtime EMITS the obs/v1 task.progress stream;
+	// the inspector consumes it — nothing reads engine internals to observe
+	// (CLAUDE.md §6).
+	Obs obs.Emitter
+
+	// ServerID is the stable server identity stamped onto the engine's emitted
+	// obs/v1 events. When empty it defaults to "dockyard-tasks".
+	ServerID string
 }
 
 // Engine is the server-side Tasks router and lifecycle owner (RFC §8.2). It is
@@ -83,6 +95,7 @@ type Engine struct {
 	store       TaskStore
 	codec       protocolcodec.Codec
 	log         *slog.Logger
+	rec         *obs.Recorder // obs/v1 emit helper; never nil
 	genID       IDFunc
 	pollMS      int64
 	listOn      bool
@@ -93,6 +106,7 @@ type Engine struct {
 	cancels map[string]context.CancelFunc // taskID → cancel of its run goroutine
 	waiters map[string][]chan struct{}    // taskID → terminal-status signal channels
 	elicits map[string]*elicitation       // taskID → outstanding input_required prompt
+	spans   map[string]obs.SpanContext    // taskID → obs/v1 trace span correlating its events
 
 	sweep *purgeSweep // background TTL purge sweep; nil when no interval set
 }
@@ -117,6 +131,8 @@ func NewEngine(store TaskStore, opts *Options) (*Engine, error) {
 	listOn := false
 	identifiable := false
 	var life Lifecycle
+	var emitter obs.Emitter
+	serverID := "dockyard-tasks"
 	if opts != nil {
 		if opts.Logger != nil {
 			log = opts.Logger
@@ -130,6 +146,10 @@ func NewEngine(store TaskStore, opts *Options) (*Engine, error) {
 		listOn = opts.AdvertiseList
 		identifiable = opts.RequestorIdentifiable
 		life = opts.Lifecycle
+		emitter = opts.Obs
+		if opts.ServerID != "" {
+			serverID = opts.ServerID
+		}
 	}
 	// tasks/list is served only when it is BOTH opted-in AND the deployment can
 	// identify requestors — a receiver that cannot identify requestors must not
@@ -138,6 +158,7 @@ func NewEngine(store TaskStore, opts *Options) (*Engine, error) {
 		store:       store,
 		codec:       protocolcodec.CodecFor(protocolcodec.DefaultVersion),
 		log:         log,
+		rec:         obs.NewRecorder(emitter, serverID),
 		genID:       genID,
 		pollMS:      pollMS,
 		listOn:      listOn && identifiable,
@@ -146,6 +167,7 @@ func NewEngine(store TaskStore, opts *Options) (*Engine, error) {
 		cancels:     make(map[string]context.CancelFunc),
 		waiters:     make(map[string][]chan struct{}),
 		elicits:     make(map[string]*elicitation),
+		spans:       make(map[string]obs.SpanContext),
 	}
 	e.sweep = newPurgeSweep(store, life.PurgeInterval, log)
 	return e, nil
@@ -248,9 +270,21 @@ func (e *Engine) CreateForToolCall(ctx context.Context, p CreateToolCallParams) 
 	// The task is detached from the request context: a tools/call returns its
 	// CreateTaskResult immediately, so the task must outlive the request.
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	// One obs/v1 trace span correlates the whole task lifecycle: the start
+	// event here, any progress events, and the terminal event in finish all
+	// share this span (RFC §11.2 — W3C Trace Context correlation).
+	span := obs.NewTrace()
 	e.mu.Lock()
 	e.cancels[id] = cancel
+	e.spans[id] = span
 	e.mu.Unlock()
+
+	// Emit the obs/v1 task.progress start event (P2) — a task was created.
+	e.rec.TaskEvent(ctx, span, obs.PhaseStart, obs.TaskProgressPayload{
+		TaskID: id,
+		Status: string(protocolcodec.TaskWorking),
+		Tool:   p.ToolName,
+	}, nil)
 
 	// runTask owns runCtx for its whole lifetime and always releases cancel on
 	// exit; tasks/cancel may also call it early. Calling a CancelFunc twice is
@@ -327,16 +361,43 @@ func (e *Engine) finish(
 				slog.String("taskId", id), slog.String("error", err.Error()))
 		}
 	}
+	// Emit the obs/v1 task.progress terminal event (P2). A child span of the
+	// task's lifecycle span keeps the end correlated with the start.
+	var termErr error
+	if status == protocolcodec.TaskFailed {
+		termErr = errors.New(res.Err)
+	}
+	e.rec.TaskEvent(ctx, e.taskSpan(id).Child(), obs.PhaseEnd, obs.TaskProgressPayload{
+		TaskID:  id,
+		Status:  string(status),
+		Message: msg,
+	}, termErr)
 	e.wake(id)
 }
 
+// taskSpan returns the obs/v1 lifecycle span recorded for id, or a fresh trace
+// if none is held. It does not drop the entry — wake clears engine maps for the
+// task once it is terminal.
+func (e *Engine) taskSpan(id string) obs.SpanContext {
+	e.mu.Lock()
+	span, ok := e.spans[id]
+	e.mu.Unlock()
+	if !ok {
+		return obs.NewTrace()
+	}
+	return span
+}
+
 // wake signals every tasks/result goroutine waiting on id that the task may
-// have reached a terminal status, and drops the cancel func.
+// have reached a terminal status, and drops the cancel func and obs span. It
+// runs after finish has emitted the task's terminal obs/v1 event, so dropping
+// the span here does not lose the correlation.
 func (e *Engine) wake(id string) {
 	e.mu.Lock()
 	chans := e.waiters[id]
 	delete(e.waiters, id)
 	delete(e.cancels, id)
+	delete(e.spans, id)
 	e.mu.Unlock()
 	for _, ch := range chans {
 		close(ch)

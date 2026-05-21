@@ -8,6 +8,8 @@ import (
 	"log/slog"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/hurtener/dockyard/runtime/obs"
 )
 
 // ErrNoTransport is returned by Run when it is called with a nil transport.
@@ -51,6 +53,25 @@ type Options struct {
 	// extension layer through internal/protocolcodec; the runtime never
 	// inspects it, preserving the protocolcodec isolation seam (P3, RFC §5.4).
 	Extensions []ExtensionCapability
+
+	// Obs is the obs/v1 observability emitter the server emits tool, resource,
+	// and lifecycle events to (RFC §11, P2). A nil emitter disables emission —
+	// the server is headless either way; observability is a protocol the
+	// runtime PRODUCES, never a back channel anything reads (CLAUDE.md §6).
+	//
+	// The runtime depends only on the obs.Emitter interface: the ring-buffer
+	// driver (Phase 15), the SSE sink and the OTel adapter (Phase 16) all plug
+	// in here behind the same seam (CLAUDE.md §4.4).
+	Obs obs.Emitter
+
+	// CapturePolicy controls how much of a tool's input/output an emitted
+	// event carries. The default — the zero value, obs.CapturePolicyShape —
+	// captures shape + size only, never full content (CLAUDE.md §7).
+	CapturePolicy obs.CapturePolicy
+
+	// Redactor is the redaction-aware hook obs.CapturePolicyFull requires.
+	// Without it, full-content capture degrades to shape+size.
+	Redactor obs.Redactor
 }
 
 // ExtensionCapability is one MCP extension-capability advertisement: a
@@ -105,9 +126,10 @@ type Server struct {
 	info              Info
 	log               *slog.Logger
 	mcp               *mcpsdk.Server
-	tools             []string // registered tool names, in registration order
-	resources         []string // registered resource URIs, in registration order
-	resourceTemplates []string // registered resource-template URI templates, in registration order
+	rec               *obs.Recorder // obs/v1 emit helper; never nil (NopEmitter when unconfigured)
+	tools             []string      // registered tool names, in registration order
+	resources         []string      // registered resource URIs, in registration order
+	resourceTemplates []string      // registered resource-template URI templates, in registration order
 }
 
 // New constructs a Dockyard MCP server. It returns an error rather than
@@ -140,8 +162,34 @@ func New(info Info, opts *Options) (*Server, error) {
 		info: info,
 		log:  log,
 		mcp:  mcpSrv,
+		rec:  newRecorder(info, opts),
 	}, nil
 }
+
+// newRecorder builds the server's obs/v1 emit helper from opts. It is never
+// nil: an unconfigured emitter yields a Recorder over obs.NopEmitter, so every
+// emit site calls the same methods without a nil guard. The server identity is
+// the obs ServerID — events carry a stable server identity (RFC §11.2).
+func newRecorder(info Info, opts *Options) *obs.Recorder {
+	var emitter obs.Emitter
+	var ropts []obs.RecorderOption
+	if opts != nil {
+		emitter = opts.Obs
+		if opts.CapturePolicy != obs.CapturePolicyShape {
+			ropts = append(ropts, obs.WithCapturePolicy(opts.CapturePolicy))
+		}
+		if opts.Redactor != nil {
+			ropts = append(ropts, obs.WithRedactor(opts.Redactor))
+		}
+	}
+	return obs.NewRecorder(emitter, info.Name, ropts...)
+}
+
+// Recorder returns the server's obs/v1 emit helper. It is never nil. Extension
+// layers (runtime/apps, runtime/tasks) emit their own obs/v1 events through it
+// so every subsystem shares one emitter and one server identity — they EMIT,
+// they never read each other's internals (P2, CLAUDE.md §6).
+func (s *Server) Recorder() *obs.Recorder { return s.rec }
 
 // Info returns the server identity.
 func (s *Server) Info() Info { return s.info }
@@ -174,10 +222,22 @@ func (s *Server) Run(ctx context.Context, t mcpsdk.Transport) error {
 		slog.String("version", s.info.Version),
 		slog.Int("tools", len(s.tools)),
 	)
+	lifeSpan := obs.NewTrace()
+	s.rec.ServerLifecycle(ctx, lifeSpan, obs.ServerLifecyclePayload{
+		State:      "starting",
+		ServerName: s.info.Name,
+		Version:    s.info.Version,
+		Tools:      len(s.tools),
+	})
 	if err := s.mcp.Run(ctx, t); err != nil {
 		return fmt.Errorf("dockyard/runtime/server: serve: %w", err)
 	}
 	s.log.InfoContext(ctx, "dockyard server stopped", slog.String("name", s.info.Name))
+	s.rec.ServerLifecycle(ctx, lifeSpan.Child(), obs.ServerLifecyclePayload{
+		State:      "stopped",
+		ServerName: s.info.Name,
+		Version:    s.info.Version,
+	})
 	return nil
 }
 
