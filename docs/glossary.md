@@ -93,11 +93,27 @@ contract types produced from the Go contract structs by `internal/codegen` via
 hand-authored (P1), deterministic, headered with the `Code generated … DO NOT
 EDIT.` marker, and pinned by golden tests. RFC §6.2. D-032, D-033.
 
+## G (continued)
+
+**`getServer` seam** — the per-request server-selection callback the streamable-HTTP
+transport invokes once per incoming HTTP request to choose the server that handles
+it (the go-sdk's `getServer func(*http.Request) *Server`). Dockyard exposes it as
+`HTTPOptions.ServerForRequest`; it is the seam for per-session and multi-tenant HTTP
+wiring. RFC §5.2. brief 03 §2.3.
+
 ## H
 
 **Host profile** — a pluggable set of host-specific *derivation functions* (e.g.
 deriving Claude's signed `claudemcpcontent.com` iframe origin). A host profile is
 algorithms, not a capability matrix. RFC §7.5. D-012.
+
+**HTTP security options** — the explicit security posture of Dockyard's
+streamable-HTTP transport: DNS-rebinding (localhost) protection,
+Origin/Content-Type verification, and cross-origin (CSRF) protection. Represented
+by `runtime/server.HTTPSecurity` and set deliberately by Dockyard — never inherited
+from an SDK default, because the go-sdk has flipped these defaults between releases.
+`DefaultHTTPSecurity()` returns the recommended all-on posture. RFC §5.2.
+AGENTS.md §7. D-040, D-041.
 
 ## I
 
@@ -169,6 +185,12 @@ a future Postgres driver addable without a rewrite. RFC §13. D-007, D-025.
 `init()` blank-import. V1 ships two: `inmem` (in-memory, for single-user stdio apps)
 and `sqlite` (durable, `modernc.org/sqlite`). Every driver must pass the conformance
 suite. RFC §13. D-026.
+
+**Streamable-HTTP transport** — the current MCP HTTP transport (the 2025-03-26
+spec's streamable HTTP), one of Dockyard's two production transports alongside
+stdio. `runtime/server.Server.HTTPHandler` returns an `http.Handler` serving it,
+with explicit HTTP security options and the `getServer` per-request seam. RFC §5.2.
+brief 03 §2.3.
 
 **Stale generated output** — a generated artifact (a JSON Schema or
 `contracts.ts`) whose on-disk content no longer matches a fresh regeneration

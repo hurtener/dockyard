@@ -81,8 +81,10 @@ func TestNew_NilOptionsUsesDefaultLogger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New with nil options: %v", err)
 	}
-	if s.MCP() == nil {
-		t.Fatal("MCP() returned nil")
+	// A server constructed with nil Options is usable: it can register a tool
+	// (which requires the underlying SDK server) without error.
+	if err := server.AddTool(s, server.ToolDef{Name: "probe"}, echoHandler); err != nil {
+		t.Fatalf("AddTool on nil-options server: %v", err)
 	}
 }
 

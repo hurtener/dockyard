@@ -282,7 +282,7 @@ app binary.
 ## D-021 — `Server.MCP()` is a temporary, documented SDK seam, not long-term API
 
 **Date:** 2026-05-20
-**Status:** Settled
+**Status:** Superseded by D-042 — Phase 07 retired `Server.MCP()`.
 **Where it lives:** RFC §5.4, phase plan `phase-01-runtime-skeleton`
 **Why:** RFC §5.4 / P3 require that handler-facing and manifest-facing Dockyard
 APIs never expose raw SDK or protocol structs. Phase 01 ships `Server.MCP()
@@ -713,3 +713,77 @@ optional later work, deliberately out of scope for the Wave 2 checkpoint per its
 read-only-audit-plus-punch-list charter (AGENTS.md §17.5). References D-034 (the
 drift cross-check is a hard-failing library seam) and D-032 (tygo reads Go
 source).
+
+---
+
+## D-040 — HTTP DNS-rebinding protection is a positive-sense flag mapped explicitly onto the SDK's negative knob
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §5.2, AGENTS.md §7, `runtime/server` (`http.go`), phase
+plan `phase-07-server-core`
+**Why:** AGENTS.md §7 and RFC §5.2 require the HTTP transport's security
+protections to be set **explicitly**, never inherited from an SDK default —
+"defaults have flipped between SDK releases" (brief 03 §2.3). The go-sdk
+expresses DNS-rebinding (localhost) protection as a *negative* option,
+`StreamableHTTPOptions.DisableLocalhostProtection` (on by default; set to true
+to disable). A Dockyard app reasoning about its security posture should not have
+to think in double negatives, and a positive-sense option cannot be left
+silently at an SDK-chosen default. Phase 07 therefore exposes
+`HTTPSecurity.DNSRebindingProtection` as a positive-sense boolean and maps it
+explicitly: `DisableLocalhostProtection: !sec.DNSRebindingProtection`. The
+Dockyard runtime always passes this field a concrete value computed from
+`HTTPSecurity`, so a future SDK flip of the `DisableLocalhostProtection` default
+cannot change Dockyard behaviour. `DefaultHTTPSecurity()` sets it ON.
+
+---
+
+## D-041 — Cross-origin protection is applied as net/http middleware, not via the deprecated SDK field
+
+**Date:** 2026-05-20
+**Status:** Settled
+**Where it lives:** RFC §5.2, AGENTS.md §7, `runtime/server` (`http.go`), phase
+plan `phase-07-server-core`
+**Why:** The go-sdk v1.6.0 `StreamableHTTPOptions.CrossOriginProtection` field
+is **deprecated**: its godoc directs callers to wrap the handler with
+`net/http.CrossOriginProtection` middleware instead, and notes the field's
+behaviour is gated behind an `MCPGODEBUG` compatibility parameter until v1.8.0.
+Building Phase 07 on a deprecated field would mean rework when it is removed and
+would couple Dockyard's security posture to an SDK-version-specific debug knob —
+the opposite of the explicit-security requirement (RFC §5.2, AGENTS.md §7,
+brief 03 §2.3). Phase 07 therefore applies cross-origin (CSRF) protection the
+SDK-recommended way: `HTTPHandler` wraps the SDK handler with
+`http.NewCrossOriginProtection().Handler(...)` when
+`HTTPSecurity.CrossOriginProtection` is set. `HTTPSecurity.TrustedOrigins` maps
+onto `CrossOriginProtection.AddTrustedOrigin`; a malformed origin is a
+constructor error, never a silent misconfiguration. The standard-library
+middleware also covers Origin verification — it rejects non-safe cross-origin
+requests by comparing the `Origin`/`Sec-Fetch-Site` headers against `Host`.
+`DefaultHTTPSecurity()` sets it ON.
+
+---
+
+## D-042 — `Server.MCP()` is retired in Phase 07; the runtime exposes no raw SDK server
+
+**Date:** 2026-05-20
+**Status:** Settled — supersedes D-021
+**Where it lives:** RFC §5.4, P3, `runtime/server` (`server.go`), phase plan
+`phase-07-server-core`
+**Why:** D-021 introduced `Server.MCP() *mcp.Server` in Phase 01 as a
+deliberate, godoc-flagged *temporary* seam, recording that "once Phase 07 lands
+the full Dockyard registration API, `MCP()` is expected to be unexported." Phase
+07 lands exactly that surface. The Dockyard-owned registration API is now
+complete — `AddTool`, `AddToolWithSchemas` (Phase 04), and `AddResource`
+(Phase 07) — as are the transport entrypoints `Run`, `ServeStdio`,
+`ServeInMemory`, and `HTTPHandler`. A repo-wide search confirms no remaining
+consumer of `MCP()`: `internal/protocolcodec` (Phase 02) never touches the
+server, and `runtime/tool` (Phase 04) registers tools through the typed
+`AddToolWithSchemas` surface. The only use was a Phase 01 unit test asserting
+the server was constructed, now re-expressed as a behavioural check
+(registering a tool succeeds). Phase 07 therefore **removes the exported
+`MCP()` method entirely** rather than merely unexporting it: there is no
+in-package caller either, so an unexported `mcp()` accessor would be dead code.
+The SDK `*mcp.Server` is now reached only through the unexported `s.mcp` field,
+restoring RFC §5.4 / P3 — the runtime surface exposes no raw SDK or protocol
+structs. This decision supersedes D-021; the bounded leak D-021 tracked is
+closed.
