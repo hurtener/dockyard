@@ -29,7 +29,10 @@ func newTaskEngine(t *testing.T, advertiseList bool) *tasks.Engine {
 	t.Helper()
 	e, err := tasks.NewEngine(tasks.NewInMemoryStore(), &tasks.Options{
 		AdvertiseList: advertiseList,
-		PollInterval:  10, // fast cadence keeps the test snappy
+		// Phase 14: tasks/list is served only when the engine can also identify
+		// requestors (RFC §8.5). The Phase 13 listing tests want it served.
+		RequestorIdentifiable: advertiseList,
+		PollInterval:          10, // fast cadence keeps the test snappy
 	})
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
