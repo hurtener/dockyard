@@ -2,10 +2,12 @@ package codegen_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/hurtener/dockyard/internal/codegen"
@@ -48,6 +50,256 @@ type nestedOutput struct {
 
 // mapContract exercises a string-keyed map at the top level (a valid object).
 type mapContract map[string]int
+
+// --- depth-audit fixtures: real Go contract shapes -------------------------
+
+// auditSeverity is a named-constant enum type (finding 3 / D-051).
+type auditSeverity string
+
+const (
+	auditSeverityInfo  auditSeverity = "info"
+	auditSeverityWarn  auditSeverity = "warn"
+	auditSeverityError auditSeverity = "error"
+)
+
+// shapesContract exercises the Go shapes the depth audit found mishandled:
+// time.Time (finding 1), json.RawMessage (finding 2), and a named-constant enum
+// (finding 3). It is the schema-side fixture for those findings.
+type shapesContract struct {
+	When    time.Time       `json:"when" jsonschema:"the event timestamp"`
+	Payload json.RawMessage `json:"payload" jsonschema:"arbitrary embedded JSON"`
+	Level   auditSeverity   `json:"level" jsonschema:"the event severity"`
+	Levels  []auditSeverity `json:"levels,omitempty"`
+}
+
+// auditBase is the embedded half of the embedding fixture (finding 4 / D-051).
+type auditBase struct {
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+}
+
+// auditEvent embeds auditBase; encoding/json and the schema both inline the
+// promoted fields, so the schema fixture has id/kind at the top level.
+type auditEvent struct {
+	auditBase
+	Title string `json:"title"`
+}
+
+// auditNode is a recursive (self-referential) contract (finding 5 / D-052).
+type auditNode struct {
+	Name     string       `json:"name"`
+	Children []*auditNode `json:"children,omitempty"`
+}
+
+// auditTree is recursive through a non-pointer struct field.
+type auditTree struct {
+	Label string     `json:"label"`
+	Left  *auditTree `json:"left,omitempty"`
+	Right *auditTree `json:"right,omitempty"`
+}
+
+func TestSchemaFor_TimeAndRawMessage(t *testing.T) {
+	s, err := codegen.SchemaFor[shapesContract]()
+	if err != nil {
+		t.Fatalf("SchemaFor: %v", err)
+	}
+	// Finding 1: time.Time keeps its format: date-time qualifier.
+	when, ok := s.Properties["when"]
+	if !ok {
+		t.Fatal("missing when property")
+	}
+	if when.Type != "string" {
+		t.Errorf("when type = %q, want string", when.Type)
+	}
+	if when.Format != "date-time" {
+		t.Errorf("when format = %q, want date-time (finding 1)", when.Format)
+	}
+	// Finding 2: json.RawMessage is an unconstrained schema, not a byte array.
+	payload, ok := s.Properties["payload"]
+	if !ok {
+		t.Fatal("missing payload property")
+	}
+	if payload.Type != "" || len(payload.Types) != 0 {
+		t.Errorf("payload should be an unconstrained schema, got type %q/%v (finding 2)",
+			payload.Type, payload.Types)
+	}
+	if payload.Items != nil {
+		t.Errorf("payload must not render as an array of bytes (finding 2)")
+	}
+	if payload.Minimum != nil || payload.Maximum != nil {
+		t.Errorf("payload must not carry numeric byte bounds (finding 2)")
+	}
+	// A json.RawMessage field with no `jsonschema` tag marshals to the bare
+	// unconstrained `true` schema — proving the value itself is unconstrained.
+	type rawOnly struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	bare, err := codegen.SchemaFor[rawOnly]()
+	if err != nil {
+		t.Fatalf("SchemaFor[rawOnly]: %v", err)
+	}
+	out, err := codegen.Marshal(bare)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(out), `"payload": true`) {
+		t.Errorf("an untagged json.RawMessage should marshal as `\"payload\": true`, got:\n%s", out)
+	}
+}
+
+func TestSchemaFor_EnumWithoutRegistration(t *testing.T) {
+	// Without WithEnum the engine cannot see the const set — the property is a
+	// plain string with no enum. This pins the gap WithEnum closes.
+	s, err := codegen.SchemaFor[shapesContract]()
+	if err != nil {
+		t.Fatalf("SchemaFor: %v", err)
+	}
+	if level := s.Properties["level"]; len(level.Enum) != 0 {
+		t.Errorf("without WithEnum the level property should carry no enum, got %v", level.Enum)
+	}
+}
+
+func TestSchemaFor_EnumWithRegistration(t *testing.T) {
+	// Finding 3: WithEnum stamps the enum array on every property of the type —
+	// the scalar field, and the slice's item schema. The enum values are the
+	// type's own constant set.
+	s, err := codegen.SchemaFor[shapesContract](codegen.WithEnum("auditSeverity",
+		string(auditSeverityInfo), string(auditSeverityWarn), string(auditSeverityError)))
+	if err != nil {
+		t.Fatalf("SchemaFor: %v", err)
+	}
+	level, ok := s.Properties["level"]
+	if !ok {
+		t.Fatal("missing level property")
+	}
+	if got := enumStrings(level.Enum); !slices.Equal(got, []string{"info", "warn", "error"}) {
+		t.Errorf("level enum = %v, want [info warn error] (finding 3)", got)
+	}
+	if level.Type != "string" {
+		t.Errorf("level type = %q, want string (enum is additive)", level.Type)
+	}
+	levels, ok := s.Properties["levels"]
+	if !ok || levels.Items == nil {
+		t.Fatal("missing levels slice property or its item schema")
+	}
+	if got := enumStrings(levels.Items.Enum); !slices.Equal(got, []string{"info", "warn", "error"}) {
+		t.Errorf("levels item enum = %v, want the enum stamped on slice items too", got)
+	}
+}
+
+func TestEnumsFromSource(t *testing.T) {
+	// EnumsFromSource discovers the const set from contract source — the seam
+	// the generate pipeline uses, since reflection cannot see a const block.
+	src := `type Severity string
+
+const (
+	SeverityInfo  Severity = "info"
+	SeverityWarn  Severity = "warn"
+	SeverityError Severity = "error"
+)
+
+type EventRecord struct {
+	Level Severity ` + "`json:\"level\"`" + `
+}
+`
+	opts, err := codegen.EnumsFromSource(src)
+	if err != nil {
+		t.Fatalf("EnumsFromSource: %v", err)
+	}
+	if len(opts) != 1 {
+		t.Fatalf("expected 1 discovered enum option, got %d", len(opts))
+	}
+	// The discovered option applied to a matching contract stamps the enum.
+	s, err := codegen.SchemaFor[severityCarrier](opts...)
+	if err != nil {
+		t.Fatalf("SchemaFor with discovered enum: %v", err)
+	}
+	if got := enumStrings(s.Properties["level"].Enum); !slices.Equal(got, []string{"info", "warn", "error"}) {
+		t.Errorf("discovered enum should be stamped onto the schema, got %v", got)
+	}
+	// Discovery is deterministic — the option count is stable across calls.
+	again, err := codegen.EnumsFromSource(src)
+	if err != nil {
+		t.Fatalf("EnumsFromSource (again): %v", err)
+	}
+	if len(again) != len(opts) {
+		t.Errorf("EnumsFromSource is not deterministic: %d vs %d", len(opts), len(again))
+	}
+}
+
+// Severity / severityCarrier mirror the type names parsed by TestEnumsFromSource
+// so a discovered enum option matches by type name.
+type Severity string
+
+type severityCarrier struct {
+	Level Severity `json:"level"`
+}
+
+func TestSchemaFor_Embedded(t *testing.T) {
+	// Finding 4: an embedded struct's fields are inlined into the schema, just
+	// as encoding/json promotes them — no nested `auditBase` property.
+	s, err := codegen.SchemaFor[auditEvent]()
+	if err != nil {
+		t.Fatalf("SchemaFor: %v", err)
+	}
+	for _, name := range []string{"id", "kind", "title"} {
+		if _, ok := s.Properties[name]; !ok {
+			t.Errorf("embedded fixture missing inlined property %q", name)
+		}
+	}
+	if _, ok := s.Properties["auditBase"]; ok {
+		t.Errorf("embedded struct must be inlined, not a named `auditBase` property")
+	}
+}
+
+func TestSchemaFor_RecursiveRejected(t *testing.T) {
+	// Finding 5: a recursive contract fails with a specific, documented error —
+	// ErrRecursiveContract — not a vague upstream "cycle detected" string.
+	cases := []struct {
+		name string
+		fn   func() (*jsonschema.Schema, error)
+	}{
+		{"pointer-slice recursion", func() (*jsonschema.Schema, error) {
+			return codegen.SchemaFor[auditNode]()
+		}},
+		{"pointer-field recursion", func() (*jsonschema.Schema, error) {
+			return codegen.SchemaFor[auditTree]()
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := c.fn()
+			if err == nil {
+				t.Fatal("expected a recursion error")
+			}
+			if !errors.Is(err, codegen.ErrRecursiveContract) {
+				t.Errorf("error %v should wrap ErrRecursiveContract", err)
+			}
+			if !errors.Is(err, codegen.ErrInvalidContract) {
+				t.Errorf("ErrRecursiveContract should also wrap ErrInvalidContract, got %v", err)
+			}
+			if !strings.Contains(err.Error(), "D-052") {
+				t.Errorf("error should cite the D-052 limitation, got %v", err)
+			}
+			if strings.Contains(err.Error(), "cycle detected for type") {
+				t.Errorf("error should not leak the vague upstream string, got %v", err)
+			}
+		})
+	}
+}
+
+// enumStrings renders an enum's []any values as []string for comparison.
+func enumStrings(vals []any) []string {
+	out := make([]string, 0, len(vals))
+	for _, v := range vals {
+		s, ok := v.(string)
+		if !ok {
+			return nil
+		}
+		out = append(out, s)
+	}
+	return out
+}
 
 func TestSchemaFor_Scalars(t *testing.T) {
 	s, err := codegen.SchemaFor[scalarsInput]()

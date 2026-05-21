@@ -94,12 +94,49 @@ type EventRecord struct {
 }
 `
 
+// embeddedTSSource exercises an embedded (anonymous) struct field. tygo would
+// emit `Base: Base;` as a named property; Dockyard flattens the embedded
+// struct's fields into the embedding interface so the TypeScript matches the
+// JSON Schema and Go's own encoding/json promotion (finding 4 / D-051).
+const embeddedTSSource = `// AuditBase carries fields shared by every audit record.
+type AuditBase struct {
+	ID   string ` + "`json:\"id\"`" + `
+	Kind string ` + "`json:\"kind\"`" + `
+}
+
+// AuditEvent embeds AuditBase — its id/kind fields are promoted, not nested.
+type AuditEvent struct {
+	AuditBase
+	Title string ` + "`json:\"title\"`" + `
+}
+
+// AuditSpan embeds AuditEvent transitively and shadows kind with its own field.
+type AuditSpan struct {
+	AuditEvent
+	Kind     string ` + "`json:\"kind\"`" + `
+	Duration int    ` + "`json:\"duration\"`" + `
+}
+`
+
+// shapesTSSource exercises a recursive (self-referential) contract — tygo
+// handles recursion natively in TypeScript even though the JSON Schema
+// generator cannot (finding 5 / D-052). It pairs the recursion-limit decision
+// with proof that the TS half is unaffected.
+const shapesTSSource = `// AuditNode is a recursive contract: a node referencing more nodes.
+type AuditNode struct {
+	Name     string       ` + "`json:\"name\"`" + `
+	Children []*AuditNode ` + "`json:\"children,omitempty\"`" + `
+}
+`
+
 func tsGoldenContracts() []tsGoldenContract {
 	return []tsGoldenContract{
 		{file: "scalars_input.ts.golden", source: scalarsTSSource},
 		{file: "nested_output.ts.golden", source: nestedTSSource},
 		{file: "show_revenue.ts.golden", source: revenueTSSource},
 		{file: "enum_record.ts.golden", source: enumTSSource},
+		{file: "embedded_event.ts.golden", source: embeddedTSSource},
+		{file: "recursive_node.ts.golden", source: shapesTSSource},
 		{
 			file:    "show_revenue_null.ts.golden",
 			source:  revenueTSSource,

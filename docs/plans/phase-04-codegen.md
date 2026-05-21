@@ -196,6 +196,26 @@ func AddToolWithSchemas[In, Out any](s *Server, def ToolDef,
   diff, not a silent drift — and by pinning the version. RFC §18 Q-6 (lockstep with
   the SDK's pinned version) is noted; Phase 04 keeps `v0.4.3`, the version the SDK
   already pulls, so there is one schema dialect.
+- **Inference is type-only — three Go shapes need Dockyard-side correction
+  (depth-remediation).** The engine infers a property schema from its Go type
+  alone, which a depth audit found lossy or wrong for real contracts: `time.Time`
+  dropped its `format: date-time`, `json.RawMessage` rendered as a byte array, and
+  a named-constant enum lost its `enum` array. All three are corrected inside the
+  single schema dialect — `time.Time`/`json.RawMessage` via the engine's
+  `TypeSchemas` hook, enums via the `WithEnum` option fed by `EnumsFromSource`
+  (D-050, D-051). Golden fixtures now exercise every one of these shapes so a
+  regression is a visible diff.
+- **Recursive contracts are a documented V1 limitation (D-052).** A
+  self-referential contract type cannot be expressed as a schema:
+  `google/jsonschema-go` does not emit `$ref`/`$defs` for recursive Go types and
+  exposes no hook to break the cycle, and forking the engine would create the
+  divergent schema dialect RFC §6.2 settled against. `SchemaForType` detects the
+  cycle up front and returns `ErrRecursiveContract` — a specific, actionable error
+  citing D-052 — rather than leaking the engine's vague `cycle detected` string.
+  The TypeScript half (tygo) handles recursion natively; only the schema half is
+  constrained. Revisiting `$defs` support is deferred to a post-V1 phase; an
+  author who needs a tree shape uses a non-recursive encoding (a flat node list
+  with id references) in the meantime.
 - **The builder's generic shape departs from the brief sketch (D-029).** Risk is
   bounded: the departure is a Go-language constraint, not a design change, and the
   fluent contract-first ergonomics survive.

@@ -217,6 +217,89 @@ func assertBalanced(t *testing.T, ts string) {
 	}
 }
 
+// --- embedded-struct flattening (finding 4 / D-051) ------------------------
+
+func TestTypeScriptForSource_EmbeddedStructFlattened(t *testing.T) {
+	t.Parallel()
+	src := "// Base carries shared fields.\n" +
+		"type Base struct {\n" +
+		"\tID   string `json:\"id\"`\n" +
+		"\tKind string `json:\"kind\"`\n" +
+		"}\n\n" +
+		"// Widget embeds Base.\n" +
+		"type Widget struct {\n" +
+		"\tBase\n" +
+		"\tTitle string `json:\"title\"`\n" +
+		"}\n"
+	got, err := codegen.TypeScriptForSource(src)
+	if err != nil {
+		t.Fatalf("TypeScriptForSource: %v", err)
+	}
+	s := string(got)
+	// The embedded struct's fields are inlined into Widget.
+	for _, want := range []string{"id: string;", "kind: string;", "title: string;"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("embedded field %q should be inlined into Widget:\n%s", want, s)
+		}
+	}
+	// tygo's default `Base: Base;` named-property form must NOT appear.
+	if strings.Contains(s, "Base: Base") {
+		t.Errorf("embedded struct must be flattened, not emitted as a named property:\n%s", s)
+	}
+}
+
+func TestTypeScriptForSource_EmbeddedTransitiveAndShadowing(t *testing.T) {
+	t.Parallel()
+	// AuditSpan embeds AuditEvent (which embeds AuditBase) and re-declares `kind`
+	// — Go's "outer wins" promotion rule. The flattened interface must carry
+	// `kind` exactly once.
+	src := "type Inner struct {\n" +
+		"\tID   string `json:\"id\"`\n" +
+		"\tKind string `json:\"kind\"`\n" +
+		"}\n\n" +
+		"type Mid struct {\n" +
+		"\tInner\n" +
+		"\tTitle string `json:\"title\"`\n" +
+		"}\n\n" +
+		"type Outer struct {\n" +
+		"\tMid\n" +
+		"\tKind     string `json:\"kind\"`\n" +
+		"\tDuration int    `json:\"duration\"`\n" +
+		"}\n"
+	got, err := codegen.TypeScriptForSource(src)
+	if err != nil {
+		t.Fatalf("TypeScriptForSource: %v", err)
+	}
+	s := string(got)
+	outer := s[strings.Index(s, "export interface Outer"):]
+	outer = outer[:strings.Index(outer, "}")]
+	if n := strings.Count(outer, "kind"); n != 1 {
+		t.Errorf("`kind` should appear exactly once in Outer (outer wins), got %d:\n%s", n, outer)
+	}
+	for _, want := range []string{"id", "title", "duration"} {
+		if !strings.Contains(outer, want) {
+			t.Errorf("transitively promoted field %q missing from Outer:\n%s", want, outer)
+		}
+	}
+}
+
+func TestTypeScriptForSource_EmbeddedForeignTypeLeftAlone(t *testing.T) {
+	t.Parallel()
+	// An embedded type that is not a locally declared struct cannot be flattened
+	// — its fields are not visible here — so it is left for tygo.
+	src := "type Widget struct {\n" +
+		"\tsync.Mutex\n" +
+		"\tName string `json:\"name\"`\n" +
+		"}\n"
+	got, err := codegen.TypeScriptForSource(src)
+	if err != nil {
+		t.Fatalf("TypeScriptForSource: %v", err)
+	}
+	if !strings.Contains(string(got), "name: string;") {
+		t.Errorf("the non-embedded field should still render:\n%s", got)
+	}
+}
+
 // --- TypeScriptForDir ------------------------------------------------------
 
 func TestTypeScriptForDir(t *testing.T) {

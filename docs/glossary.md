@@ -95,6 +95,17 @@ generated input JSON Schema *before* the typed handler runs, so a schema-violati
 argument becomes a typed `tool.ArgumentError` (wrapping `ErrInvalidArguments`)
 rather than a panic or a vague failure. RFC §5, §6.3. D-044.
 
+**Embedded-struct flattening** — the `internal/codegen` step that inlines an
+embedded (anonymous) struct's fields into the embedding interface's generated
+TypeScript, matching how the JSON Schema and Go's own `encoding/json` promote
+those fields. Without it the TypeScript and the schema disagree. RFC §6.2.
+D-051.
+
+**Enum registration** — supplying a named contract type's constant set to the
+schema generator (`WithEnum`, or `EnumsFromSource` parsed from contract source)
+so the generated JSON Schema carries an `enum` array. Reflection cannot see a
+Go `const` block, so the values must be registered. RFC §6.1. D-051.
+
 ## F
 
 **Forward-only migration** — an append-only, ordered, idempotent schema or data step
@@ -224,6 +235,12 @@ the app opts into. `internal/manifest` parses and shape-checks the `quality`
 block; the gates are *enforced* by `dockyard validate`. RFC §4.2, §9.4. D-035.
 
 ## R
+
+**Recursive contract** — a Go contract type that, directly or transitively,
+contains itself. An explicit, documented V1 limitation of the schema generator:
+the pinned inference engine cannot emit `$ref`/`$defs` for cycles, so
+`SchemaForType` rejects a recursive contract with `ErrRecursiveContract` rather
+than fail vaguely. RFC §6.1. D-052.
 
 **Resource template** — a server registration that serves a *family* of
 resources addressed by an RFC 6570 URI template (e.g. `ui://app/{view}`) rather

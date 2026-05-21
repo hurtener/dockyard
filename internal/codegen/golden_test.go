@@ -55,6 +55,24 @@ func goldenContracts() []goldenContract {
 			}
 			return codegen.Marshal(s)
 		}},
+		// Depth-audit fixtures: time.Time + json.RawMessage + a registered enum
+		// (findings 1–3) and an embedded struct inlined into the schema
+		// (finding 4). A regression in any of these now surfaces as a diff.
+		{"shapes_contract.golden", func() ([]byte, error) {
+			s, err := codegen.SchemaFor[shapesContract](codegen.WithEnum("auditSeverity",
+				string(auditSeverityInfo), string(auditSeverityWarn), string(auditSeverityError)))
+			if err != nil {
+				return nil, err
+			}
+			return codegen.Marshal(s)
+		}},
+		{"embedded_event.golden", func() ([]byte, error) {
+			s, err := codegen.SchemaFor[auditEvent]()
+			if err != nil {
+				return nil, err
+			}
+			return codegen.Marshal(s)
+		}},
 	}
 }
 

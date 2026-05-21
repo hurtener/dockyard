@@ -991,6 +991,111 @@ Apps core, exactly as RFC §7.5 mandates.
 
 ---
 
+## D-050 — `time.Time` and `json.RawMessage` get corrected schema mappings, not the inference engine's defaults
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §6.1, `internal/codegen` (`schema.go`), phase plan
+`phase-04-codegen`
+**Why:** A depth audit of the codegen pipeline found `internal/codegen`
+silently mishandling two standard-library types because
+`github.com/google/jsonschema-go` infers a property's schema from its Go type
+alone. A `time.Time` field rendered as a bare `{"type":"string"}` — the engine
+drops the `format: date-time` qualifier, even though `time.Time` marshals to an
+RFC 3339 string. A `json.RawMessage` field rendered as `[]byte` does:
+`{"type":["null","array"],"items":{integer 0-255}}` — an outright *wrong*
+schema, since `json.RawMessage` is arbitrary embedded JSON, not a byte array.
+Both are corrected via the engine's own `ForOptions.TypeSchemas` hook (the
+documented extension point): `time.Time` maps to `{type:"string",
+format:"date-time"}` and `json.RawMessage` maps to the empty schema, which
+marshals to the unconstrained `true` — accepting any JSON value. The correction
+lives in one place, `contractTypeSchemas`, applied on every `SchemaForType`
+call, so a misdeclared `time.Time` or `json.RawMessage` contract field can
+never reach a host with a lossy or wrong schema. This stays inside the single
+schema dialect Dockyard standardizes on (RFC §6.2) — it overrides two
+translations, it does not add a parallel schema library.
+
+---
+
+## D-051 — Named-constant enums, embedded structs, and value-type drift: the generated artifacts must faithfully mirror every Go contract shape
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §6.1, §6.2, `internal/codegen` (`schema.go`,
+`enums.go`, `typescript.go`, `drift.go`), phase plans `phase-04-codegen`,
+`phase-05-typescript-codegen`
+**Why:** The same depth audit found three further ways the two generated
+artifacts diverged from Go's actual JSON shape — each invisible because the
+test fixtures never exercised the shape.
+**Named-constant enums.** A `type Severity string` plus a `const` set rendered
+as a plain `{"type":"string"}`: the engine infers from the field *type*, and a
+named type's constants are invisible to reflection, so the `enum` array was
+lost — while the TypeScript generator (tygo, AST-based) *did* emit the union,
+so schema and TS diverged. The fix is the `WithEnum` schema option: it
+registers a named type's constant values, and `SchemaFor` post-processes the
+schema to stamp the `enum` array onto every property of that type — top-level,
+nested, slice items, map values. `EnumsFromSource` discovers those constant
+sets by parsing contract source, since reflection alone cannot; it is the seam
+the `generate` pipeline uses. `enum` is additive — the inferred `type` stays —
+so the schema now matches the tygo union.
+**Embedded structs.** The schema *inlines* an embedded struct's fields
+(correct — it matches Go's `encoding/json` field promotion), but tygo emitted
+the embedded type as a *named property* (`Base: Base;`), so the two artifacts
+disagreed and neither matched the wire format the UI deserializes.
+`typeDeclSource` now flattens embedded struct fields at the AST level before
+handing source to tygo: an anonymous field whose type is a locally declared
+struct is replaced by that struct's fields, transitively, applying Go's "outer
+wins" shadowing rule. An embedded type from another package is left for tygo,
+since its fields are not visible. The TypeScript now inlines exactly as the
+schema does.
+**Value-type drift.** `CrossCheck` compared only the property *name set* and
+optionality, so it was structurally blind to exactly the divergences above — a
+property could be a string in the schema and a number in TypeScript and pass.
+`CrossCheck` now also compares a coarse value-type *kind*
+(string/number/boolean/array/object); a same-named property whose kind diverges
+between the two artifacts is reported as drift. The comparison is deliberately
+coarse — robust across two independent generators and their cosmetic noise
+(tygo's `/* int */`, a nilable `["null",T]` type set) — and a named or
+unconstrained type is treated as kind-compatible, so a legitimately opaque
+field never reports a false drift. The documented `WithNullOptional`
+limitation (an optional field renders `T | null` with no `?`, read as required
+by the line-oriented parser) is unchanged: callers still feed `CrossCheck`
+default-style TypeScript.
+
+---
+
+## D-052 — Recursive contracts are an explicit, documented V1 limitation, not a silent gap
+
+**Date:** 2026-05-21
+**Status:** Settled
+**Where it lives:** RFC §6.1, `internal/codegen` (`schema.go`, package docs),
+phase plan `phase-04-codegen`
+**Why:** A recursive (self-referential) contract — a Go type that, directly or
+transitively, contains itself — made `internal/codegen` hard-fail.
+`github.com/google/jsonschema-go` returned a vague internal `cycle detected`
+string and `SchemaForType` propagated it as a generic `ErrInvalidContract`.
+JSON Schema's `$ref`/`$defs` exist precisely to express cycles, so the first
+remediation attempt was a real fix: emit `$defs`/`$ref` for recursive types, or
+post-process the engine's output to break the cycle. That attempt **failed for
+a concrete reason**: the pinned engine — the single schema dialect Dockyard
+standardizes on (RFC §6.2) — does not emit `$defs` for recursive Go types at
+all. Its cycle detection fires deep inside the reflection walk *before* any
+schema node for the recursive type exists, and `ForOptions` exposes no hook to
+supply a `$ref`, break the cycle, or post-process it. A real fix would mean
+forking the engine and maintaining a divergent inference path — exactly the
+divergent-dialect cost RFC §6.2 settled against. Recursion is therefore an
+**explicit V1 limitation**. `SchemaForType` detects the cycle up front with its
+own depth-first walk and returns `ErrRecursiveContract` — a specific,
+actionable error that names the cycle path and cites this decision — instead of
+leaking the engine's vague string. `ErrRecursiveContract` wraps
+`ErrInvalidContract`, so existing `errors.Is` callers keep working. The
+limitation is asymmetric: the TypeScript generator (tygo) handles recursion
+natively, so only the schema half is constrained; a contract author who needs a
+tree shape uses a non-recursive encoding (e.g. a flat node list with id
+references) until a post-V1 phase revisits `$defs` support.
+
+---
+
 ## D-053 — Panic safety is a toolchain-enforced guarantee: every handler-invocation path is recover-wrapped
 
 **Date:** 2026-05-21
