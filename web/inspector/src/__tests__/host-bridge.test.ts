@@ -98,7 +98,7 @@ describe('HostBridge handshake', () => {
     view.close();
   });
 
-  it('answers a tools/call with a not-wired error (Phase 23 seam)', async () => {
+  it('answers a tools/call with an error when no fixture is wired', async () => {
     const channel = new MessageChannel();
     const host = new HostBridge({
       peer: channel.port1 as unknown as MessageSink,
@@ -111,7 +111,39 @@ describe('HostBridge handshake', () => {
     });
     await Promise.all([view.connect(), host.ready()]);
 
-    await expect(view.callTool('demo', {})).rejects.toThrow(/not wired/);
+    await expect(view.callTool('demo', {})).rejects.toThrow(/fixture/);
+    host.close();
+    view.close();
+  });
+
+  it('answers a tools/call from the wired fixture responder (the fixture switcher)', async () => {
+    const channel = new MessageChannel();
+    const host = new HostBridge({
+      peer: channel.port1 as unknown as MessageSink,
+      source: portSource(channel.port1),
+    });
+    host.start();
+    const view = createBridge({
+      peer: channel.port2 as unknown as MessageSink,
+      source: portSource(channel.port2),
+    });
+    await Promise.all([view.connect(), host.ready()]);
+
+    // A successful fixture: the App's tools/call resolves with synthetic
+    // structuredContent — the fixture drives the App's UI state.
+    host.setCallToolResponder(() => ({
+      structuredContent: { total: 1234 },
+      text: 'happy fixture',
+    }));
+    const ok = await view.callTool('demo', {});
+    expect(ok.structuredContent).toEqual({ total: 1234 });
+
+    // An error fixture: the tools/call rejects so the App renders its error
+    // state.
+    host.setCallToolResponder(() => ({
+      error: { code: -32003, message: 'permission denied' },
+    }));
+    await expect(view.callTool('demo', {})).rejects.toThrow(/permission denied/);
     host.close();
     view.close();
   });

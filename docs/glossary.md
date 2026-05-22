@@ -58,6 +58,13 @@ inspector. RFC §7.2, §7.3. D-016, D-059, D-060, D-061.
 advertises the extensions and capabilities it supports. Dockyard reads this at run
 time and adapts; it never hardcodes a per-host capability matrix. RFC §7.5. D-011.
 
+**Capability-set emulation** — the inspector's Host control: a set of capability
+toggles (Apps on/off, Tasks on/off, which display modes the host grants) the
+developer flips to render an App as a host that does or does not negotiate a
+capability, exercising graceful degradation. Driven through the injectable
+`hostContext`; it is a capability toggle set, never a hardcoded per-host
+capability matrix (CLAUDE.md §6 / §13). RFC §7.5, §12. D-100.
+
 **Capability-degradation test** — a `dockyard test` category (Phase 21) that
 exercises a project across host capability sets — Apps negotiated or not, a
 display mode supported or not — and asserts the project degrades gracefully:
@@ -246,6 +253,14 @@ Go `const` block, so the values must be registered. RFC §6.1. D-051.
 
 ## F
 
+**Fixture switcher** — the inspector's Fixtures DetailRail panel: a
+`happy` / `empty` / `error` / `permission` / `slow` / `large` selector wired to
+the attached server's generated tool contracts. Selecting a fixture builds
+synthetic `structuredContent` from the tool's generated output contract
+(P1 — contract-first, never hand-written) and feeds it to the previewed App's
+`tools/call`, so an App's UI states are exercised without a backend.
+RFC §12, §6. D-100.
+
 **Fuzz target** — a Go `FuzzXxx` function (standard `go test` toolchain) that
 exercises a parse or decode surface — a `protocolcodec` wire decoder, the
 `dockyard.app.yaml` loader, the codegen Go-source parser, the JSON-RPC tool-
@@ -358,6 +373,12 @@ relays the `obs/v1` SSE stream and a bounded JSON-RPC log to the inspector UI.
 It is a pure SSE *client* of `runtime/obs`'s SSE sink (P2 — it consumes the
 public `obs/v1` contract, never runtime internals) and fans the stream to many
 inspector UI clients without blocking on a slow one. RFC §11, §12. D-096.
+
+**Inspector verdict** — one row of the inspector's Verdicts DetailRail panel: a
+contract-drift, schema-validation, or spec-compliance result surfaced as an
+ok / warn / error `StatusChip`. Sourced from `internal/validate.Run` — the same
+`dockyard validate` quality-gate engine — so the inspector never reimplements
+the checks. RFC §12. D-099.
 
 **Install host profile** — the small per-MCP-host (`claude`, `cursor`)
 structure in `internal/installpkg` that derives that host's MCP config-file

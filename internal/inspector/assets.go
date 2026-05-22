@@ -47,6 +47,39 @@ func newMux(opts Options, log *slog.Logger) http.Handler {
 	mux.Handle("GET /api/obs/stream", relay.streamHandler())
 	mux.Handle("GET /api/rpc/log", relay.rpcLogHandler())
 
+	// /api/verdicts — the read-only Verdicts panel source (contract-drift,
+	// schema-validation, spec-compliance). When no source is configured the
+	// endpoint answers with an empty array so the UI's four-state empty state
+	// renders cleanly. The handler re-runs the checks per request — the
+	// verdicts are never a stale cache.
+	mux.HandleFunc("GET /api/verdicts", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		verdicts := []Verdict{}
+		if opts.Verdicts != nil {
+			if v := opts.Verdicts(); v != nil {
+				verdicts = v
+			}
+		}
+		_ = json.NewEncoder(w).Encode(verdicts)
+	})
+
+	// /api/contracts — the read-only generated-contract source the fixture
+	// switcher derives its fixtures from (RFC §12, §6 — P1). When no source is
+	// configured the endpoint answers with an empty array so the Fixtures /
+	// Tools panels render their four-state empty state.
+	mux.HandleFunc("GET /api/contracts", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		if opts.Contracts != nil {
+			if raw := opts.Contracts(); len(raw) > 0 {
+				_, _ = w.Write(raw)
+				return
+			}
+		}
+		_, _ = w.Write([]byte("[]"))
+	})
+
 	// The web/inspector frontend (its built dist/ tree), or a placeholder.
 	mux.Handle("/", frontendHandler(opts.Assets, log))
 

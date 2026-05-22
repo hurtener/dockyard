@@ -2480,3 +2480,67 @@ placeholder bundle (`internal/inspector/dist/`) keeps the `//go:embed`
 directive resolvable before any frontend build; wiring the production
 `web/inspector` build into the binary is the Phase 23 `dockyard inspect`
 packaging step.
+
+---
+
+## D-099 — `dockyard inspect` attaches a read-only obs relay, not an MCP client
+
+**Status:** Settled (Phase 23).
+
+`dockyard inspect --url <server>` attaches the inspector to a running MCP
+server by pointing the inspector's read-only obs/v1 relay at the server's
+`/obs/v1/stream` endpoint — it deliberately does **not** open an MCP client
+session. This keeps P4 intact: Dockyard ships no production MCP client, and the
+inspector — the lone client-shaped surface — stays a localhost-bound, read-only
+relay, never an arbitrary-execution proxy. `--url` derives the obs stream URL
+from the server base URL (the canonical `/obs/v1/stream` path is appended); a
+non-http(s) or hostless URL is a typed error. `--port` selects the inspector's
+own loopback port (host is always `127.0.0.1`; a non-loopback bind is refused by
+Phase 22's `ErrNonLoopbackBind` before the listener opens). `--no-open`
+suppresses the browser-open for CI. The Tools/Resources panel's invoke path is
+fixture-backed in the standalone case — a `tools/call` from a previewed App is
+answered from the active fixture, never proxied to live execution.
+
+---
+
+## D-100 — Capability-set emulation is a capability toggle set, never a host matrix
+
+**Status:** Settled (Phase 23).
+
+The inspector's Host control emulates a host's capability set as a set of
+capability **toggles** — Apps on/off, Tasks on/off, which display modes the
+host grants — held in a plain `CapabilitySet` of boolean/value fields. Flipping
+a toggle re-derives the `hostContext` + `hostCapabilities` the host-half bridge
+advertises in the `ui/initialize` handshake, and the App re-runs the handshake
+and degrades for real. There is **no hardcoded per-host capability matrix**
+(CLAUDE.md §6 / §13 — a host matrix always drifts). The named presets
+(`Fully capable`, `Apps only`, `Inline only`, `No Apps extension`) are
+convenience starting toggle-sets only: selecting one seeds the toggles and is
+never consulted at handshake time — adding or removing a preset changes no
+negotiation logic. The fixture switcher closes Phase 22's `tools/call`
+not-wired seam: `HostBridge.setCallToolResponder` lets the active fixture
+answer a `tools/call`, and a successful fixture resolves the call with
+synthetic `structuredContent` derived from the tool's generated output
+contract (P1), an error fixture rejects it — so an App's six UI states are
+exercised without a backend.
+
+---
+
+## D-101 — The inspector auto-attach inside `dockyard dev` is a deferred seam
+
+**Status:** Settled (Phase 23).
+
+RFC §12 names two inspector entry points: `dockyard inspect` (standalone) and
+automatic operation inside `dockyard dev`. Phase 23 ships `dockyard inspect`
+and **defers** embedding the inspector backend into the `dockyard dev`
+supervisor. The `internal/devloop` supervisor is a self-contained process-tree
+orchestrator (the Go server child, the Vite child, the fsnotify watcher);
+embedding the inspector HTTP backend into that process is a devloop change with
+its own lifecycle and teardown concerns, not an inspector change, and folding
+it in alongside Phase 23's substantial inspector-advanced surface would widen
+the phase's risk. The auto-attach is a clean follow-up seam: a developer
+already gets the full inspector against a `dockyard dev` server by running
+`dockyard inspect --url` against that server's HTTP transport. This is a
+deliberate, documented deviation from building the `dockyard dev` integration
+in this phase; the master plan's Phase 23 acceptance criteria
+(`dockyard inspect` attaches to any running server) are met.

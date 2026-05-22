@@ -97,6 +97,21 @@ export interface HostBridgeOptions {
   onRpc?: (entry: HostRpcLogEntry) => void;
 }
 
+/**
+ * A fixture-backed `tools/call` outcome — the shape the fixture switcher hands
+ * the host bridge. A successful fixture carries `structuredContent`; a failed
+ * fixture carries an `error`. The bridge answers the App's `tools/call` with
+ * whichever is set.
+ */
+export interface CallToolFixtureResult {
+  /** Synthetic structured content — present for a successful fixture. */
+  structuredContent?: unknown;
+  /** A plain-text content line. */
+  text?: string;
+  /** A JSON-RPC error — present for a failed fixture. */
+  error?: { code: number; message: string };
+}
+
 /** The default inspector host context — the inspector emulates a capable host. */
 export function defaultHostContext(): HostContext {
   return {
@@ -129,6 +144,18 @@ export class HostBridge {
   private closed = false;
   private initializeReceived = false;
   private viewReady = false;
+
+  /**
+   * The fixture-backed `tools/call` responder. Phase 23's fixture switcher
+   * sets this so a `tools/call` from the App is answered from the active
+   * fixture (RFC §12 — the inspector closes the Phase 22 not-wired seam with a
+   * fixture, never a live arbitrary-execution proxy). When unset, `tools/call`
+   * still answers with the explicit "not wired" JSON-RPC error so an App
+   * degrades gracefully rather than hanging.
+   */
+  private callToolResponder:
+    | ((params: unknown) => CallToolFixtureResult)
+    | undefined;
 
   /** Resolves once the View has sent `ui/notifications/initialized`. */
   private resolveReady!: () => void;
@@ -212,6 +239,20 @@ export class HostBridge {
     return { ...this.hostContext };
   }
 
+  /**
+   * Sets the fixture-backed `tools/call` responder (RFC §12 — the fixture
+   * switcher). After this, a `tools/call` request from the App is answered
+   * from the fixture the responder returns: a successful fixture resolves the
+   * call with synthetic `structuredContent`, a failed fixture resolves it with
+   * a JSON-RPC error. Passing `undefined` reverts to the "not wired" error.
+   * It is a dev-test response, never a live arbitrary-execution proxy.
+   */
+  setCallToolResponder(
+    responder: ((params: unknown) => CallToolFixtureResult) | undefined,
+  ): void {
+    this.callToolResponder = responder;
+  }
+
   /** Tears the bridge down: drops the message listener. Idempotent. */
   close(): void {
     if (this.closed) return;
@@ -256,15 +297,12 @@ export class HostBridge {
         this.respond(req.id, {});
         return;
       case ViewMethod.callTool:
-        // Phase 22 seam: a real `tools/call` proxy to the running MCP server is
-        // Phase 23 (the fixture switcher / live invocation). Until then the
-        // host answers with an explicit "not wired" JSON-RPC error so an App
-        // degrades gracefully rather than hanging.
-        this.respondError(
-          req.id,
-          -32601,
-          'tools/call proxy is not wired in the Phase 22 inspector core',
-        );
+        // Phase 23 closes the Phase 22 seam: when the fixture switcher has set
+        // a responder, the host answers `tools/call` from the active fixture
+        // — a dev-test response, never a live arbitrary-execution proxy
+        // (RFC §12). With no responder set, the host still answers with the
+        // explicit "not wired" error so an App degrades gracefully.
+        this.handleCallTool(req);
         return;
       default:
         // An unknown method — answer with a method-not-found error.
@@ -319,6 +357,32 @@ export class HostBridge {
     }
     const result: RequestDisplayModeResult = { mode, granted };
     this.respond(req.id, result);
+  }
+
+  private handleCallTool(req: JsonRpcRequest): void {
+    if (!this.callToolResponder) {
+      // No fixture responder wired — the explicit, graceful "not wired" error.
+      this.respondError(
+        req.id,
+        -32601,
+        'tools/call has no fixture wired — select a fixture in the inspector',
+      );
+      return;
+    }
+    const fixture = this.callToolResponder(req.params);
+    if (fixture.error) {
+      this.respondError(req.id, fixture.error.code, fixture.error.message);
+      return;
+    }
+    // The MCP `tools/call` result shape: `content` + `structuredContent`.
+    const content =
+      fixture.text !== undefined
+        ? [{ type: 'text', text: fixture.text }]
+        : [];
+    this.respond(req.id, {
+      content,
+      structuredContent: fixture.structuredContent,
+    });
   }
 
   private notify(method: string, params: unknown): void {
