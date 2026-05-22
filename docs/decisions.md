@@ -399,7 +399,11 @@ CGo-free and CI enforces `CGO_ENABLED=0` (brief 06 §4 R7).
 ## D-027 — Migrations are forward-only, append-only, idempotent, and runner-tracked
 
 **Date:** 2026-05-20
-**Status:** Settled
+**Status:** Settled — enforcement claim partially superseded by D-111. The
+`ErrMigrationMutated` / fingerprint runtime-enforcement claim below is false (a
+Go func cannot be content-hashed) and was removed in remediation R3; the
+forward-only / append-only / idempotent / runner-tracked semantics and the
+`ErrMigrationOutOfOrder` reorder/removal check stand. See D-111.
 **Where it lives:** RFC §13, AGENTS.md §9, `runtime/store/migrate.go`
 **Why:** AGENTS.md §9 mandates forward-only migrations that are never edited after
 merge. Phase 03 implements one shared migration runner (`store.RunMigrations`) that
@@ -2628,3 +2632,115 @@ degrade gracefully: a `--dir` that names no Dockyard project, or a project
 never `dockyard generate`d, yields the panels' honest four-state empty state,
 never a crash — so `dockyard inspect --url <remote>` with no local project
 still works.
+
+---
+
+## D-111 — "no migration edits after merge" is a review-enforced rule, not a runtime-enforced one (supersedes D-027's enforcement claim)
+
+**Status:** Settled (depth-audit remediation R3).
+
+**Supersedes:** the enforcement claim of D-027.
+
+D-027 stated the migration runner detects "a recorded migration whose
+fingerprint diverges (`ErrMigrationMutated` — a migration edited after merge)".
+The pre-Wave-9 depth audit found that claim false. A `store.Migration`'s effect
+is a Go func (`Up`); `Migration.fingerprint` hashed only
+`fmt.Sprintf("%d\x00%s", ordinal, m.ID)` — the ordinal and ID — because a Go
+func value cannot be content-hashed (the language offers no stable hash of a
+closure body, and closures over different source share an entry point). Editing
+a migration's `Up` body in place — same `ID`, same ordinal — therefore produced
+an identical fingerprint, so the `ErrMigrationMutated` branch could never fire
+for that case. It was unreachable dead code, and the runner's `rec.Ordinal !=
+ordinal` check already covered the only thing the fingerprint could detect
+(reorder).
+
+R3 takes the honest option: `ErrMigrationMutated`, the `Migration.fingerprint`
+method, and the `appliedRecord.Fingerprint` field are removed; the
+`appliedRecord` now stores only the ordinal. The runner still enforces, at
+runtime, that the registered sequence extends the applied sequence as a prefix
+and that no applied migration was reordered or removed
+(`ErrMigrationOutOfOrder`). The rule "never edit a migration's `Up` body after
+it merges" (CLAUDE.md §9) stands — but it is enforced by **code review and the
+CI diff**, not by the runtime, and the code (`Migration`/`RunMigrations`/
+`errors.go` docstrings) now says so plainly. CLAUDE.md §9's wording ("never edit
+a migration after it merges") was already a statement of the rule, not a claim
+of runtime enforcement, so it is left unchanged.
+
+The preferred option — a genuine content hash — was considered and rejected: it
+would require every `Migration` author to supply a hashable representation of
+the migration's effect (declared SQL text or an author-set checksum), which the
+V1 pure-Go-func `Migration` shape does not carry. Adding that is a larger design
+change than a remediation should make unilaterally; if a future phase wants
+runtime enforcement it must first give `Migration` a hashable effect
+representation (an RFC change), at which point this decision is revisited.
+
+---
+
+## D-112 — HTTP Content-Type verification is an explicit field of the Dockyard HTTPSecurity posture
+
+**Status:** Settled (depth-audit remediation R3).
+
+CLAUDE.md §7 requires the HTTP transport's DNS-rebinding, Origin/Content-Type,
+and cross-origin protections to be set **explicitly** by Dockyard, "never
+inherited from an SDK default" — SDK security defaults have flipped between
+releases. The depth audit found `HTTPSecurity` set DNS-rebinding and
+cross-origin/Origin protection explicitly but addressed **Content-Type
+verification nowhere** — it was left to whatever the linked go-sdk does.
+
+R3 adds `HTTPSecurity.ContentTypeVerification`, on in `DefaultHTTPSecurity`.
+When set, `HTTPHandler` wraps the handler in Dockyard's own
+`contentTypeMiddleware`, which rejects a POST whose request-body `Content-Type`
+is not the JSON media type the MCP streamable-HTTP transport mandates
+(`application/json`, charset parameter tolerated) with `415 Unsupported Media
+Type`. GET (the SSE stream) and DELETE (session teardown) carry no body and are
+passed through. The check is Dockyard's own posture — verified by a behavioural
+test that asserts on the middleware's distinct rejection body — so it holds
+regardless of what the linked SDK defaults to. It is opt-out via an explicit
+non-zero `HTTPSecurity` with the flag off.
+
+---
+
+## D-113 — `dockyard validate` runs codegen.CrossCheck, so `dockyard build` catches schema↔TS desync
+
+**Status:** Settled (depth-audit remediation R3).
+
+P1 (contract-first) makes a desync between the two independently-generated
+Design-A artifacts — the JSON Schema and the TypeScript — a hard failure;
+`codegen.CrossCheck` (RFC §6.2) is the check built for it. The depth audit found
+`CrossCheck` was wired only into `dockyard test` (`internal/testgate`), not into
+`internal/validate`: `validate`'s `checkStaleCodegen` only byte-compared each
+artifact against a fresh regeneration. Yet `internal/validate/doc.go` claimed
+artifacts are "cross-checked for schema↔TS drift", and `dockyard build` runs
+`validate` (not the test gate) — so a committed, internally-inconsistent
+schema/TS pair passed `validate` and `build`.
+
+R3 adds `checkCrossCodegen` to `internal/validate`: it reads the committed
+schema files and `contracts.ts` from disk (deliberately not a regeneration —
+the point is to gate what is checked in) and runs `codegen.CrossCheck` per tool
+side. A desync is reported under the existing `CheckStaleCodegen` class as a
+Blocker — the same build-blocker class as stale codegen, consistent with P1 — so
+`dockyard build` now also catches it. `validate/doc.go`'s long-standing claim is
+now accurate.
+
+---
+
+## D-114 — the OTel adapter parents an exported span under the obs/v1 event's ParentSpanID
+
+**Status:** Settled (depth-audit remediation R3).
+
+D-076 settled that the `OTelEmitter` makes a Dockyard span carry the obs/v1
+event's own W3C trace-id and span-id so it "nests natively under a calling
+Harbor agent's `execute_tool` span", and D-079 made a handler `log` event a true
+child of its enclosing `tool.call` in obs/v1. The depth audit found the OTel
+adapter built the span-start context from only `{trace, span}` IDs and never
+established a parent span context — so every exported OTel span was a root in
+its trace, and the D-079 intra-trace parent linkage was lost on OTel export.
+
+R3 carries the event's `ParentSpanID` through into the export path: `obsIDs`
+parses a well-formed `ParentSpanID`, and `OTelEmitter.startContext` seats a
+remote parent span context (`oteltrace.ContextWithRemoteSpanContext` over a
+`SpanContext` with the event's trace-id and the parent span-id) on the context
+passed to `tracer.Start`, so the exported span nests under its parent. An absent
+or malformed `ParentSpanID` is tolerated as "no parent" — the span is exported
+as a trace root rather than the event being dropped. The IDGenerator continues
+to assign the span's own IDs unchanged; only the parent linkage is added.

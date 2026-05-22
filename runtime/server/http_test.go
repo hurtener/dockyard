@@ -2,8 +2,10 @@ package server_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,6 +26,129 @@ func TestDefaultHTTPSecurity_AllProtectionsOn(t *testing.T) {
 	}
 	if !sec.CrossOriginProtection {
 		t.Error("DefaultHTTPSecurity: CrossOriginProtection must be ON")
+	}
+	if !sec.ContentTypeVerification {
+		t.Error("DefaultHTTPSecurity: ContentTypeVerification must be ON")
+	}
+}
+
+// dockyardCTRejection is the substring unique to Dockyard's own Content-Type
+// middleware rejection — distinct from any SDK-internal Content-Type message.
+// A test asserts on it to prove the EXPLICIT Dockyard check fired, not whatever
+// the linked SDK happens to do (AGENTS.md §7, D-112).
+const dockyardCTRejection = "MCP streamable-HTTP request body must be application/json"
+
+// TestHTTPHandler_ContentTypeVerification proves the explicit Content-Type
+// posture (AGENTS.md §7, D-112): with ContentTypeVerification ON, a POST whose
+// body Content-Type is not application/json is rejected with 415 by Dockyard's
+// OWN middleware (asserted via the distinct rejection body), a correct one is
+// accepted, and GET (which carries no body) is never rejected on Content-Type
+// grounds.
+func TestHTTPHandler_ContentTypeVerification(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t)
+	if err := server.AddTool(s, server.ToolDef{Name: "echo", Description: "echo"}, echoHandler); err != nil {
+		t.Fatalf("AddTool: %v", err)
+	}
+	// Default posture has ContentTypeVerification ON. DNS-rebinding protection
+	// is left ON; the test drives the handler directly via httptest, so the
+	// Host header is the test server's own — not a rebinding case.
+	h, err := s.HTTPHandler(&server.HTTPOptions{Security: server.DefaultHTTPSecurity()})
+	if err != nil {
+		t.Fatalf("HTTPHandler: %v", err)
+	}
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	// A minimal well-formed JSON-RPC initialize body — enough that a correct
+	// Content-Type reaches the SDK rather than being bounced by the middleware.
+	body := `{"jsonrpc":"2.0","id":1,"method":"initialize",` +
+		`"params":{"protocolVersion":"2025-06-18","capabilities":{},` +
+		`"clientInfo":{"name":"t","version":"0"}}}`
+
+	cases := []struct {
+		name         string
+		method       string
+		contentType  string
+		wantRejected bool
+	}{
+		{"post wrong content-type", http.MethodPost, "text/plain", true},
+		{"post missing content-type", http.MethodPost, "", true},
+		{"post correct content-type", http.MethodPost, "application/json", false},
+		{"post json with charset", http.MethodPost, "application/json; charset=utf-8", false},
+		{"get is never content-type-rejected", http.MethodGet, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Not t.Parallel(): the parent owns the httptest server and closes
+			// it on return; parallel subtests would outlive it.
+			var reqBody *strings.Reader
+			if tc.method == http.MethodPost {
+				reqBody = strings.NewReader(body)
+			} else {
+				reqBody = strings.NewReader("")
+			}
+			req, err := http.NewRequestWithContext(context.Background(), tc.method, ts.URL, reqBody)
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
+			if tc.contentType != "" {
+				req.Header.Set("Content-Type", tc.contentType)
+			}
+			// Accept both media types so a passed-through request is not
+			// bounced by the SDK on Accept grounds — the test isolates the
+			// Content-Type check.
+			req.Header.Set("Accept", "application/json, text/event-stream")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			raw, _ := io.ReadAll(resp.Body)
+			byDockyard := resp.StatusCode == http.StatusUnsupportedMediaType &&
+				strings.Contains(string(raw), dockyardCTRejection)
+			if byDockyard != tc.wantRejected {
+				t.Fatalf("status %d body %q (rejected-by-Dockyard=%v), want %v",
+					resp.StatusCode, raw, byDockyard, tc.wantRejected)
+			}
+		})
+	}
+}
+
+// TestHTTPHandler_ContentTypeVerificationOff proves the check is opt-out: with
+// ContentTypeVerification explicitly off, Dockyard's own middleware no longer
+// bounces a wrong-Content-Type POST — the response no longer carries Dockyard's
+// distinct rejection body. (Whatever the linked SDK does on its own is not
+// Dockyard's explicit posture and is out of scope here — that is exactly the
+// SDK-default the explicit posture exists to not depend on.)
+func TestHTTPHandler_ContentTypeVerificationOff(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t)
+	h, err := s.HTTPHandler(&server.HTTPOptions{
+		// Non-zero posture with ContentTypeVerification deliberately off.
+		Security: server.HTTPSecurity{DNSRebindingProtection: true},
+	})
+	if err != nil {
+		t.Fatalf("HTTPHandler: %v", err)
+	}
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+		ts.URL, strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "text/plain")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(raw), dockyardCTRejection) {
+		t.Fatalf("ContentTypeVerification off: Dockyard middleware still rejected "+
+			"the POST (body %q)", raw)
 	}
 }
 

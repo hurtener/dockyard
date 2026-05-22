@@ -211,3 +211,17 @@ func (s *Server) ServeInMemory(ctx context.Context) mcpsdk.Transport
 - [ ] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
 - [ ] New vocabulary added to `docs/glossary.md`
 - [ ] New / changed architectural decision filed in `docs/decisions.md`
+
+## Remediation notes
+
+- **R3 / depth audit (D-112).** This plan's Brief findings and acceptance
+  criteria call for DNS-rebinding, Origin/Content-Type, and cross-origin
+  protections all set explicitly in `HTTPSecurity`. The depth audit found
+  Content-Type verification was the one not actually delivered — `HTTPSecurity`
+  set DNS-rebinding and cross-origin/Origin explicitly but left Content-Type to
+  whatever the linked go-sdk defaults to, contradicting "never inherited from an
+  SDK default" (CLAUDE.md §7). R3 closes the gap: `HTTPSecurity` gains an
+  explicit `ContentTypeVerification` field (on in `DefaultHTTPSecurity`), and
+  `HTTPHandler` wraps a Dockyard `contentTypeMiddleware` that rejects a
+  non-`application/json` POST body with 415. A behavioural test asserts it via
+  the middleware's distinct rejection body. See D-112.

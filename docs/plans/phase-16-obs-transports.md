@@ -239,3 +239,17 @@ go.mod / go.sum                # OTel trace SDK dependency
 - [x] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
 - [x] New vocabulary added to `docs/glossary.md`
 - [x] New / changed architectural decision filed in `docs/decisions.md`
+
+## Remediation notes
+
+- **R3 / depth audit (D-114).** The `OTelEmitter` was specified to carry the
+  obs/v1 event's W3C-derived trace/span IDs so a Dockyard span nests under a
+  calling agent's span (D-076). The depth audit found the adapter built the
+  span-start context from only `{trace, span}` IDs and never established a
+  parent span context, so every exported OTel span was a trace root — the
+  obs/v1 intra-trace parent linkage (a `log` event as a true child of its
+  `tool.call`, D-079) was lost on export. R3 carries `Event.ParentSpanID`
+  through `obsIDs` and seats a remote parent span context
+  (`ContextWithRemoteSpanContext`) on the start context so the exported span
+  nests under its parent; an absent/malformed `ParentSpanID` is tolerated as "no
+  parent". See D-114.

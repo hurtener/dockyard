@@ -19,6 +19,18 @@ import (
 type otelIDs struct {
 	trace oteltrace.TraceID
 	span  oteltrace.SpanID
+	// parent is the enclosing span's id, when the obs/v1 event carried a
+	// ParentSpanID; the zero SpanID when it did not. It does NOT flow through
+	// the IDGenerator — the IDGenerator only assigns the span's own IDs. The
+	// parent linkage is established on the start context by the emitter
+	// (ContextWithRemoteSpanContext), so this field is carried only for the
+	// emitter to read (D-114).
+	parent oteltrace.SpanID
+}
+
+// hasParent reports whether the event carried a well-formed ParentSpanID.
+func (i otelIDs) hasParent() bool {
+	return i.parent.IsValid()
 }
 
 // idKey is the context key under which the OTelEmitter passes the desired IDs

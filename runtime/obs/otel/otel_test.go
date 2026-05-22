@@ -220,3 +220,66 @@ func TestOTelEmitter_InvalidIDsDropped(t *testing.T) {
 		t.Fatalf("event with invalid trace-id produced %d spans, want 0", got)
 	}
 }
+
+// TestOTelEmitter_ParentSpanIDNests proves the exported span nests under the
+// obs/v1 event's ParentSpanID (Finding D / D-114): a handler `log` event that
+// is a true child of its `tool.call` (the obs/v1 trace-correlation, D-079) must
+// keep that parent linkage on OTel export. Before the fix every exported span
+// was a trace root.
+func TestOTelEmitter_ParentSpanIDNests(t *testing.T) {
+	t.Parallel()
+	e, rec := recordingEmitter(t)
+
+	parentSpanID := "00f067aa0ba902b7" // a well-formed 16-hex W3C span-id.
+	ev := event(t, obs.KindToolCall, obs.PhaseEnd, obs.ToolCallPayload{Tool: "search"})
+	ev.ParentSpanID = parentSpanID
+	e.Emit(context.Background(), ev)
+
+	spans := rec.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+	sp := spans[0]
+	parent := sp.Parent()
+	if !parent.IsValid() {
+		t.Fatalf("exported span has no parent — it is a trace root; want it nested "+
+			"under ParentSpanID %q", parentSpanID)
+	}
+	if got := parent.SpanID().String(); got != parentSpanID {
+		t.Errorf("span parent span-id = %q, want %q", got, parentSpanID)
+	}
+	// The parent must share the event's trace — a child span, not a cross-trace link.
+	if got := parent.TraceID().String(); got != ev.TraceID {
+		t.Errorf("parent trace-id = %q, want the event's trace-id %q", got, ev.TraceID)
+	}
+	// The span itself still carries the event's own span-id.
+	if got := sp.SpanContext().SpanID().String(); got != ev.SpanID {
+		t.Errorf("span span-id = %q, want event span-id %q", got, ev.SpanID)
+	}
+}
+
+// TestOTelEmitter_NoParentSpanIDIsRoot proves an event with no ParentSpanID
+// still exports as a trace root, and a malformed ParentSpanID is tolerated as
+// "no parent" rather than dropping the event.
+func TestOTelEmitter_NoParentSpanIDIsRoot(t *testing.T) {
+	t.Parallel()
+	e, rec := recordingEmitter(t)
+
+	noParent := event(t, obs.KindToolCall, obs.PhaseEnd, obs.ToolCallPayload{Tool: "a"})
+	e.Emit(context.Background(), noParent)
+
+	badParent := event(t, obs.KindToolCall, obs.PhaseEnd, obs.ToolCallPayload{Tool: "b"})
+	badParent.ParentSpanID = "not-hex"
+	e.Emit(context.Background(), badParent)
+
+	spans := rec.Ended()
+	if len(spans) != 2 {
+		t.Fatalf("got %d spans, want 2 (a malformed ParentSpanID must not drop the event)", len(spans))
+	}
+	for _, sp := range spans {
+		if sp.Parent().IsValid() {
+			t.Errorf("span %q has a parent; an event with no/invalid ParentSpanID must be a root",
+				sp.Name())
+		}
+	}
+}
