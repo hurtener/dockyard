@@ -45,11 +45,14 @@ else
 fi
 
 # 5. HTTP security options are explicitly settable (DefaultHTTPSecurity exists).
+#    All three protections — DNS-rebinding, cross-origin, AND Content-Type
+#    verification (D-112) — are explicit fields, never an inherited SDK default.
 if [ -f runtime/server/http.go ]; then
   if grep -q 'func DefaultHTTPSecurity()' runtime/server/http.go \
      && grep -q 'DNSRebindingProtection' runtime/server/http.go \
-     && grep -q 'CrossOriginProtection' runtime/server/http.go; then
-    ok "explicit HTTP security options present"
+     && grep -q 'CrossOriginProtection' runtime/server/http.go \
+     && grep -q 'ContentTypeVerification' runtime/server/http.go; then
+    ok "explicit HTTP security options present (incl. Content-Type verification)"
   else
     fail "explicit HTTP security options missing from http.go"
   fi
