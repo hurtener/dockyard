@@ -314,6 +314,13 @@ drivers register a factory in an `init()` block. Phase 15 ships the ring-buffer
 driver; Phase 16's SSE sink and OTel adapter plug in behind the same seam.
 CLAUDE.md §4.4. RFC §11.3. D-074.
 
+**`FanOut`** — the bounded fan-out `obs.Emitter` (`runtime/obs`) that forwards
+every `obs.Event` to several drivers at once — the ring buffer, the SSE sink,
+and the `OTelEmitter` together. It is the CLAUDE.md §8 bounded fan-out: a slow
+driver cannot stall a fast one because every driver's `Emit` is itself
+non-blocking. A `FanOut` is a reusable concurrent artifact and `Close` joins its
+drivers' close errors. CLAUDE.md §8. RFC §11.3.
+
 **`OTelEmitter`** — Dockyard's optional, off-by-default OpenTelemetry export
 adapter for `obs/v1` (`runtime/obs/otel`). It lowers an `obs.Event` onto an
 OpenTelemetry span carrying MCP-semconv attributes (`mcp.*` / `gen_ai.*`); the

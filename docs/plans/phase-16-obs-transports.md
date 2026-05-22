@@ -96,21 +96,21 @@ OTel trace SDK only and is revisited if the logs SDK reaches `v1`.
 
 ## Acceptance criteria
 
-- [ ] The SSE sink streams `obs/v1` events to a connected subscriber and does
+- [x] The SSE sink streams `obs/v1` events to a connected subscriber and does
       NOT corrupt a stdio MCP pipe — `os.Stdout`/`os.Stdin` carry only clean
       JSON-RPC framing while obs events flow out the separate SSE channel
       (master plan; the headline criterion).
-- [ ] OTel spans carry `mcp.*` / `gen_ai.*` attributes — `mcp.method.name`,
+- [x] OTel spans carry `mcp.*` / `gen_ai.*` attributes — `mcp.method.name`,
       `gen_ai.tool.name`, `gen_ai.operation.name`, `mcp.session.id`,
       `network.transport`, and `mcp.resource.uri` where applicable (master plan).
-- [ ] `notifications/message` log records surface as `obs/v1` `log` events; a
+- [x] `notifications/message` log records surface as `obs/v1` `log` events; a
       client that negotiated `logging` still receives `notifications/message`
       exactly as before (master plan).
-- [ ] The `OTelEmitter` is off by default — local observation (ring buffer +
+- [x] The `OTelEmitter` is off by default — local observation (ring buffer +
       SSE) works with zero OTel configuration (CLAUDE.md §8).
-- [ ] The SSE sink binds localhost-only and refuses a non-loopback bind address
+- [x] The SSE sink binds localhost-only and refuses a non-loopback bind address
       (CLAUDE.md §7).
-- [ ] `make build` stays CGo-free with the OTel dependency present.
+- [x] `make build` stays CGo-free with the OTel dependency present.
 
 ## Files added or changed
 
@@ -228,14 +228,14 @@ go.mod / go.sum                # OTel trace SDK dependency
 
 ## Pre-merge checklist
 
-- [ ] `make drift-audit` passes
-- [ ] `make check-mirror` passes
-- [ ] `make preflight` passes
-- [ ] `go test -race ./...` and `golangci-lint run` clean
-- [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
-- [ ] Coverage on touched packages ≥ stated target
-- [ ] New CLI command / manifest field / public API has a smoke check in this PR
-- [ ] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
-- [ ] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
-- [ ] New vocabulary added to `docs/glossary.md`
-- [ ] New / changed architectural decision filed in `docs/decisions.md`
+- [x] `make drift-audit` passes
+- [x] `make check-mirror` passes
+- [x] `make preflight` passes
+- [x] `go test -race ./...` and `golangci-lint run` clean
+- [x] All cross-references (`RFC §X.Y`, `brief NN`) resolve
+- [x] Coverage on touched packages ≥ stated target
+- [x] New CLI command / manifest field / public API has a smoke check in this PR
+- [x] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
+- [x] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
+- [x] New vocabulary added to `docs/glossary.md`
+- [x] New / changed architectural decision filed in `docs/decisions.md`
