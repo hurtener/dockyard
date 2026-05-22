@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/hurtener/dockyard/internal/protocolcodec"
+	"github.com/hurtener/dockyard/runtime/obs"
 )
 
 // Dispatch routes one tasks/* JSON-RPC request and returns its result JSON.
@@ -148,6 +149,14 @@ func (e *Engine) handleCancel(ctx context.Context, params json.RawMessage) (json
 	if cancel != nil {
 		cancel()
 	}
+
+	// Emit the obs/v1 task.progress terminal event for the cancellation (P2) —
+	// tasks/cancel is a terminal path the run goroutine's finish does not cover.
+	e.rec.TaskEvent(ctx, e.taskSpan(p.ID).Child(), obs.PhaseEnd, obs.TaskProgressPayload{
+		TaskID:  p.ID,
+		Status:  string(protocolcodec.TaskCancelled),
+		Message: "The task was cancelled by request.",
+	}, nil)
 
 	e.wake(p.ID)
 

@@ -1633,3 +1633,117 @@ client for the handshake — no mocks at any seam — exactly so that
 real-transport framing and cross-subsystem timing are exercised, which is what
 surfaced defects 1–3. The audit verdict: with these three fixes the Wave 5
 foundation is sound.
+
+---
+
+## D-073 — The Store migration registry is a caller-owned `MigrationSet`, not a process global (Wave 5 checkpoint S1 fix)
+
+**Status:** Settled (Phase 15).
+
+The Wave 5 checkpoint filed **S1**: the Store migration registry in
+`runtime/store` was a mutable process-global (`migrations []Migration`,
+`migrationIDs map[string]struct{}`), mutated by `AddMigration` and cleared by
+`ResetMigrationsForTest`. A `sync.Mutex` guarded a *single* `AddMigration`
+call, but the registry's *use* was a non-atomic three-step sequence —
+`ResetMigrationsForTest()` → register → `Store.Migrate()` — that two
+`t.Parallel()` test fixtures would interleave: one fixture's reset wiped
+another's just-registered migrations, and `AddMigration`'s duplicate-ID panic
+fired on timing luck alone. The Wave 5 E2E fixture (`wave5_test.go`) only
+avoided the panic with an external `migrationSetupMu` mutex held across
+`Migrate`; the Phase 14 fixtures reset-and-cleanup the global per test. This is
+shared mutable state masquerading as a registry — the wrong shape.
+
+**Decision.** Remove the mutable global entirely. Migrations are now carried by
+an explicit, caller-owned **`store.MigrationSet`** value:
+
+- `store.NewMigrationSet()` returns an empty set; `set.Add(Migration)` returns
+  an error (no panic) on a duplicate/empty/nil-Up migration; `set.MustAdd` is
+  the panic-on-error variant for a constructor assembling a fixed set;
+  `set.Extend(other)` composes the sets of several sub-stores.
+- `Store.Migrate` takes the set explicitly: `Migrate(ctx, *MigrationSet)`. A
+  nil set is a valid no-op. `RunMigrations(ctx, Store, *MigrationSet)` is the
+  shared runner every driver delegates to.
+- The package globals (`migrations`, `migrationIDs`, `migrationsMu`,
+  `AddMigration`, `registeredMigrations`, `ResetMigrationsForTest`) are
+  **deleted**. `ErrDuplicateMigration` is now an `Add`/`Extend` return value
+  (and the `MustAdd` panic value), not a global-registry panic.
+- `tasks.RegisterMigrations()` (which mutated the global) is replaced by
+  `tasks.Migrations()`, which returns a fresh, caller-owned
+  `*store.MigrationSet` on every call. An application composes it with any
+  future sub-store's set and passes the result to `Store.Migrate`.
+
+With no shared state, two stores migrate concurrently from independent sets
+with no coordination and no locking. Every migration-runner test is now
+`t.Parallel()`, and `TestMigrationSet_ConcurrentMigrate` runs 32 goroutines
+each building their own set and migrating their own store under `-race` — the
+durable proof of the S1 fix. The `migrationSetupMu` workaround in
+`wave5_test.go` and the per-test global reset/cleanup in the Phase 14 and
+TaskStore-conformance fixtures are removed in the same PR; they are
+unnecessary once the global is gone.
+
+This supersedes the registration mechanism described in D-025's "registered
+through `AddMigration`" prose and in the Phase 03 / Phase 14 plans — the
+forward-only, append-only, fingerprinted migration *semantics* are unchanged;
+only the registration surface moved from a global to an explicit value. The
+Phase 03 and Phase 14 plan files' historical references to `AddMigration` /
+`RegisterMigrations` are left as written (they record what those phases
+shipped); this entry is the authoritative current state.
+
+---
+
+## D-074 — obs/v1 is an explicit, public, versioned event contract with a headless interface+factory+driver emitter seam
+
+**Status:** Settled (Phase 15).
+
+Phase 15 implements RFC §11.1/§11.2 — observability is a protocol. The
+implementation settles several shapes the RFC and brief 05 left as sketches:
+
+1. **The event contract is golden-pinned.** `obs.Event` carries
+   `schema_version` = `"dockyard.obs/v1"`; its JSON wire shape is a public,
+   third-party-consumable contract (RFC §11.3, CLAUDE.md §8) and is pinned by
+   golden tests in `runtime/obs/event_test.go`. An accidental field/order
+   change fails CI; a deliberate change bumps `SchemaVersion` and updates the
+   golden. Event kinds: `tool.call`, `resource.read`, `prompt.get`,
+   `app.load`, `app.bridge`, `app.user_action`, `host.compat`, `log`,
+   `server.lifecycle`, and `task.progress` (the brief's `progress` kind is
+   named `task.progress` for clarity; Tasks is V1 scope, so task events are in
+   obs/v1 V1 — brief 05 Q-8 answered "yes").
+
+2. **The emitter is an interface + factory + driver seam** (CLAUDE.md §4.4),
+   matching the Store seam: `obs.Emitter` is the only interface the runtime
+   depends on; drivers register a factory via `obs.RegisterDriver` in an
+   `init()` block; `obs.Open(driver, cfg)` constructs by name. Phase 15 ships
+   the `ringbuffer` driver; Phase 16's SSE sink and OTel adapter register
+   behind the *same* seam, and the MCP `logging`→obs/v1 bridge is just another
+   event source. `obs.FanOut` is the bounded multi-driver emitter.
+
+3. **Emit is non-blocking by construction.** The ring-buffer driver is a
+   bounded ring: a full buffer overwrites its oldest event (counted via
+   `Dropped()`), it never stalls an emitter. `FanOut` is non-blocking provided
+   each driver is — which every V1 driver is. The runtime never blocks on a
+   slow consumer (CLAUDE.md §8).
+
+4. **W3C Trace Context.** `obs.SpanContext` carries a 16-byte trace-id and
+   8-byte span-id as lowercase hex (`NewTrace`, `Child`), so a Dockyard
+   server's spans nest natively under a calling Harbor agent's `execute_tool`
+   span and Phase 16's OTel adapter has spec-shaped IDs to export (RFC §11.2,
+   brief 05 Q-4).
+
+5. **Capture defaults to shape + size.** `obs.Shape` computes a content-free
+   structural fingerprint (kind, byte size, object field *names*, array
+   length) — never values. `CapturePolicyShape` (the zero value, the default)
+   captures only the shape; `CapturePolicyFull` is the opt-in hook, honoured
+   *only* when a redaction-aware `obs.Redactor` is supplied, otherwise it
+   degrades to shape+size — full content is never the silent default
+   (CLAUDE.md §7). The `Redactor` interface is defined; the concrete redaction
+   pipeline is deliberately out of Phase 15 scope (Phase 16+).
+
+6. **Headless instrumentation, no back channel (P2).** `runtime/server`
+   carries an `obs.Recorder` (built from `Options.Obs`) and emits `tool.call`,
+   `resource.read`, and `server.lifecycle`; `runtime/apps` emits `app.load`
+   from the App resource-read handler; `runtime/tasks.Engine` emits
+   `task.progress` start/end events. Every subsystem EMITS through the shared
+   `obs.Emitter`; nothing reads another subsystem's internals to observe — if
+   a signal is needed, an event is added (CLAUDE.md §6). The `obs/v1`
+   `session_id` field and a `WithSession` context seam are defined now so
+   Phase 16's transports can stamp session identity without a contract change.

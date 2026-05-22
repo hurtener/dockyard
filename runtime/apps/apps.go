@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/hurtener/dockyard/internal/protocolcodec"
+	"github.com/hurtener/dockyard/runtime/obs"
 	"github.com/hurtener/dockyard/runtime/server"
 )
 
@@ -174,8 +175,22 @@ func Register(s *server.Server, app App) error {
 	// (brief 01 §2.2). The handler returns the same _meta on every read; it is
 	// host-independent, so concurrent reads are safe (graceful degradation
 	// needs no per-host branching — RFC §7.5).
+	//
+	// The read handler also emits an obs/v1 app.load event (RFC §11.2, P2):
+	// serving a ui:// App resource to a host is exactly the app-load signal the
+	// observability protocol carries (brief 05 §2.5, §3.2). The runtime EMITS;
+	// the inspector consumes — nothing reads apps internals to observe.
 	html := app.HTML
-	read := func(_ context.Context, _ string) (server.ResourceContent, error) {
+	rec := s.Recorder()
+	appURI := app.URI
+	appName := app.Name
+	read := func(ctx context.Context, _ string) (server.ResourceContent, error) {
+		rec.AppLoad(ctx, obs.NewTrace(), obs.AppLoadPayload{
+			AppID:       appName,
+			ResourceURI: appURI,
+			MIME:        MIMETypeApp,
+			Bytes:       len(html),
+		})
 		return server.ResourceContent{
 			MIMEType: MIMETypeApp,
 			Text:     string(html),

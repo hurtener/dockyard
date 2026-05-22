@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/hurtener/dockyard/runtime/obs"
 )
 
 // ToolFunc is a Dockyard tool handler. It is generic over a typed input and a
@@ -117,13 +119,18 @@ func AddTool[In, Out any](s *Server, def ToolDef, fn ToolFunc[In, Out]) error {
 	// handler that panics on a live tools/call becomes a typed error result,
 	// never a process crash — the "no panic across the MCP boundary" rule made
 	// a toolchain guarantee (AGENTS.md §5, §13; D-053).
-	handler := func(ctx context.Context, _ *mcpsdk.CallToolRequest, in In) (*mcpsdk.CallToolResult, Out, error) {
+	handler := func(ctx context.Context, req *mcpsdk.CallToolRequest, in In) (*mcpsdk.CallToolResult, Out, error) {
+		// Emit the obs/v1 tool.call lifecycle (RFC §11.2, P2). The end event
+		// carries the shape+size capture of input/output — full content only
+		// under an opted-in, redaction-aware policy (CLAUDE.md §7).
+		endObs := s.rec.ToolCall(ctx, obs.NewTrace(), def.Name, toolTransport(req))
 		var out Out
 		err := guardHandler(ctx, s.log, "tool", def.Name, func() error {
 			var herr error
 			out, herr = fn(ctx, in)
 			return herr
 		})
+		endObs(toolArgs(req), marshalForObs(out), err)
 		if err != nil {
 			var zero Out
 			return nil, zero, err
@@ -193,6 +200,8 @@ func AddToolWithSchemas[In, Out any](
 		if req != nil && req.Params != nil {
 			ctx = WithRawArguments(ctx, req.Params.Arguments)
 		}
+		// Emit the obs/v1 tool.call lifecycle (RFC §11.2, P2).
+		endObs := s.rec.ToolCall(ctx, obs.NewTrace(), def.Name, toolTransport(req))
 		// guardHandler converts a panic in the app author's handler into a
 		// typed error result — the server survives a panicking tool on a live
 		// tools/call (AGENTS.md §5, §13; D-053).
@@ -202,6 +211,7 @@ func AddToolWithSchemas[In, Out any](
 			out, herr = fn(ctx, arg)
 			return herr
 		})
+		endObs(toolArgs(req), marshalForObs(out.Structured), err)
 		if err != nil {
 			var zero Out
 			return nil, zero, err

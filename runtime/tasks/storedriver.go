@@ -40,17 +40,18 @@ const taskStoreMigrationID = "0001_tasks_init"
 // silent misread.
 const taskStoreSchemaVersion = 1
 
-// RegisterMigrations registers the durable TaskStore's forward-only migrations
-// with the Store migration runner. It is called exactly once per process,
-// before Store.Migrate. A blank Store import does not pull this in (the
-// TaskStore is a facade, not a Store driver), so an app that wants durable
-// tasks calls RegisterMigrations explicitly, then Store.Migrate, then NewStore.
+// Migrations returns the durable TaskStore's forward-only migrations as a
+// caller-owned [store.MigrationSet] (D-073). An application composes this set
+// with any other sub-store's set ([store.MigrationSet.Extend]) and passes the
+// result to Store.Migrate, then constructs the TaskStore with [NewStore].
 //
-// Calling it twice in one process is a programming error — store.AddMigration
-// panics on a duplicate migration ID, by design (CLAUDE.md §9: a duplicate
-// migration ID is a programming error caught at process start).
-func RegisterMigrations() {
-	store.AddMigration(store.Migration{
+// Migrations returns a fresh set on every call — there is no process-global
+// registry — so it is safe to call concurrently from independent test
+// fixtures, each migrating its own store with no shared state and no external
+// locking. This replaces the former RegisterMigrations, which mutated a
+// process-global registry and forced callers to serialize their fixtures.
+func Migrations() *store.MigrationSet {
+	return store.NewMigrationSet().MustAdd(store.Migration{
 		ID: taskStoreMigrationID,
 		Up: func(_ context.Context, tx store.Tx) error {
 			marker, err := json.Marshal(map[string]int{"schemaVersion": taskStoreSchemaVersion})
@@ -160,7 +161,7 @@ const schemaMarkerKey = "__schema__"
 
 // NewStore returns the durable TaskStore driver layered over s — the Store-seam
 // TaskStore Phase 14 supplies behind the Phase 13 seam (RFC §8.5). The caller
-// is responsible for having called RegisterMigrations and s.Migrate before
+// is responsible for having run [Migrations] through s.Migrate before
 // constructing tasks against the store; NewStore itself does no migration so
 // migration timing stays under application control (matching store.Open).
 //

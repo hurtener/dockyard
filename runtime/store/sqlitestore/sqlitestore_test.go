@@ -64,7 +64,7 @@ func TestDriverRegistered(t *testing.T) {
 			t.Fatalf("Close: %v", err)
 		}
 	}()
-	if err := s.Migrate(context.Background()); err != nil {
+	if err := s.Migrate(context.Background(), nil); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 	if err := s.Ping(context.Background()); err != nil {

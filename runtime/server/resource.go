@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/hurtener/dockyard/runtime/obs"
 )
 
 // ResourceDef describes a resource to register on the server. URI and Name are
@@ -125,6 +127,8 @@ func (s *Server) AddResource(def ResourceDef, fn ResourceFunc) error {
 		if req != nil && req.Params != nil && req.Params.URI != "" {
 			uri = req.Params.URI
 		}
+		// Emit the obs/v1 resource.read lifecycle (RFC §11.2, P2).
+		endObs := s.rec.ResourceRead(ctx, obs.NewTrace(), uri)
 		var content ResourceContent
 		err := guardHandler(ctx, s.log, "resource", uri, func() error {
 			var herr error
@@ -132,6 +136,7 @@ func (s *Server) AddResource(def ResourceDef, fn ResourceFunc) error {
 			return herr
 		})
 		if err != nil {
+			endObs("", 0, err)
 			return nil, err
 		}
 		mime := content.MIMEType
@@ -144,6 +149,7 @@ func (s *Server) AddResource(def ResourceDef, fn ResourceFunc) error {
 		} else {
 			rc.Text = content.Text
 		}
+		endObs(mime, resourceBytes(content), nil)
 		return &mcpsdk.ReadResourceResult{Contents: []*mcpsdk.ResourceContents{rc}}, nil
 	}
 
@@ -263,6 +269,8 @@ func (s *Server) AddResourceTemplate(def ResourceTemplateDef, fn ResourceFunc) e
 		if req != nil && req.Params != nil {
 			uri = req.Params.URI
 		}
+		// Emit the obs/v1 resource.read lifecycle (RFC §11.2, P2).
+		endObs := s.rec.ResourceRead(ctx, obs.NewTrace(), uri)
 		var content ResourceContent
 		err := guardHandler(ctx, s.log, "resource", uri, func() error {
 			var herr error
@@ -270,6 +278,7 @@ func (s *Server) AddResourceTemplate(def ResourceTemplateDef, fn ResourceFunc) e
 			return herr
 		})
 		if err != nil {
+			endObs("", 0, err)
 			return nil, err
 		}
 		mime := content.MIMEType
@@ -282,6 +291,7 @@ func (s *Server) AddResourceTemplate(def ResourceTemplateDef, fn ResourceFunc) e
 		} else {
 			rc.Text = content.Text
 		}
+		endObs(mime, resourceBytes(content), nil)
 		return &mcpsdk.ReadResourceResult{Contents: []*mcpsdk.ResourceContents{rc}}, nil
 	}
 

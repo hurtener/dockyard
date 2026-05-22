@@ -238,6 +238,14 @@ RFC §13. D-025.
 validated by `internal/manifest` into a typed `Manifest` Go struct; invalid
 manifests fail with source-located (`file:line`) errors. RFC §4.2. D-035, D-036.
 
+**`MigrationSet`** — an explicit, caller-owned, ordered collection of Store
+migrations (`store.MigrationSet`). It replaced the former mutable process-global
+migration registry: a caller builds a set (`NewMigrationSet`, `Add`, `MustAdd`,
+`Extend`), passes it to `Store.Migrate(ctx, set)`, and two stores migrate
+concurrently from independent sets with no shared state and no locking. A
+sub-store exposes its migrations as a fresh set per call (e.g.
+`tasks.Migrations()`). RFC §13. CLAUDE.md §9. D-073.
+
 **MCP server core** — the `runtime/server` package: the part of the app runtime
 that wraps the official Go MCP SDK and exposes Dockyard's server construction,
 typed tool registration, and transport serve loop. The settled foundation
@@ -266,7 +274,32 @@ RFC §7.1. D-047, D-048.
 
 **`obs/v1`** — Dockyard's canonical, versioned, public observability event protocol.
 The headless runtime emits it; the inspector and the post-V1 console are pure
-clients. RFC §11. D-008.
+clients. The wire shape of `obs.Event` is pinned by golden tests — a change is a
+versioned, documented `schema_version` bump. RFC §11. D-008, D-074.
+
+**`obs.Event`** — the one canonical obs/v1 event type (`runtime/obs`): a
+`schema_version`, an event id, a timestamp, server/session identity, W3C
+trace/span IDs, a `kind`, a `phase`, a typed per-kind `payload`, an optional
+`duration_ms`, and an optional `ErrorInfo`. The only type the inspector and the
+post-V1 console consume; no raw runtime or SDK type leaks through it. RFC §11.2.
+D-074.
+
+**Event kind** — the classification of an `obs.Event`: `tool.call`,
+`resource.read`, `prompt.get`, `app.load`, `app.bridge`, `app.user_action`,
+`host.compat`, `log`, `server.lifecycle`, `task.progress`. The set is closed for
+obs/v1; a new kind is a versioned addition. RFC §11.2. D-074.
+
+**Emitter seam** — the obs/v1 interface + factory + driver seam (`obs.Emitter`,
+`obs.RegisterDriver`, `obs.Open`). The runtime depends only on `obs.Emitter`;
+drivers register a factory in an `init()` block. Phase 15 ships the ring-buffer
+driver; Phase 16's SSE sink and OTel adapter plug in behind the same seam.
+CLAUDE.md §4.4. RFC §11.3. D-074.
+
+**OTel export adapter** — the optional `obs/v1` driver (Phase 16) that maps an
+`obs.Event` onto OpenTelemetry MCP semantic conventions for export to an
+external observability stack. It is off by default and never a prerequisite to
+observe locally — obs/v1 is the stable contract; the adapter absorbs OTel
+semconv churn. RFC §11.3. D-074.
 
 ## P
 
@@ -294,11 +327,24 @@ block; the gates are *enforced* by `dockyard validate`. RFC §4.2, §9.4. D-035.
 
 ## R
 
+**Recorder** — the headless obs/v1 emit helper (`obs.Recorder`) a subsystem
+uses to record events without hand-assembling an `obs.Event`. It binds a server
+identity and an `obs.Emitter` once; each event it builds carries the schema
+version, a fresh id, a timestamp, and the identity automatically. `runtime/server`,
+`runtime/apps`, and `runtime/tasks` all emit through one shared Recorder. RFC §11.2.
+D-074.
+
 **Recursive contract** — a Go contract type that, directly or transitively,
 contains itself. An explicit, documented V1 limitation of the schema generator:
 the pinned inference engine cannot emit `$ref`/`$defs` for cycles, so
 `SchemaForType` rejects a recursive contract with `ErrRecursiveContract` rather
 than fail vaguely. RFC §6.1. D-052.
+
+**Ring-buffer emitter** — the in-memory, bounded obs/v1 emitter driver
+(`obs.RingBuffer`, registered as `"ringbuffer"`) Phase 15 ships — the source the
+inspector pulls recent event history from. It is non-blocking by construction: a
+full buffer overwrites its oldest event (counted via `Dropped()`), so a slow or
+absent consumer can never stall the runtime. RFC §11.3. D-074.
 
 **Resource template** — a server registration that serves a *family* of
 resources addressed by an RFC 6570 URI template (e.g. `ui://app/{view}`) rather
@@ -314,6 +360,13 @@ in the model-facing `Text`). A flag never fails the tool call; it is recorded on
 the tool's `Builder` and read through `Builder.Flags()`. RFC §6.3. D-045.
 
 ## S
+
+**Shape + size capture** — the default obs/v1 tool input/output capture policy
+(`obs.CapturePolicyShape`): an event carries only the structural fingerprint of
+a value (`obs.ValueShape` — kind, byte size, object field *names*, array length)
+and never the values themselves, so secrets and PII never leak into the event
+stream. Full-content capture (`CapturePolicyFull`) is an opt-in honoured only
+when a redaction-aware `obs.Redactor` is supplied. CLAUDE.md §7. RFC §11.2. D-074.
 
 **Single-file bundle** — the default build output for a Dockyard App UI: one HTML
 file with no external origins, so the deny-by-default CSP works without declaring
@@ -445,3 +498,13 @@ shell library implements the View side of that dialect. RFC §7.3. brief 01 §2.
 App's view-state across host-driven re-renders. The bridge framework-manages it:
 asking for the same `viewUUID` again recovers the same state snapshot. RFC §7.3.
 D-060.
+
+## W
+
+**W3C Trace Context** — the W3C distributed-tracing standard
+(<https://www.w3.org/TR/trace-context/>) obs/v1 adopts for its correlation IDs:
+a 16-byte trace-id and an 8-byte span-id, lowercase hex. Modelled in
+`runtime/obs` as `obs.SpanContext` (`NewTrace`, `Child`). Adopting it means a
+Dockyard server's spans nest natively under a calling Harbor agent's
+`execute_tool` span, and Phase 16's OTel adapter has spec-shaped IDs to export.
+RFC §11.2. D-074.

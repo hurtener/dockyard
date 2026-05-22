@@ -415,16 +415,15 @@ func testPing(t *testing.T, open func() store.Store) {
 func testMigrateIdempotent(t *testing.T, open func() store.Store) {
 	s := open()
 	defer mustClose(t, s)
-	// A clean Migrate and a re-run Migrate must both succeed. The global
-	// migration registry is exercised separately by the seam unit tests; here
-	// the contract is simply that Migrate is safe to call repeatedly.
-	if err := s.Migrate(ctx()); err != nil {
+	// A clean Migrate and a re-run Migrate with a nil set must both succeed —
+	// Migrate with no migrations is a valid no-op, safe to call repeatedly.
+	if err := s.Migrate(ctx(), nil); err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
-	if err := s.Migrate(ctx()); err != nil {
+	if err := s.Migrate(ctx(), nil); err != nil {
 		t.Fatalf("re-run Migrate: %v", err)
 	}
-	if err := s.Migrate(ctx()); err != nil {
+	if err := s.Migrate(ctx(), nil); err != nil {
 		t.Fatalf("third Migrate: %v", err)
 	}
 }
@@ -435,20 +434,16 @@ func testMigrateIdempotent(t *testing.T, open func() store.Store) {
 const migrationsNamespace = "__store_migrations__"
 
 // testMigrationRunner exercises the real migration runner end-to-end against
-// the driver under test — not an in-package fake. It registers a real
-// migration through store.AddMigration, applies it via Store.Migrate, asserts
+// the driver under test — not an in-package fake. It builds a real migration
+// in a caller-owned store.MigrationSet, applies it via Store.Migrate, asserts
 // it ran exactly once, is idempotent on re-run, and is recorded in the
 // __store_migrations__ namespace. It runs against every driver, so the runner
-// is proven on inmem AND sqlitestore (AGENTS.md §9, §17).
+// is proven on inmem AND sqlitestore (CLAUDE.md §9, §17). The MigrationSet is
+// local to this test — there is no process-global registry to isolate (D-073).
 func testMigrationRunner(t *testing.T, open func() store.Store) {
-	// Isolate the global migration registry: this test owns it for its
-	// duration and clears it afterwards so other suites stay unaffected.
-	store.ResetMigrationsForTest()
-	t.Cleanup(store.ResetMigrationsForTest)
-
 	const migrationID = "0001_storetest_seed"
 	var runCount int
-	store.AddMigration(store.Migration{
+	set := store.NewMigrationSet().MustAdd(store.Migration{
 		ID: migrationID,
 		Up: func(_ context.Context, tx store.Tx) error {
 			runCount++
@@ -460,7 +455,7 @@ func testMigrationRunner(t *testing.T, open func() store.Store) {
 	defer mustClose(t, s)
 
 	// First Migrate: the migration must apply exactly once.
-	if err := s.Migrate(ctx()); err != nil {
+	if err := s.Migrate(ctx(), set); err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
 	if runCount != 1 {
@@ -502,7 +497,7 @@ func testMigrationRunner(t *testing.T, open func() store.Store) {
 	}
 
 	// Re-run: idempotent — the migration must not run again.
-	if err := s.Migrate(ctx()); err != nil {
+	if err := s.Migrate(ctx(), set); err != nil {
 		t.Fatalf("re-run Migrate: %v", err)
 	}
 	if runCount != 1 {
