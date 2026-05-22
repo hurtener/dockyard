@@ -196,6 +196,13 @@ into a `*panicError` (wrapping the `ErrHandlerPanic` sentinel) and logs the
 stack. The "never panic across the MCP boundary" rule made a guarantee, not a
 docstring instruction. AGENTS.md §5, §13. D-053.
 
+**Handler span** — the `obs/v1` `tool.call` `SpanContext` that `runtime/server`
+threads onto a tool handler's `context.Context` (via `obs.WithSpan`) so an
+`obs/v1` event emitted from *inside* the handler — most notably a
+handler-emitted `log` event through the MCP-logging bridge — derives a child
+span of the enclosing `tool.call` rather than minting an unrelated trace.
+RFC §11.2. D-079.
+
 **Host profile** — a pluggable set of host-specific *derivation functions* (e.g.
 deriving Claude's signed `claudemcpcontent.com` iframe origin). A host profile is
 algorithms, not a capability matrix. Implemented as the `apps.HostProfile`
@@ -288,6 +295,15 @@ a **`resources/read` response** it carries `{csp, permissions, domain,
 prefersBorder}`. Dockyard emits only this nested form, never the deprecated flat
 `_meta["ui/resourceUri"]` form; all encoding goes through `internal/protocolcodec`.
 RFC §7.1. D-047, D-048.
+
+## N
+
+**No-template path** — `dockyard new <name>` invoked with no `--template`
+flag: the first-class scaffold that produces a blank but working MCP server —
+a manifest, one example contract-first tool, generated contract artifacts, a
+runnable main, and a contract test. RFC §10 names it the first-class path;
+templates are optional product-pattern showcases layered on later. RFC §9.1,
+§10.
 
 ## O
 
@@ -395,6 +411,11 @@ in the model-facing `Text`). A flag never fails the tool call; it is recorded on
 the tool's `Builder` and read through `Builder.Flags()`. RFC §6.3. D-045.
 
 ## S
+
+**Scaffold** — the project tree `dockyard new` generates: the manifest, the
+example contract-first tool, the generated contract artifacts, a runnable
+`main.go`, a contract test, and project metadata. Owned by `internal/scaffold`;
+deterministic for a fixed invocation and golden-pinned. RFC §9.1, §10.
 
 **Shape + size capture** — the default obs/v1 tool input/output capture policy
 (`obs.CapturePolicyShape`): an event carries only the structural fingerprint of

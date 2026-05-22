@@ -1906,3 +1906,65 @@ entry records the design choices, the way D-072 records the Wave 5 checkpoint's.
    assertions ("ignores reserved…", "drops non-JSON-RPC…") keep their
    `setTimeout(0)` form: a negative `not.toHaveBeenCalled()` assertion is
    already correct under either delivery order.
+
+---
+
+## D-079 — the obs/v1 handler-span context seam; a handler-emitted log event correlates to its tool.call
+
+**Status:** Settled (Phase 17, folds in the Wave 6 checkpoint item S1).
+
+The Wave 6 checkpoint filed S1: an `obs/v1` `log` event emitted from inside a
+tool handler — through the MCP-logging → obs/v1 bridge (`LogBridge`, D-077) —
+was not trace-correlated to its enclosing `tool.call`. `LogBridge.LogTo` minted
+a fresh `obs.NewTrace()` per record, so a handler-emitted log event carried an
+unrelated trace id and no parent span: an inspector could not tie a log line to
+the tool call that produced it.
+
+Phase 17 owns the fix. `runtime/obs` gains a context seam mirroring the Phase 15
+`obs.WithSession` pattern (D-074):
+
+- `obs.WithSpan(ctx, SpanContext)` stamps an in-flight span onto a context.
+- `obs.SpanFromContext(ctx)` reads it back.
+- `obs.ChildOrNewTrace(ctx)` is the one-call "child of the enclosing span if
+  there is one, else a fresh root trace" form an emit site nested inside a
+  possibly-instrumented unit of work uses.
+
+`runtime/server`'s tool-handler edge (`AddTool` and `AddToolWithSchemas`) opens
+the `tool.call` span once and threads it onto the handler context via
+`obs.WithSpan` before invoking the handler. `LogBridge.LogTo` then emits its
+`obs/v1` log event with `obs.ChildOrNewTrace(ctx)` instead of `obs.NewTrace()`:
+inside a handler the log event is a **child** of the `tool.call` span — same
+trace id, `ParentSpanID` set to the `tool.call` span id — and outside a request
+(a record logged with no enclosing span) it still gets a well-formed fresh root
+trace. The MCP `notifications/message` side of the bridge is unchanged.
+
+This is purely additive to the obs/v1 contract — no event shape changed, the
+correlation simply became correct. A `-race`-clean test
+(`runtime/server/logbridge_trace_test.go`) drives a real `tools/call` whose
+handler emits a log record and asserts the log event shares the `tool.call`'s
+trace id and nests under its span.
+
+---
+
+## D-080 — a scaffolded project's go.mod uses a replace directive until Dockyard is published
+
+**Status:** Settled (Phase 17).
+
+`dockyard new` scaffolds a project that imports the Dockyard runtime library
+(`github.com/hurtener/dockyard/runtime/...`). Until Dockyard is published to a
+module registry with a tagged version, a scaffolded project cannot resolve that
+import with `go get` — there is no published module to fetch.
+
+The scaffold therefore supports an optional `go.mod` `replace` directive
+pointing the Dockyard import at a local checkout. It is surfaced as the hidden
+`dockyard new --dockyard-path <path>` flag (and the `scaffold.Options.Dockyard-
+Replace` field). When set, the scaffolded `go.mod` carries
+`replace github.com/hurtener/dockyard => <abs path>`; when unset, the scaffold
+depends on the module version directly (the released-Dockyard workflow).
+
+The flag is hidden because a released `dockyard` CLI will not need it — once
+Dockyard ships a tagged release, a scaffolded project depends on the published
+version and the replace directive disappears. The pre-release integration test
+and the Phase 17 smoke script pass `--dockyard-path` pointed at the repo root so
+the scaffolded project genuinely compiles against the real runtime. Revisiting
+this when Dockyard first publishes a release is a Phase 30 (release) follow-up.
