@@ -26,6 +26,10 @@
       "min": 80,
       "band": "new-package"
     },
+    "github.com/hurtener/dockyard/internal/inspector": {
+      "min": 80,
+      "band": "new-package"
+    },
     "github.com/hurtener/dockyard/internal/installpkg": {
       "min": 70,
       "band": "subprocess-override",

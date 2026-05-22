@@ -2417,3 +2417,66 @@ suite via `testing.Benchmark` inside an ordinary test. The benchmark code is
 then genuinely covered, and a silently-broken benchmark — a panicking seed, a
 misnamed namespace — is caught by the normal `go test` run, not only by
 `make bench`. It mirrors the conformance harness self-guard.
+
+---
+
+## D-096 — The inspector is a localhost HTTP backend serving an embedded frontend
+
+**Status:** Settled (Phase 22).
+
+The inspector (RFC §12) is split into a Go backend (`internal/inspector`) and a
+Svelte frontend (`web/inspector`). The backend is a localhost HTTP server: it
+serves the built frontend bundle and relays the obs/v1 stream and a JSON-RPC log
+to it, read-only. The frontend talks only to this backend over its read-only
+HTTP API — never directly to the MCP server. This keeps the one client-shaped
+surface (P4) narrow and auditable: there is exactly one localhost listener, it
+is loopback-bound by an explicit typed check (`ErrNonLoopbackBind`) that runs
+before the listener opens, and it exposes no mutating route. A non-loopback bind
+is never served — the mechanical enforcement of RFC §12 and the
+CVE-2025-49596 lesson. `internal/inspector` mirrors `runtime/obs`'s SSE-sink
+loopback gate verbatim rather than inventing a second policy.
+
+---
+
+## D-097 — The `ui/` host half reuses `web/bridge`'s protocol contract verbatim
+
+**Status:** Settled (Phase 22).
+
+`web/bridge` ships the *View* half of the `ui/` postMessage dialect; Phase 22's
+`web/inspector/src/host/host-bridge.ts` ships the *host* half. The host half
+imports every protocol constant and wire type — `ViewMethod`, `HostNotification`,
+`ViewNotification`, `InitializeParams`, `InitializeResult`, the JSON-RPC type
+guards — from `@dockyard/bridge` rather than redefining them. The `ui/` dialect
+therefore lives in exactly one place (`web/bridge/src/protocol.ts`); a spec
+revision is a single reviewable diff, and the host and View halves cannot drift
+(P3). To make this possible, `@dockyard/bridge`'s barrel additionally re-exports
+the JSON-RPC envelope types and the `isJsonRpc*` guards — a widening of the
+barrel, not a new contract.
+
+A consequence settled here: the `ui/initialize` handshake's
+`ui/notifications/initialized` is a **host→View** notification only. The host's
+side of the handshake is complete the moment it has *answered* `ui/initialize`
+and *sent* `ui/notifications/initialized`; there is no inbound View
+`initialized` for the host to wait on. `HostBridge.ready()` resolves at that
+point.
+
+---
+
+## D-098 — The inspector frontend is a Vite application; Events + RPC are the Phase 22 core
+
+**Status:** Settled (Phase 22).
+
+`web/inspector` is a plain-Svelte Vite *application* (it builds to `dist/` and
+is embedded into the Go backend), unlike `web/ui` / `web/bridge` which are
+libraries. It joins the `make web` `WEB_PROJECTS` set and the Phase 21.5
+coverage gate with a 70% frontend threshold — the band `web/ui` / `web/bridge`
+use. Phase 22 builds the inspector *core*: the `AppShell` layout, the App
+preview frame with the host-half bridge, and the DetailRail's **Events** and
+**RPC** panels as the working tabs. The Fixtures / Tools / Verdicts / Tasks
+tabs are scaffolded as explicit "coming in Phase 23" placeholders, and the
+Host/Display-mode controls are shown read-only — the rail's tab structure and
+the App-frame's bridge wiring are the clean seams Phase 23 extends. A committed
+placeholder bundle (`internal/inspector/dist/`) keeps the `//go:embed`
+directive resolvable before any frontend build; wiring the production
+`web/inspector` build into the binary is the Phase 23 `dockyard inspect`
+packaging step.

@@ -288,6 +288,15 @@ theme, `styles.variables` (standardized host CSS custom properties), `displayMod
 `availableDisplayModes`, `locale`, container dimensions, and more. The bridge
 shell exposes it as reactive Svelte stores. RFC §7.3. brief 01 §2.4.
 
+**host-half bridge** — the *host* side of the `ui/` postMessage dialect
+(`web/inspector/src/host/host-bridge.ts`, Phase 22) — the counterpart to the
+bridge shell library's View half. It answers a View's `ui/initialize` request
+with `hostContext` + `hostCapabilities`, sends `ui/notifications/initialized`,
+fans host→view notifications, and grants display modes the App advertised. It
+imports the `ui/` protocol contract verbatim from `@dockyard/bridge` — the
+dialect is never forked. The inspector is its one consumer. RFC §7.3, §12.
+D-097.
+
 **Handler runtime** — the `runtime/tool` layer that wraps a contract-first tool
 handler in production: it validates incoming arguments at the catalog edge (edge
 validation), runs the typed handler, hardens the content split (RFC §6.3), and
@@ -336,6 +345,19 @@ AGENTS.md §7. D-040, D-041.
 component. It implements the host half of the `ui/` bridge to render Apps locally,
 surfaces the `obs/v1` stream, fixtures, latency analytics, drift verdicts, and
 capability-set emulation. Dev-mode-gated, localhost-only, read-only. RFC §12.
+
+**Inspector backend** — the Go side of the inspector (`internal/inspector`,
+Phase 22): a localhost HTTP server that serves the `web/inspector` frontend
+bundle and brokers the read-only inspector API. It refuses any non-loopback
+bind with the typed `ErrNonLoopbackBind` before its listener opens — the
+mechanical enforcement of the inspector's localhost-only property (RFC §12, the
+CVE-2025-49596 lesson). D-096.
+
+**Inspector relay** — the `internal/inspector` component that, read-only,
+relays the `obs/v1` SSE stream and a bounded JSON-RPC log to the inspector UI.
+It is a pure SSE *client* of `runtime/obs`'s SSE sink (P2 — it consumes the
+public `obs/v1` contract, never runtime internals) and fans the stream to many
+inspector UI clients without blocking on a slow one. RFC §11, §12. D-096.
 
 **Install host profile** — the small per-MCP-host (`claude`, `cursor`)
 structure in `internal/installpkg` that derives that host's MCP config-file

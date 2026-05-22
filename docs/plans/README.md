@@ -51,7 +51,7 @@ done-definition, dependency declarations, and coverage discipline.
 | 20 | `dockyard build` + `run` + `install`          | internal/cli           | §14              | 06, 01    | 17, 10        | 75%  | Shipped |
 | 21 | `dockyard test` — contract + compliance gate  | internal/cli           | §9.1, §9.4       | 04, 01    | 18            | 75%  | Shipped |
 | 21.5| Test-quality hardening                       | internal/coveragecheck | §9.4             | 04, 06    | 02–21         | §11  | Shipped |
-| 22 | Inspector core — bridge host-half + obs view  | internal/inspector     | §12              | 05, 04, 01| 09, 10a, 11, 16| 80% | Pending |
+| 22 | Inspector core — bridge host-half + obs view  | internal/inspector     | §12              | 05, 04, 01| 09, 10a, 11, 16| 80% | Shipped |
 | 23 | Inspector advanced + `dockyard inspect`       | internal/inspector     | §12              | 05, 04    | 22, 14, 21    | 80%  | Pending |
 | 24 | Template system + `analytical-card`           | templates              | §10              | 04, 01    | 19, 20, 10a   | 75%  | Pending |
 | 25 | `approval-flow` template                      | templates              | §10, §8.6        | 02, 01    | 24, 14        | 75%  | Pending |
