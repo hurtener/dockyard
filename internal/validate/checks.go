@@ -259,3 +259,67 @@ func checkStaleCodegen(rp *reporter, projectDir string, lm loadedManifest) {
 		}
 	}
 }
+
+// checkCrossCodegen is the second half of P1 enforcement (RFC §6.2): it proves
+// the committed JSON Schema and the committed TypeScript for each tool contract
+// are internally CONSISTENT with one another.
+//
+// checkStaleCodegen proves each artifact matches its Go source byte-for-byte;
+// it cannot, on its own, catch the two independent Design-A generators
+// desyncing on a way that both happen to be self-consistent. codegen.CrossCheck
+// is the check built for exactly that — schema↔TypeScript drift — and was
+// previously wired only into `dockyard test`. It belongs here too: `dockyard
+// build` runs `validate` (not the test gate), so without this an internally
+// inconsistent committed schema/TS pair would pass build (D-113).
+//
+// It reads the committed artifacts from disk (not a fresh regeneration — the
+// point is to gate what is checked in) and runs CrossCheck per tool side. A
+// desync is a Blocker, consistent with P1.
+func checkCrossCodegen(rp *reporter, projectDir string, lm loadedManifest) {
+	tsPath := filepath.Join(projectDir, filepath.FromSlash(generate.TSFileName()))
+	tsRaw, tsErr := os.ReadFile(tsPath) //nolint:gosec // path composed from a caller-supplied project dir
+	if tsErr != nil {
+		// A missing contracts.ts is already reported by checkStaleCodegen as a
+		// missing generated file; nothing to cross-check against.
+		return
+	}
+	for _, t := range lm.m.Tools {
+		for _, side := range []string{"input", "output"} {
+			tsName := contractTypeName(t, side)
+			if tsName == "" {
+				continue // a contract reference with no "." — manifest already flags it.
+			}
+			rel := generate.SchemaFileName(t.Name, side)
+			full := filepath.Join(projectDir, filepath.FromSlash(rel))
+			raw, err := os.ReadFile(full) //nolint:gosec // path composed from a caller-supplied project dir
+			if err != nil {
+				continue // a missing schema is already a checkStaleCodegen Blocker.
+			}
+			var s jsonschema.Schema
+			if err := json.Unmarshal(raw, &s); err != nil {
+				continue // an unparseable schema is already a checkSchemas Blocker.
+			}
+			if err := codegen.CrossCheck(&s, tsName, tsRaw); err != nil {
+				rp.block(CheckStaleCodegen,
+					"tool %q %s: schema %s and TypeScript %s have drifted apart — %v; "+
+						"run `dockyard generate`",
+					t.Name, side, rel, generate.TSFileName(), err)
+			}
+		}
+	}
+}
+
+// contractTypeName extracts the TypeScript interface name from a manifest tool
+// contract reference. A reference is "<package path>.<TypeName>"; the interface
+// name is the final segment. An empty string means the reference has no "."
+// and is malformed — already a manifest-level Blocker.
+func contractTypeName(t manifest.Tool, side string) string {
+	ref := t.Input
+	if side == "output" {
+		ref = t.Output
+	}
+	if i := strings.LastIndex(ref, "."); i >= 0 && i+1 < len(ref) {
+		return ref[i+1:]
+	}
+	return ""
+}

@@ -167,6 +167,7 @@ func Run(opts Options) (*Report, error) {
 		checkSpecCompliance(rp, opts.ProjectDir, m)
 		checkUIStates(rp, opts.ProjectDir, m)
 		checkStaleCodegen(rp, opts.ProjectDir, m)
+		checkCrossCodegen(rp, opts.ProjectDir, m)
 	}
 
 	sortDiagnostics(rp.diagnostics)

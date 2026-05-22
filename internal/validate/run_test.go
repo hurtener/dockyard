@@ -103,6 +103,50 @@ func TestRun_StaleCodegenIsBlocker(t *testing.T) {
 	}
 }
 
+// TestRun_CrossCheckDriftIsBlocker proves `dockyard validate` runs
+// codegen.CrossCheck (D-113): it mutates the committed contracts.ts so the
+// TypeScript and the committed JSON Schema for a tool contract no longer agree,
+// then asserts validate reports a schema↔TS drift Blocker. Without CrossCheck
+// wired into validate, an internally inconsistent committed pair would pass
+// `dockyard validate` — and therefore `dockyard build`, which runs validate.
+func TestRun_CrossCheckDriftIsBlocker(t *testing.T) {
+	t.Parallel()
+	projectDir := scaffoldAndGenerate(t, "val-crosscheck-unit")
+
+	tsPath := filepath.Join(projectDir, filepath.FromSlash(generate.TSFileName()))
+	tsRaw, err := os.ReadFile(tsPath) //nolint:gosec // test temp dir
+	if err != nil {
+		t.Fatalf("read contracts.ts: %v", err)
+	}
+	// Inject an extra property into the first generated interface: it is now
+	// present in the TypeScript but absent from the schema — exactly the
+	// schema↔TS desync CrossCheck exists to catch.
+	ts := string(tsRaw)
+	open := strings.Index(ts, "{")
+	if open < 0 {
+		t.Fatalf("no interface body found in contracts.ts:\n%s", ts)
+	}
+	drifted := ts[:open+1] + "\n  injectedDrift: string;" + ts[open+1:]
+	if err := os.WriteFile(tsPath, []byte(drifted), 0o600); err != nil { //nolint:gosec // test temp dir
+		t.Fatalf("write drifted contracts.ts: %v", err)
+	}
+
+	report, err := Run(Options{ProjectDir: projectDir})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var found bool
+	for _, d := range report.Blockers() {
+		if d.Check == CheckStaleCodegen && strings.Contains(d.Message, "drifted apart") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("an internally inconsistent schema/TS pair must produce a "+
+			"schema↔TS drift Blocker; got %v", report.Diagnostics)
+	}
+}
+
 // TestDiagnosticString covers the Diagnostic and Check string rendering.
 func TestDiagnosticString(t *testing.T) {
 	t.Parallel()
