@@ -2544,3 +2544,28 @@ already gets the full inspector against a `dockyard dev` server by running
 deliberate, documented deviation from building the `dockyard dev` integration
 in this phase; the master plan's Phase 23 acceptance criteria
 (`dockyard inspect` attaches to any running server) are met.
+
+---
+
+## D-102 — The Wave 8 E2E goroutine-leak baseline is read after fixture setup
+
+**Status:** Settled (Wave 8 checkpoint).
+
+`test/integration/wave8_test.go` drives the integrated inspector with a
+long-lived in-process fixture — a real `runtime/server`, a real `runtime/obs`
+SSE sink, a live MCP client session, and a `runtime/tasks` engine — that stays
+up until the test's `t.Cleanup` runs, *after* the test body's
+goroutine-leak assertion. Reading the leak baseline at the top of the test (as
+the Wave 7 CLI E2E does, where the artifact under test is a *subprocess* and the
+in-process fixture is minimal) would therefore count every fixture goroutine —
+the sink's HTTP server, the server's session pump — as a leak.
+
+Wave 8's leak baseline is instead read **after** `wave8Server` has brought the
+fixture up and `stableGoroutineCount` reports it quiescent. The assertion then
+targets exactly the artifact under test — the `internal/inspector` backend, its
+relay's SSE-client loop, and the per-UI-client HTTP goroutines — which is the
+Wave 8 reusable concurrent artifact the checkpoint must prove tears down clean.
+It continues to use `wave1_test.go`'s robust poll-until-settled
+`assertNoGoroutineLeak` (the Wave 7 checkpoint's fix), never a one-shot
+snapshot. This is an E2E-test-design choice, not a runtime change; the relay's
+own teardown contract is unchanged.
