@@ -22,6 +22,21 @@ spec, stale generated contracts, or a missing required UI state. A `validate`
 run carrying any build blocker exits non-zero. The complement is a *warning* —
 reported but non-fatal. RFC §9.4. D-082.
 
+**Boot check** — `dockyard install`'s post-write verification: a throwaway,
+localhost, dev-only spawn of the freshly built server binary that drives one
+real MCP `initialize` handshake to confirm the host config it just wrote
+launches a working server. It is the test-only client carve-out (P4), never a
+production or long-lived MCP client. Implemented in `internal/installpkg`.
+RFC §14. D-088.
+
+**Build pipeline** — the ordered sequence `dockyard build` runs to produce a
+project's shippable artifact: regenerate the contract artifacts → run the
+`dockyard validate` quality gate (a build blocker fails the build — P1 at build
+time) → `vite build` the project's `web/` UI when one exists → `go build` one
+CGo-free, statically-linked binary per cross-compile target with the UI
+embedded → emit a SHA-256 checksum per artifact. Implemented in
+`internal/buildpkg`. RFC §14. D-087.
+
 **Bridge shell library** — the Svelte/TypeScript library (`web/bridge/`) vendored
 into every Dockyard app. It implements the *View half* of the `ui/` `postMessage`
 JSON-RPC dialect — the side that runs inside the App's sandboxed iframe — so app
@@ -71,6 +86,12 @@ empty `TextContent` block is emitted when `Text` is empty. RFC §6.3. D-043.
 `tools[].input` / `tools[].output` field holds: a reference to a Go contract
 struct, not inline schema. Resolved to a JSON Schema through the manifest's
 `ContractResolver` seam (the codegen pipeline). RFC §4.2, §6.1. D-037.
+
+**Cross-compile matrix** — the set of GOOS/GOARCH target triples `dockyard
+build` produces an artifact and a SHA-256 checksum for: darwin, linux and
+windows × amd64 and arm64. Built sequentially, one `go build` per target with
+`CGO_ENABLED=0` pinned; a per-target failure is collected and reported rather
+than aborting the run. `buildpkg.DefaultMatrix()` returns it. RFC §14. D-087.
 
 ## D
 
@@ -269,6 +290,14 @@ AGENTS.md §7. D-040, D-041.
 component. It implements the host half of the `ui/` bridge to render Apps locally,
 surfaces the `obs/v1` stream, fixtures, latency analytics, drift verdicts, and
 capability-set emulation. Dev-mode-gated, localhost-only, read-only. RFC §12.
+
+**Install host profile** — the small per-MCP-host (`claude`, `cursor`)
+structure in `internal/installpkg` that derives that host's MCP config-file
+location — Claude Desktop's per-OS `claude_desktop_config.json`, Cursor's
+`~/.cursor/mcp.json`. A filesystem-path derivation, not a capability matrix
+(distinct from the `apps.HostProfile` iframe-origin derivation): `dockyard
+install` writes a host config, and isolating the path here keeps a host's
+location change one localized edit. RFC §14. D-088.
 
 ## K
 
