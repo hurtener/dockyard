@@ -42,3 +42,18 @@ func TestConformanceHarnessRuns(t *testing.T) {
 func TestRunConformanceInMemory(t *testing.T) {
 	RunConformance(t, func() store.Store { return inmem.New() })
 }
+
+// TestRunBenchmarksSmoke exercises the Phase 21.5 shared Store benchmark suite
+// (RunBenchmarks) as an ordinary test. `make bench` runs the benchmarks for
+// real numbers; this self-guard drives them inside `go test` so the benchmark
+// code is covered and a silently-broken benchmark — a panicking seed, a
+// misnamed namespace — is caught by the normal suite, not only by `make bench`.
+// It mirrors the conformance harness self-guard above.
+func TestRunBenchmarksSmoke(t *testing.T) {
+	res := testing.Benchmark(func(b *testing.B) {
+		RunBenchmarks(b, func() store.Store { return inmem.New() })
+	})
+	if res.N < 1 {
+		t.Fatalf("RunBenchmarks did not execute any iteration: %+v", res)
+	}
+}
