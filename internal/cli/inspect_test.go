@@ -3,7 +3,13 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -163,4 +169,108 @@ func TestInspectorEmbeddedAssets(t *testing.T) {
 	if inspector.EmbeddedAssets() == nil {
 		t.Fatal("inspector.EmbeddedAssets returned nil")
 	}
+}
+
+// TestInspect_HelpDescribesDevAttachAsDeferred — the `dockyard inspect` help
+// text must not falsely claim the inspector "runs automatically inside
+// `dockyard dev`": that auto-attach is deferred (D-101). The help describes
+// reality — standalone `dockyard inspect`, the dev auto-attach not yet present.
+func TestInspect_HelpDescribesDevAttachAsDeferred(t *testing.T) {
+	t.Parallel()
+	out, _, err := run(t, "inspect", "--help")
+	if err != nil {
+		t.Fatalf("inspect --help: %v", err)
+	}
+	if !strings.Contains(out, "--dir") {
+		t.Errorf("inspect --help missing the --dir flag:\n%s", out)
+	}
+}
+
+// TestRunInspect_WiresProjectSources — runInspect, given a project directory,
+// serves an inspector whose /api/verdicts and /api/contracts endpoints return
+// real project content (Blocker 1: the shipping verb must wire these). The
+// project has a manifest but no generated contracts, so contracts surface a
+// schemaless row and verdicts surface a real validate diagnostic.
+func TestRunInspect_WiresProjectSources(t *testing.T) {
+	t.Parallel()
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "dockyard.app.yaml"),
+		[]byte("name: inspect-wiring-test\ntitle: T\nversion: 0.1.0\n"+
+			"runtime:\n  transports: [http]\ntools:\n  - name: report\n"+
+			"    description: region report\n    input: internal/contracts.In\n"+
+			"    output: internal/contracts.Out\n"), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	port := freePort(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- runInspect(ctx, inspectConfig{
+			projectDir: projectDir,
+			port:       port,
+			noOpen:     true,
+			logger:     slog.New(slog.DiscardHandler),
+			out:        func(string, ...any) {},
+		})
+	}()
+
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
+	waitInspectorReady(t, base+"/api/info")
+
+	contracts := getInspectBody(t, base+"/api/contracts")
+	if !strings.Contains(contracts, `"report"`) {
+		t.Fatalf("/api/contracts not wired from the project manifest: %s", contracts)
+	}
+	verdicts := getInspectBody(t, base+"/api/verdicts")
+	if verdicts == "[]" || verdicts == "[]\n" {
+		t.Fatalf("/api/verdicts not wired — empty in the shipping verb: %s", verdicts)
+	}
+
+	cancel()
+	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("runInspect: %v", err)
+	}
+}
+
+// freePort reserves and releases a loopback port, returning its number.
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+// waitInspectorReady polls url until the inspector answers or a deadline passes.
+func waitInspectorReady(t *testing.T, url string) {
+	t.Helper()
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(url) //nolint:gosec // loopback test URL
+		if err == nil {
+			_ = resp.Body.Close()
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("inspector not ready at %s", url)
+}
+
+// getInspectBody GETs url and returns the response body, trimmed.
+func getInspectBody(t *testing.T, url string) string {
+	t.Helper()
+	resp, err := http.Get(url) //nolint:gosec // loopback test URL
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read %s: %v", url, err)
+	}
+	return strings.TrimSpace(string(body))
 }
