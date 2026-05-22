@@ -204,3 +204,16 @@ A check against an unbuilt surface `skip()`s, never `fail()`s.
 - [x] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
 - [x] New vocabulary added to `docs/glossary.md`
 - [x] New / changed architectural decision filed in `docs/decisions.md`
+
+## Remediation notes
+
+- **R3 / depth audit (D-113).** This plan states `validate` invokes
+  `codegen.CrossCheck`. The depth audit found that was not so: `validate`'s
+  `checkStaleCodegen` only byte-compared each artifact against a fresh
+  regeneration; `CrossCheck` (the schema↔TS desync check) was wired only into
+  `dockyard test`. Since `dockyard build` runs `validate`, not the test gate, an
+  internally-inconsistent committed schema/TS pair passed both. R3 adds
+  `checkCrossCodegen` to `internal/validate` — it reads the committed schema
+  files and `contracts.ts` and runs `codegen.CrossCheck` per tool side,
+  reporting a desync as a `CheckStaleCodegen` Blocker. `validate/doc.go`'s
+  cross-check claim is now accurate. See D-113.

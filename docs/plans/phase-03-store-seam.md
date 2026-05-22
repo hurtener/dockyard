@@ -260,3 +260,16 @@ All checks `skip()` gracefully if the surface is absent (`common.sh` convention)
 - [x] Cross-subsystem seam opened/consumed ⇒ integration test (`AGENTS.md` §17)
 - [x] New vocabulary added to `docs/glossary.md`
 - [x] New / changed architectural decision filed in `docs/decisions.md`
+
+## Remediation notes
+
+- **R3 / depth audit (D-111).** The Public API surface listed
+  `ErrMigrationMutated` as a sentinel and the runner was described as detecting
+  a migration edited after merge. That guarantee was not real: a `Migration`'s
+  `Up` is a Go func, which cannot be content-hashed, so `Migration.fingerprint`
+  hashed only ordinal+ID and the `ErrMigrationMutated` branch was unreachable
+  dead code. R3 removed `ErrMigrationMutated`, the `fingerprint` method, and the
+  `appliedRecord.Fingerprint` field. The runner still enforces forward-only
+  ordering and reorder/removal (`ErrMigrationOutOfOrder`); "no migration edits
+  after merge" is now documented in code as a **review-enforced** rule, not a
+  runtime-enforced one. See D-111 (supersedes D-027's enforcement claim).
