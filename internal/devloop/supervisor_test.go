@@ -193,12 +193,18 @@ func TestSupervisorReportsCrash(t *testing.T) {
 	if err := s.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	// The wait returns the instant onExit fires; the ceiling only guards
+	// against a genuine hang. It is generous (not the 3s it once was) so a
+	// CPU-saturated CI run — many -race packages compiling and testing in
+	// parallel — cannot starve the child spawn/exit/Wait sequence past the
+	// deadline and produce a spurious failure. A real never-fires bug still
+	// fails, just 10s later.
 	select {
 	case err := <-crashed:
 		if err == nil {
 			t.Fatal("onExit fired with nil error for a crashing child")
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("onExit never fired for a crashing child")
 	}
 }

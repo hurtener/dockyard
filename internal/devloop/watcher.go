@@ -124,7 +124,24 @@ func isIgnoredDir(name string) bool {
 // orchestrator — a send on the buffered events channel that would block is
 // dropped because a rebuild is already pending (coalescing across the
 // channel boundary too).
+//
+// run is a thin adapter that binds the real fsnotify channels to loop, the
+// transport-agnostic debounce engine. The split lets the debounce/coalesce
+// logic be exercised deterministically by feeding synthetic events into loop
+// without a real fsnotify watcher or real files.
 func (w *watcher) run(ctx context.Context) {
+	w.loop(ctx, w.fsw.Events, w.fsw.Errors)
+}
+
+// loop is the transport-agnostic debounce engine. It coalesces events from the
+// events channel over the debounce window, emitting one classified changeKind
+// per burst on w.events, and survives watch errors from errs. It returns —
+// closing w.events — when ctx is cancelled or either input channel closes.
+//
+// run wires loop to the real fsnotify channels in production; tests drive loop
+// directly with channels they control, so coalescing is proven with no
+// dependence on OS/fsnotify event-delivery timing.
+func (w *watcher) loop(ctx context.Context, events <-chan fsnotify.Event, errs <-chan error) {
 	defer close(w.events)
 
 	timer := time.NewTimer(0)
@@ -139,7 +156,7 @@ func (w *watcher) run(ctx context.Context) {
 			timer.Stop()
 			return
 
-		case ev, ok := <-w.fsw.Events:
+		case ev, ok := <-events:
 			if !ok {
 				timer.Stop()
 				return
@@ -156,7 +173,7 @@ func (w *watcher) run(ctx context.Context) {
 			pending = mergeKind(pending, kind)
 			timer.Reset(w.debounce)
 
-		case err, ok := <-w.fsw.Errors:
+		case err, ok := <-errs:
 			if !ok {
 				timer.Stop()
 				return

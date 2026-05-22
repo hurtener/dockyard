@@ -2242,3 +2242,73 @@ no-`--addr` HTTP run — `runpkg` now defaults to `127.0.0.1:8080`, matching the
 scaffold (CLAUDE.md §17 cross-phase fix). A scaffold integration test builds the
 generated server and proves it completes a real MCP initialize over HTTP under
 `DOCKYARD_TRANSPORT=http`, closing the seam end to end.
+
+---
+
+## D-091 — Wave 7 checkpoint: the CLI wave-end E2E design and the folded hygiene fixes
+
+**Status:** Settled (Wave 7 checkpoint).
+
+The Wave 7 checkpoint (RFC §9, §10, §14 — phases 17-21) lands its wave-end
+end-to-end integration test and the hygiene fixes the §17.5 audit surfaced.
+This entry records the design choices, the way D-078 records the Wave 6
+checkpoint's.
+
+1. **The Wave 7 E2E drives the `dockyard` CLI as one wired tool, against the
+   real built binary.** `test/integration/wave7_test.go` compiles the actual
+   `dockyard` binary from `cmd/dockyard` (CGo-free) and exercises the whole
+   developer workflow — `new` → `generate` → `validate` → `build` → `run` →
+   `test` — by invoking that binary as a subprocess, exactly as a developer
+   runs it. No verb is reached through an in-process package shortcut: every
+   stage goes through the real cobra root, so the command-tree composition and
+   each verb's wiring are genuinely tested. It asserts the scaffold builds, that
+   `generate` is idempotent (a clean rerun reports "no changes"), that
+   `validate` exits 0 clean / non-zero on an injected stale-codegen drift, that
+   `build` emits a CGo-free statically-linked binary, that `run --transport
+   http` serves a real MCP `initialize` over streamable-HTTP on a localhost
+   port, and that `test` runs every category and a contract regression fails
+   the gate. It covers ≥1 failure mode per seam — a `validate` stale-codegen
+   blocker, a `build` blocked by that validation, a `test` gate failed by a
+   contract regression, and an `install` against an unwritable host-config path
+   — and runs under `-race` with a post-teardown goroutine-leak assertion after
+   the spawned `dockyard run` child is torn down.
+
+2. **The dev-loop concurrency proof drives the real `devloop.Run`
+   orchestrator.** Wave 7's one reusable concurrent artifact is the
+   `internal/devloop` orchestrator. The wave7 test drives the REAL
+   `devloop.Run` against a real scaffolded project and stresses its supervised
+   restart path with N≥12 concurrent `.go` edits from N goroutines under
+   `-race`, asserting the loop tears down with no goroutine leak. The
+   supervisor's own lock-level race safety stays covered in-package by
+   `internal/devloop`'s `TestSupervisorConcurrentRestart`; the wave7 test does
+   not add an exported test-only surface to `devloop` to reach the unexported
+   supervisor directly — it exercises the same artifact through the genuine
+   orchestrator + watcher seam instead.
+
+3. **Two flaky devloop tests were de-flaked — folded fixes (§17).** The audit
+   reproduced `TestSupervisorReportsCrash` and `TestRunSupervisesViteWhenWebPresent`
+   failing only under the saturated `go test -race ./...` matrix, never in
+   isolation: both bounded a child process's spawn/exit/observe sequence with a
+   timeout (3s and 5s) too tight for a CPU-saturated `-race` run with many
+   packages compiling in parallel. Both waits already return the instant their
+   observable signal fires, so the ceilings were raised (to 10s and 15s) with
+   no cost on a healthy run; a genuine never-fires bug still fails, just later.
+   A flaky test is a defect (§17), so this was fixed in the checkpoint PR.
+
+4. **Shipped-phase status hygiene was corrected.** The phase index in
+   `docs/plans/README.md` still listed phases 18, 19 and 20 as `Pending` though
+   their code, smoke scripts and integration tests had all landed; they are now
+   `Shipped`. The phase plans for 18, 19 and 21 had left their acceptance-
+   criteria and pre-merge-checklist boxes unchecked though the work was done;
+   they are now checked, matching the convention phases 17 and 20 already
+   followed. These are documentation-drift defects of the same class as RFC
+   drift and were fixed in the checkpoint PR.
+
+**Verdict.** The Wave 7 `dockyard` CLI foundation is sound: all eight verbs
+compose onto one cobra root, the `new` → `generate` → `validate` → `build` →
+`run` → `test` workflow holds end to end against the real binary, the
+`DOCKYARD_TRANSPORT` scaffold↔`run` contract (D-090) is verified localhost-
+bound, and P1 (contract-first) and P4 (server-side only — the install boot
+check is the throwaway localhost carve-out of D-088) are upheld. No blocker was
+found; the audit punch-list is should-fix and nit hygiene, fixed in the
+checkpoint PR.

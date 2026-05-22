@@ -73,15 +73,15 @@ surfaces; no brief finding is overridden.
 
 ## Acceptance criteria
 
-- [ ] `dockyard generate` is idempotent: a second run with no source change
+- [x] `dockyard generate` is idempotent: a second run with no source change
       produces byte-identical files and reports no change.
-- [ ] `dockyard validate` exits non-zero on each build-blocker class — an
+- [x] `dockyard validate` exits non-zero on each build-blocker class — an
       invalid manifest, a broken tool↔UI mapping, an invalid MIME, a
       spec-compliance violation, stale generated output.
-- [ ] Stale generated output (a contract struct changed without rerunning
+- [x] Stale generated output (a contract struct changed without rerunning
       `generate`) fails `validate`.
-- [ ] `dockyard validate` exits 0 on a clean scaffolded project.
-- [ ] Both verbs are registered on the cobra root and shown in `--help`.
+- [x] `dockyard validate` exits 0 on a clean scaffolded project.
+- [x] Both verbs are registered on the cobra root and shown in `--help`.
 
 ## Files added or changed
 

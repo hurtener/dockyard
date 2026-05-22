@@ -119,63 +119,88 @@ func TestWatcherClassify(t *testing.T) {
 
 // TestWatcherDebounceCoalescesBurst proves a burst of file events within the
 // debounce window produces exactly one change event — not one per write.
+//
+// The burst is fed straight into the debounce engine (w.loop) through a
+// channel the test owns, so coalescing is proven with no dependence on
+// OS/fsnotify event-delivery timing — every synthetic event reaches the
+// debouncer before the window opens, on a quiet machine or a saturated CI
+// runner alike.
 func TestWatcherDebounceCoalescesBurst(t *testing.T) {
 	t.Parallel()
 	w, dir := newTestWatcher(t)
+	// A deliberately large debounce window: the burst is fed synchronously
+	// below, and a window this wide leaves no room for a scheduler stall
+	// between two channel sends to outlast it, even on a saturated runner.
+	w.debounce = 2 * time.Second
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go w.run(ctx)
+
+	events := make(chan fsnotify.Event)
+	errs := make(chan error)
+	go w.loop(ctx, events, errs)
 
 	goFile := filepath.Join(dir, "main.go")
-	// A burst of ten writes well within one 50ms debounce window.
+	// A burst of ten writes. Sends on the unbuffered channel are synchronous:
+	// loop has consumed each event (and reset the debounce timer) before the
+	// next is sent, so the whole burst lands inside one debounce window
+	// regardless of scheduler jitter.
 	for i := 0; i < 10; i++ {
-		if err := os.WriteFile(goFile, []byte("package main\n"), 0o600); err != nil {
-			t.Fatalf("write burst: %v", err)
-		}
-		time.Sleep(2 * time.Millisecond)
+		events <- fsnotify.Event{Name: goFile, Op: fsnotify.Write}
 	}
 
-	// Exactly one coalesced event should arrive.
+	// Exactly one coalesced event should arrive — one debounce window after
+	// the final write, with a generous margin for the timer to fire.
 	select {
 	case kind := <-w.events:
 		if kind != changeGo {
 			t.Fatalf("first coalesced event = %v, want changeGo", kind)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(w.debounce + 3*time.Second):
 		t.Fatal("no coalesced event after a burst")
 	}
 
-	// No second event should follow the single burst.
+	// No second event should follow the single burst. A missed coalesce would
+	// have flushed a second event one debounce window after some later write;
+	// waiting past a full window with margin proves none is pending.
 	select {
 	case kind := <-w.events:
 		t.Fatalf("unexpected second event %v — burst was not coalesced", kind)
-	case <-time.After(300 * time.Millisecond):
+	case <-time.After(w.debounce + time.Second):
 	}
 }
 
 // TestWatcherContractChangeWins proves a burst touching both a contract file
 // and a plain .go file is classified contract-source (codegen must run).
+//
+// Like TestWatcherDebounceCoalescesBurst, the burst is fed directly into the
+// debounce engine so the single-classified-outcome assertion holds without a
+// wall-clock dependency on fsnotify delivery timing.
 func TestWatcherContractChangeWins(t *testing.T) {
 	t.Parallel()
 	w, dir := newTestWatcher(t)
+	// A large debounce window: the two events below are fed synchronously, so
+	// a window this wide leaves no room for a scheduler stall between the
+	// sends to outlast it.
+	w.debounce = 2 * time.Second
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go w.run(ctx)
 
-	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o600); err != nil {
-		t.Fatalf("write main.go: %v", err)
-	}
+	events := make(chan fsnotify.Event)
+	errs := make(chan error)
+	go w.loop(ctx, events, errs)
+
+	// Synchronous sends on the unbuffered channel guarantee both events land
+	// inside one debounce window.
+	events <- fsnotify.Event{Name: filepath.Join(dir, "main.go"), Op: fsnotify.Write}
 	contractFile := filepath.Join(dir, "internal", "contracts", "contracts.go")
-	if err := os.WriteFile(contractFile, []byte("package contracts\n"), 0o600); err != nil {
-		t.Fatalf("write contract: %v", err)
-	}
+	events <- fsnotify.Event{Name: contractFile, Op: fsnotify.Write}
 
 	select {
 	case kind := <-w.events:
 		if kind != changeContract {
 			t.Fatalf("coalesced kind = %v, want changeContract", kind)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(w.debounce + 3*time.Second):
 		t.Fatal("no coalesced event")
 	}
 }

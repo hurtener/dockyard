@@ -101,13 +101,13 @@ note under Goals.
 
 ## Acceptance criteria
 
-- [ ] `dockyard test` is wired onto the cobra root and runs all five categories
+- [x] `dockyard test` is wired onto the cobra root and runs all five categories
       against a Dockyard project.
-- [ ] A contract regression (a contract struct changed without regenerating, so
+- [x] A contract regression (a contract struct changed without regenerating, so
       the generated schema/TS is stale) fails the run — exit non-zero.
-- [ ] A spec-compliance violation fails the run — exit non-zero.
-- [ ] A clean scaffolded project passes — exit zero.
-- [ ] The scaffolded server honours `DOCKYARD_TRANSPORT=http` and genuinely
+- [x] A spec-compliance violation fails the run — exit non-zero.
+- [x] A clean scaffolded project passes — exit zero.
+- [x] The scaffolded server honours `DOCKYARD_TRANSPORT=http` and genuinely
       serves HTTP (the Phase 20↔17 wiring-gap fix).
 
 ## Files added or changed
