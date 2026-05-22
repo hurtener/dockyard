@@ -23,8 +23,9 @@ MCP Servers and MCP Apps. It ships as one static, CGo-free binary: scaffold a
 server, write typed Go tool handlers, and get generated contracts, a local
 inspector, quality gates, and one-command packaging.
 
-Phase 17 ships the command tree and 'dockyard new'. The remaining verbs —
-generate, validate, dev, build, run, install, test — land in later phases.`
+Phase 17 shipped the command tree and 'dockyard new'; Phase 18 adds 'generate'
+and 'validate'. The remaining verbs — dev, build, run, install, test — land in
+later phases.`
 
 // NewRootCmd builds the root `dockyard` cobra command with every subcommand
 // that has landed registered onto it. It is the single composition point: a
@@ -55,7 +56,9 @@ func NewRootCmd(stdout, stderr io.Writer) *cobra.Command {
 
 	// Subcommand registration. Each landed verb is one line; later phases add
 	// theirs here. Keep alphabetical.
+	root.AddCommand(newGenerateCmd())
 	root.AddCommand(newNewCmd())
+	root.AddCommand(newValidateCmd())
 
 	return root
 }
