@@ -13,6 +13,28 @@ mount Phase 13 deferred: `tasks/*` JSON-RPC frames are routed into
 `tasks` capability is injected into the `initialize` handshake, so a real MCP
 client drives `tasks/*` end to end over the wire.
 
+> **Remediation note (R2, depth audit).** Phase 14 shipped the transport mount
+> as a *standalone* `runtime/tasks.Mount` (`NewMount`, `HTTPMiddleware`,
+> `ServeStdioFrames`) and proved it in isolation, but the "Files added or
+> changed" claim that it wired the mount into `runtime/server/http.go` and the
+> stdio path was **not actually done** — `runtime/server`, `cmd/`, and
+> `internal/cli` never referenced `tasks.Mount`. The Phase 14 integration test
+> met the "tasks/* over a transport" criterion with a hand-written `sdkStandIn`
+> handler, not the product. Remediation **R2** closes that seam: the
+> `runtime/server` server now attaches a `tasks.Engine` via `Options.Tasks` /
+> `WithTasks`, and `HTTPHandler` / `ServeStdio` wire the mount onto the real
+> transports. See **D-108–D-110** and `test/integration/r2_tasks_mount_test.go`
+> (a real MCP SDK client over the real `runtime/server` streamable-HTTP
+> transport — no stand-in).
+>
+> **Recorded follow-up.** R2 fixes the `runtime/server` seam. It does **not**
+> make `dockyard run` / the scaffolded `main.go` auto-construct and attach a
+> `tasks.Engine` when the project declares task-supporting tools — that needs
+> per-tool task-support detection, engine + `Store` construction in the
+> generated entrypoint, and a per-transport identifiability decision, and is a
+> later CLI/scaffold phase's work (D-108). An app author reaches the wiring
+> today through `server.Options.Tasks` / `Server.WithTasks`.
+
 ## RFC anchor
 
 - RFC §8.4 — the handler API: handlers stay sync-shaped; `TaskHandle` for
@@ -116,9 +138,15 @@ client drives `tasks/*` end to end over the wire.
       it scopes to the calling auth context.
 - [ ] The durable `TaskStore` driver passes the shared `TaskStore` conformance
       suite against the inmem and sqlite `Store` backings; forward-only migration.
-- [ ] **(folded in)** A real MCP client drives `tasks/get`/`result`/`cancel`/
-      `list` end to end over a real transport — `tasks/*` frames reach
-      `Engine.Dispatch` and the `tasks` capability is in the `initialize` result.
+- [x] **(folded in; completed by R2)** A real MCP client drives
+      `tasks/get`/`result`/`cancel`/`list` end to end over a real transport —
+      `tasks/*` frames reach `Engine.Dispatch` and the `tasks` capability is in
+      the `initialize` result. *Phase 14 shipped the standalone mount but did
+      not join it to `runtime/server`; remediation R2 wired the
+      `Options.Tasks` / `WithTasks` seam and `HTTPHandler` / `ServeStdio` mount
+      so the criterion is met by the product, proven by
+      `test/integration/r2_tasks_mount_test.go` with a real SDK client over the
+      real server transport.*
 - [ ] Each new `tasks` manifest key is documented in `internal/manifest`, the
       example manifest, and the smoke script.
 
@@ -138,8 +166,17 @@ client drives `tasks/*` end to end over the wire.
 - `runtime/tasks/taskstoretest/conformance.go` — the shared `TaskStore`
   conformance suite (new package; AGENTS.md §3 — under `runtime/tasks/`).
 - `runtime/tasks/*_test.go` — unit, concurrency, golden tests.
-- `runtime/server/http.go`, `runtime/server/stdio` mount — wire `tasks/*` and
-  the `tasks` capability into the transports.
+- `runtime/tasks/transport.go` — the standalone `tasks/*` transport mount
+  (`NewMount`, `HTTPMiddleware`, `ServeStdioFrames`) + capability-injection
+  seam. **Note:** Phase 14 shipped this mount but did **not** join it to
+  `runtime/server` — the wiring below was completed by remediation R2, not
+  Phase 14.
+- `runtime/server/server.go`, `runtime/server/http.go`,
+  `runtime/server/stdio.go` *(R2)* — the server↔tasks attachment seam
+  (`Options.Tasks`, `WithTasks`, `TasksEnabled`) and the mount wiring onto the
+  streamable-HTTP handler and the stdio transport path. See D-108–D-110.
+- `test/integration/r2_tasks_mount_test.go` *(R2)* — a real MCP SDK client
+  drives `tasks/*` over the real `runtime/server` streamable-HTTP transport.
 - `internal/manifest/manifest.go`, `internal/manifest/validate.go` — the `tasks`
   manifest block + its validation.
 - `internal/manifest/testdata/valid-full.yaml`, `bad-*.yaml` — fixtures.
