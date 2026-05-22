@@ -25,8 +25,9 @@ type ratedTestInput struct {
 }
 
 // NewHandlerRuntimeForTest builds a handler runtime over the ratedTestInput
-// contract for the edge-validation tests.
-func NewHandlerRuntimeForTest(t *testing.T) *testRuntime {
+// contract for the edge-validation tests. It takes a testing.TB so both a
+// *testing.T unit test and a *testing.F fuzz target can build a runtime.
+func NewHandlerRuntimeForTest(t testing.TB) *testRuntime {
 	t.Helper()
 	in, err := codegen.SchemaFor[ratedTestInput]()
 	if err != nil {
