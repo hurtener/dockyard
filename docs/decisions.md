@@ -2123,3 +2123,56 @@ gains a `web/` UI later picks up Vite supervision on the next `dockyard dev`
 invocation; the dev loop does not need to be taught about the UI ahead of time.
 This keeps the blank-server DX a first-class path: `dockyard new && dockyard
 dev` works with zero UI ceremony.
+
+---
+
+## D-087 — `dockyard build` runs the cross-compile matrix sequentially and collects per-target failures
+
+**Status:** Settled (Phase 20).
+
+`dockyard build` cross-compiles the RFC §14 matrix — darwin/linux/windows ×
+amd64/arm64. Phase 20 builds the matrix **sequentially**, one `go build`
+invocation per target, and **collects** a per-target failure rather than
+aborting the whole run on the first one: every target is attempted, and the
+aggregate error (`errors.Join` of the failures) is returned after the matrix
+has run.
+
+Sequential, not parallel: the matrix is bounded at six triples and a build is
+not the latency-critical path (`dockyard dev` is); correctness and a readable,
+deterministic `dist/` tree win over a few seconds of wall-clock. Collect, not
+abort: one unbuildable triple — for example a project that has added a CGo
+dependency, which cannot cross-compile under `CGO_ENABLED=0` — must not hide
+that the rest of the matrix is green. The release engineer (Phase 30) inherits
+a build that reports the full picture in one run.
+
+A parallel matrix is a later refinement if build latency ever becomes a
+complaint; the `Build` API (a `Result` of `Artifact`s) does not change when it
+does.
+
+---
+
+## D-088 — `dockyard install`'s boot check is a throwaway localhost spawn, not a production MCP client
+
+**Status:** Settled (Phase 20).
+
+`dockyard install claude|cursor` writes the host's MCP config and then verifies
+the server boots. The verification — the **boot check** — spawns the freshly
+built server binary exactly as the host config launches it (a local stdio
+subprocess), drives one real MCP `initialize` handshake against it with a
+bounded timeout, and tears the process down.
+
+This does **not** violate P4 (server-side only; Harbor owns the MCP client).
+The boot check is the same test-only, dev-mode, localhost client carve-out the
+inspector occupies (CLAUDE.md §1 P4, §4.2): it is throwaway, it is bounded, it
+is never a long-lived or production client, and it exists only to give the
+developer a clear "the config you just wrote launches a working server" signal.
+`dockyard install` itself writes a *host* config — a filesystem write — and is
+not a client at all.
+
+The per-host config-file locations (Claude Desktop's
+`claude_desktop_config.json` under the per-OS application-support directory;
+Cursor's `~/.cursor/mcp.json`) are kept behind a small per-host `hostProfile`
+struct in `internal/installpkg`. This is a filesystem-path derivation, not a
+capability matrix — CLAUDE.md §6 forbids a hardcoded *capability* matrix; a
+two-entry path-derivation struct is the correct, non-sprawling shape here, and
+isolating it means a host's config-location change is one localized edit.
