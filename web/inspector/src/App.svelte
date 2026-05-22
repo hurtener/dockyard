@@ -3,11 +3,13 @@
    * App.svelte — the inspector page.
    *
    * Built to design-spec.md §4 and the approved mockups/inspector.png: one
-   * `AppShell` — a `PageHeader` (logo + server name/version/transport +
-   * Host/Display controls), the App preview frame, the tabbed `DetailRail`
-   * (Events / RPC working in Phase 22; Fixtures / Tools / Verdicts / Tasks are
-   * Phase 23 placeholders), and a `ConnectionFooter`.
+   * `AppShell` — a `PageHeader` (logo + server name/version/transport + the
+   * Host capability-set control + Display-mode), the App preview frame, the
+   * tabbed `DetailRail` (Events / RPC / Fixtures / Tools / Verdicts / Tasks /
+   * Analytics), and a `ConnectionFooter`.
    *
+   * Phase 22 built the Events + RPC tabs and the App frame; Phase 23 fills the
+   * Fixtures / Tools / Verdicts / Tasks / Analytics tabs and the Host control.
    * Every component is composed from `@dockyard/ui` — none is re-implemented
    * (CLAUDE.md §20). Every async region routes through `PageState`.
    */
@@ -25,10 +27,32 @@
   import EventsPanel from './lib/EventsPanel.svelte';
   import RpcPanel from './lib/RpcPanel.svelte';
   import AppFrame from './lib/AppFrame.svelte';
-  import { fetchServerInfo, fetchRpcLog, obsStreamURL, type ServerInfo } from './lib/api.js';
+  import FixturesPanel from './lib/FixturesPanel.svelte';
+  import ToolsPanel from './lib/ToolsPanel.svelte';
+  import VerdictsPanel from './lib/VerdictsPanel.svelte';
+  import TasksPanel from './lib/TasksPanel.svelte';
+  import AnalyticsPanel from './lib/AnalyticsPanel.svelte';
+  import HostControl from './lib/HostControl.svelte';
+  import {
+    fetchServerInfo,
+    fetchRpcLog,
+    fetchVerdicts,
+    fetchContracts,
+    obsStreamURL,
+    type ServerInfo,
+    type VerdictRow,
+  } from './lib/api.js';
   import { ObsStream, type ObsEvent } from './lib/obs.js';
   import type { RpcEntry } from './lib/rpc.js';
-  import type { HostRpcLogEntry } from './host/host-bridge.js';
+  import type { HostRpcLogEntry, CallToolFixtureResult } from './host/host-bridge.js';
+  import type { ToolContract } from './lib/contracts.js';
+  import type { Fixture } from './lib/fixtures.js';
+  import {
+    fullCapabilitySet,
+    hostContextFor,
+    hostCapabilitiesFor,
+    type CapabilitySet,
+  } from './lib/capability.js';
 
   interface Props {
     /** API base URL — empty in production (served same-origin); set in tests. */
@@ -53,9 +77,22 @@
   let rpcEntries = $state<RpcEntry[]>([]);
   let rpcState = $state<PageStateValue>('loading');
 
-  // The inspector DetailRail tabs. Events + RPC are built in Phase 22; the rest
-  // are scaffolded as Phase 23 placeholders so the rail is cleanly extensible.
-  const tabs = ['Events', 'RPC', 'Fixtures', 'Tools', 'Verdicts', 'Tasks'];
+  // -- verdicts --
+  let verdicts = $state<VerdictRow[]>([]);
+  let verdictsState = $state<PageStateValue>('loading');
+
+  // -- generated contracts (drive the fixture switcher) --
+  let contracts = $state<ToolContract[]>([]);
+  let contractsState = $state<PageStateValue>('loading');
+
+  // -- capability-set emulation (the Host control) --
+  let capabilities = $state<CapabilitySet>(fullCapabilitySet());
+
+  // -- fixture switcher state --
+  let activeFixture = $state<CallToolFixtureResult | undefined>(undefined);
+
+  // The inspector DetailRail tabs.
+  const tabs = ['Events', 'RPC', 'Fixtures', 'Tools', 'Verdicts', 'Tasks', 'Analytics'];
   let activeTab = $state(0);
 
   function onHostRpc(entry: HostRpcLogEntry): void {
@@ -83,7 +120,6 @@
         liveDot = true;
       },
       onOpen: () => {
-        // The stream is open but may carry no events yet — empty, not ready.
         if (events.length === 0) eventsState = 'empty';
       },
       onError: () => {
@@ -105,6 +141,40 @@
     }
   }
 
+  async function loadVerdicts(): Promise<void> {
+    verdictsState = 'loading';
+    try {
+      verdicts = await fetchVerdicts(base);
+      verdictsState = verdicts.length > 0 ? 'ready' : 'empty';
+    } catch {
+      verdictsState = 'error';
+    }
+  }
+
+  async function loadContracts(): Promise<void> {
+    contractsState = 'loading';
+    try {
+      contracts = await fetchContracts(base);
+      contractsState = contracts.length > 0 ? 'ready' : 'empty';
+    } catch {
+      contractsState = contracts.length > 0 ? 'ready' : 'error';
+    }
+  }
+
+  /** Applies a fixture from the switcher — feeds the App synthetic content. */
+  function applyFixture(fixture: Fixture, _contract: ToolContract): void {
+    activeFixture = {
+      structuredContent: fixture.structuredContent,
+      text: fixture.text,
+      error: fixture.error,
+    };
+  }
+
+  /** Re-runs the App handshake against the new emulated capability set. */
+  function onCapabilityChange(next: CapabilitySet): void {
+    capabilities = next;
+  }
+
   onMount(async () => {
     try {
       serverInfo = await fetchServerInfo(base);
@@ -112,17 +182,17 @@
       serverInfo = { name: 'disconnected', version: '', transport: '' };
     }
     startStream();
-    await loadRpcLog();
+    await Promise.all([loadRpcLog(), loadVerdicts(), loadContracts()]);
   });
 
   onDestroy(() => stream?.close());
 
   const connection = $derived(serverInfo ? 'connected' : 'connecting');
   const headerSubtitle = $derived(
-    serverInfo
-      ? `${serverInfo.name} v${serverInfo.version}`
-      : 'connecting…',
+    serverInfo ? `${serverInfo.name} v${serverInfo.version}` : 'connecting…',
   );
+  const emulatedHostContext = $derived(hostContextFor(capabilities));
+  const emulatedHostCapabilities = $derived(hostCapabilitiesFor(capabilities));
 </script>
 
 <AppShell>
@@ -139,11 +209,14 @@
         <span class="header-meta" data-testid="transport-label">
           {serverInfo?.transport ?? '—'}
         </span>
-        <!-- Host / Display-mode controls — the deep behaviour is Phase 23
-             (capability emulation, mode negotiation UI). The chips are shown
-             read-only so the layout matches the approved mockup. -->
-        <StatusChip label="Host: ChatGPT compatible" tone="neutral" />
-        <StatusChip label="Display: inline" tone="neutral" />
+        <HostControl
+          capabilities={capabilities}
+          onChange={onCapabilityChange}
+        />
+        <StatusChip
+          label={`Display: ${capabilities.displayMode}`}
+          tone="neutral"
+        />
       {/snippet}
     </PageHeader>
   {/snippet}
@@ -153,26 +226,48 @@
       {#snippet children(index: number)}
         {#if index === 0}
           <RailCard title="Events">
-            <EventsPanel
-              {events}
-              streamState={eventsState}
-              onRetry={startStream}
-            />
+            <EventsPanel {events} streamState={eventsState} onRetry={startStream} />
           </RailCard>
         {:else if index === 1}
           <RailCard title="RPC">
-            <RpcPanel
-              entries={rpcEntries}
-              logState={rpcState}
-              onRetry={loadRpcLog}
+            <RpcPanel entries={rpcEntries} logState={rpcState} onRetry={loadRpcLog} />
+          </RailCard>
+        {:else if index === 2}
+          <RailCard title="Fixtures">
+            <FixturesPanel
+              {contracts}
+              panelState={contractsState}
+              onRetry={loadContracts}
+              onApply={applyFixture}
             />
+          </RailCard>
+        {:else if index === 3}
+          <RailCard title="Tools / Resources">
+            <ToolsPanel
+              {contracts}
+              panelState={contractsState}
+              onRetry={loadContracts}
+            />
+          </RailCard>
+        {:else if index === 4}
+          <RailCard title="Verdicts">
+            <VerdictsPanel
+              {verdicts}
+              panelState={verdictsState}
+              onRetry={loadVerdicts}
+            />
+          </RailCard>
+        {:else if index === 5}
+          <RailCard title="Tasks">
+            <TasksPanel {events} streamState={eventsState} onRetry={startStream} />
+          </RailCard>
+        {:else if index === 6}
+          <RailCard title="Analytics">
+            <AnalyticsPanel {events} streamState={eventsState} onRetry={startStream} />
           </RailCard>
         {:else}
           <RailCard title={tabs[index]}>
-            <EmptyState
-              title={`${tabs[index]} — coming in Phase 23`}
-              description="The fixture switcher, tool list, drift verdicts, and task rendering land in the inspector's advanced phase."
-            />
+            <EmptyState title="Nothing here" description="No panel for this tab." />
           </RailCard>
         {/if}
       {/snippet}
@@ -192,7 +287,14 @@
 
   <div class="preview-region">
     {#if appHtml}
-      <AppFrame html={appHtml} appName={serverInfo?.name} onRpc={onHostRpc} />
+      <AppFrame
+        html={appHtml}
+        appName={serverInfo?.name}
+        onRpc={onHostRpc}
+        hostContext={emulatedHostContext}
+        hostCapabilities={emulatedHostCapabilities}
+        fixtureResult={activeFixture}
+      />
     {:else}
       <EmptyState
         title="No App attached"

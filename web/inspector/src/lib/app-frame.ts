@@ -10,7 +10,7 @@
  */
 
 import { HostBridge, type HostRpcLogEntry } from '../host/host-bridge.js';
-import type { HostContext } from '@dockyard/bridge';
+import type { HostCapabilities, HostContext } from '@dockyard/bridge';
 
 /**
  * The iframe `sandbox` token set for an MCP App preview. It is deny-by-default:
@@ -44,6 +44,13 @@ export interface MountAppFrameOptions {
   hostWindow: Pick<Window, 'addEventListener' | 'removeEventListener'>;
   /** The host context the host half supplies in the handshake. */
   hostContext?: HostContext;
+  /**
+   * The host capabilities the host half advertises in the handshake — the
+   * capability-set emulation seam (RFC §12, §7.5). When the emulated host has
+   * Apps or Tasks toggled off, the App reads that from the handshake result
+   * and degrades.
+   */
+  hostCapabilities?: HostCapabilities;
   /** Called for every JSON-RPC message — feeds the RPC panel. */
   onRpc?: (entry: HostRpcLogEntry) => void;
   /** Called whenever the frame status changes. */
@@ -102,6 +109,7 @@ export function mountAppFrame(opts: MountAppFrameOptions): AppFrameHandle {
       ): void;
     },
     hostContext: opts.hostContext,
+    hostCapabilities: opts.hostCapabilities,
     onRpc: opts.onRpc,
   });
 
