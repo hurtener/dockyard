@@ -3,6 +3,7 @@ module github.com/hurtener/dockyard
 go 1.26.2
 
 require (
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/jsonschema-go v0.4.3
 	github.com/gzuidhof/tygo v0.2.21
 	github.com/modelcontextprotocol/go-sdk v1.6.0

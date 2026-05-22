@@ -74,6 +74,17 @@ struct, not inline schema. Resolved to a JSON Schema through the manifest's
 
 ## D
 
+**dev loop** — the `dockyard dev` orchestrated edit-feedback cycle (Phase 19):
+an embedded `fsnotify` watcher choreographing a Go-server restart on a `.go`
+change, an in-process codegen re-run on a contract change, and a supervised Vite
+dev server (which owns Svelte HMR) — all as one process tree from one command.
+Dockyard does not shell out to `air` or `wgo`. RFC §9.2. D-084, D-085, D-086.
+
+**`dockyard dev`** — the CLI verb (Phase 19) that runs the dev loop. A thin
+wrapper over the `internal/devloop` orchestrator: it watches the project,
+restarts the Go MCP server, re-runs codegen, and supervises Vite, tearing the
+whole tree down cleanly on Ctrl-C. RFC §9.2, §9.1. D-084.
+
 **`dockyard generate`** — the contract-first codegen CLI verb (Phase 18). It
 runs the Design A pipeline (RFC §6.2) over a project: it regenerates the
 per-contract JSON Schema files and the TypeScript contract types from the typed
@@ -381,6 +392,13 @@ external observability stack. It is off by default and never a prerequisite to
 observe locally — obs/v1 is the stable contract; the adapter absorbs OTel
 semconv churn. RFC §11.3. D-074.
 
+**Orchestrator** — the reusable, concurrency-safe `internal/devloop` package
+(Phase 19) that implements the dev loop: it embeds the `fsnotify` watcher,
+holds one supervisor per supervised child, runs codegen in-process on a contract
+change, and tears the whole process tree down cleanly on context cancellation.
+`devloop.Run` is its single public entrypoint; the `dockyard dev` verb is a thin
+wrapper over it. RFC §9.2. D-084.
+
 ## P
 
 **`protocolcodec`** — the internal package (`internal/protocolcodec`) that is the
@@ -473,6 +491,13 @@ a future Postgres driver addable without a rewrite. RFC §13. D-007, D-025.
 `init()` blank-import. V1 ships two: `inmem` (in-memory, for single-user stdio apps)
 and `sqlite` (durable, `modernc.org/sqlite`). Every driver must pass the conformance
 suite. RFC §13. D-026.
+
+**Supervisor** — within the dev-loop orchestrator (Phase 19), a
+`context`-scoped unit owning one child process's lifecycle: start, restart
+(terminate-then-start, no orphan), and a clean stop with a SIGTERM-then-SIGKILL
+grace window. The orchestrator holds one supervisor per supervised child — the
+Go MCP server, the Vite dev server — and the inspector lands later as one more.
+RFC §9.2. D-084, D-085.
 
 **Streamable-HTTP transport** — the current MCP HTTP transport (the 2025-03-26
 spec's streamable HTTP), one of Dockyard's two production transports alongside
