@@ -5,11 +5,10 @@ import (
 	"testing"
 
 	"github.com/hurtener/dockyard/runtime/store"
+	// Importing the inmem package (not blank) both exercises its init-block
+	// driver registration and gives the test its exported DriverName constant.
 	"github.com/hurtener/dockyard/runtime/store/inmem"
 	"github.com/hurtener/dockyard/runtime/store/storetest"
-
-	// Blank import to exercise init-block driver registration.
-	_ "github.com/hurtener/dockyard/runtime/store/inmem"
 )
 
 // TestConformance runs the shared Store conformance suite against the

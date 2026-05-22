@@ -1859,3 +1859,50 @@ Phase 16 implements RFC §11.3's MCP `logging` → obs/v1 `log`-event bridge as
    the obs/v1 `log` event is emitted regardless, so the inspector observes
    every server log record even when the client did not raise its MCP log
    level.
+
+---
+
+## D-078 — Wave 6 checkpoint: the obs/v1 wave-end E2E design and two folded web-gate hygiene fixes
+
+**Status:** Settled (Wave 6 checkpoint).
+
+The Wave 6 checkpoint (RFC §11 — phases 15 and 16) lands its wave-end
+end-to-end integration test and two folded-in `web`-gate hygiene fixes. This
+entry records the design choices, the way D-072 records the Wave 5 checkpoint's.
+
+1. **The Wave 6 E2E drives the obs/v1 protocol as one wired whole, with real
+   drivers at every seam.** `test/integration/wave6_test.go` builds a real
+   `runtime/server` carrying contract-first tools, a real resource and a real
+   MCP App, plus a real `tasks.Engine`, all emitting through ONE real
+   `obs.FanOut` composed over a real ring-buffer driver, a real out-of-band
+   `SSESink` on a real loopback listener, and a real `OTelEmitter` wired to a
+   REAL in-memory OTel span recorder (`tracetest.SpanRecorder`) — never a mock
+   at the OTel boundary (CLAUDE.md §17). MCP calls run over a REAL stdio-shaped
+   transport (newline-delimited JSON-RPC over OS pipes) so the no-corruption
+   proof is genuine. It asserts every obs/v1 event kind lands with a well-formed
+   W3C trace identity, the SSE channel streams while the stdio pipe stays clean,
+   the OTel pipeline receives `mcp.*`/`gen_ai.*` spans, and a log record fans to
+   BOTH MCP `notifications/message` and an obs/v1 `log` event; it covers a
+   failure mode per seam (a stalled SSE subscriber, a slow ring consumer, and
+   OTel-not-configured) and runs an N=14 concurrency stress under `-race`
+   against the shared `FanOut` + SSE sink (with subscriber churn) + ring buffer,
+   with a post-teardown goroutine-leak assertion.
+
+2. **The Phase 11 smoke surfaces `make web` output on failure (C1).**
+   `scripts/smoke/phase-11.sh` ran the frontend gate as `make web >/dev/null
+   2>&1`, so a CI frontend-gate failure was undiagnosable. The smoke now tees
+   `make web` to a temp log and prints the tail on failure, staying quiet on
+   success — the `ok`/`fail` semantics are unchanged.
+
+3. **The flaky `web/bridge` transport notification test is made deterministic
+   (C2).** `transport.test.ts`'s "dispatches inbound notifications to handlers"
+   waited for `MessageChannel` delivery with a single `setTimeout(…, 0)`.
+   `MessageChannel` delivery is its own event-loop task, so on a loaded runner
+   one `setTimeout(0)` can run ahead of the `message` event — the test then
+   asserts against an empty `seen` array and times out. The fix awaits the real
+   signal: the test resolves its promise from inside the `onNotification`
+   handler rather than after an arbitrary timeout. No `web/bridge` runtime
+   behaviour changed — this is a test-determinism fix only. The sibling negative
+   assertions ("ignores reserved…", "drops non-JSON-RPC…") keep their
+   `setTimeout(0)` form: a negative `not.toHaveBeenCalled()` assertion is
+   already correct under either delivery order.
