@@ -2058,3 +2058,68 @@ asserting the on-the-wire envelopes match the spec — is **not** in `validate`'
 scope; it is `dockyard test` (Phase 21), which runs the spec-compliance test
 suite. `validate` is the fast, static gate; `test` is the behavioural one. This
 split keeps `validate` cheap enough to run on every save under `dockyard dev`.
+
+---
+
+## D-084 — `dockyard dev` is a reusable orchestrator package, not a cobra RunE
+
+**Status:** Settled (Phase 19).
+
+RFC §9.2 settles that `dockyard dev` is an embedded `fsnotify` orchestrator. The
+orchestration logic — the file watcher, the child-process supervisors, the
+codegen-on-change step, the lifecycle teardown — lives in `internal/devloop` as
+a reusable, concurrency-safe package with one public entrypoint,
+`Run(ctx, Config) error`. The `dockyard dev` cobra verb (`internal/cli/dev.go`)
+is a thin wrapper that resolves the project directory, builds a `Config`, and
+calls `Run`.
+
+This mirrors D-082 (`dockyard validate` is `internal/validate.Run`, the cobra
+verb a wrapper): orchestration is testable and `-race`-provable as a package,
+and the integration test drives the exact same `Run` the CLI does — no logic
+buried in a `RunE` closure that only an end-to-end CLI invocation can reach. A
+later phase that wants to embed the dev loop (a future console, a richer
+`dockyard` subcommand) consumes the package, not the verb.
+
+The child-process layer is an `interface`-free but factored seam: a generic
+`supervisor` owns one child's lifecycle (start / restart / clean stop), and the
+orchestrator holds a slice of supervisors. Adding the inspector to the
+supervised tree later (RFC §9.2 names it; Phase 22+ builds it) is one more
+supervisor, not a restructure.
+
+---
+
+## D-085 — Phase 19's dev tree supervises the Go server, codegen, and Vite — the inspector is deferred
+
+**Status:** Settled (Phase 19).
+
+RFC §9.2's prose describes the `dockyard dev` process tree as "MCP server +
+Svelte dev server + inspector + codegen watcher". The inspector surface does
+not exist until Phase 22+. Phase 19 therefore ships the dev orchestrator
+supervising three concerns — the Go MCP server (restart on `.go` change),
+in-process codegen (re-run on a contract change), and the Vite dev server
+(Svelte HMR) — and **defers** inspector attachment to the phase that builds the
+inspector.
+
+This is a deliberate, non-silent scoping, not a departure from RFC §9.2: the
+RFC's tree is the eventual shape, and the supervisor seam (D-084) is built so
+the inspector lands as one additional supervised entry. Recording it here so a
+future reader does not mistake the inspector's absence from Phase 19 for drift.
+
+---
+
+## D-086 — `dockyard dev` degrades gracefully for a project with no `web/` UI
+
+**Status:** Settled (Phase 19).
+
+`dockyard new`'s no-template path scaffolds a blank MCP server with no `web/`
+UI project (RFC §4.1: a UI resource is additive, not a requirement). When
+`dockyard dev` runs against such a project, it supervises only the Go server
+and the codegen watcher, logs that no UI project was found, and does **not**
+error.
+
+The detection signal is a `web/package.json` — the Vite UI is a real npm
+project and its `package.json` is the unambiguous root marker. A project that
+gains a `web/` UI later picks up Vite supervision on the next `dockyard dev`
+invocation; the dev loop does not need to be taught about the UI ahead of time.
+This keeps the blank-server DX a first-class path: `dockyard new && dockyard
+dev` works with zero UI ceremony.
