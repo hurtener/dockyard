@@ -25,6 +25,9 @@
 //     fixture switcher derives its fixtures from the generated tool contracts
 //     (P1). Both are optional [Options] fields; when unset the endpoints answer
 //     with an empty array so the UI renders its four-state empty state.
+//   - The read-only `/api/apps` source — [AppsFromServer] renders the attached
+//     server's ui:// Apps by a read-only resources/list + resources/read of the
+//     server (RFC §12 line 711 — the inspector renders the server's Apps).
 //   - The host-half of the ui/ bridge, the fixture switcher, per-tool analytics,
 //     capability-set emulation, and task-lifecycle rendering all live in the
 //     web/inspector frontend; this package serves that frontend and the App
@@ -32,7 +35,14 @@
 //
 // The inspector was built across Phase 22 (the core — the HTTP backend, the
 // relay, the obs view) and Phase 23 (the advanced surface — verdicts,
-// contracts, and the `dockyard inspect` command). It carries no production MCP
-// client: `dockyard inspect` attaches the read-only relay to a server's obs/v1
-// stream, never an MCP session (P4 — D-099).
+// contracts, and the `dockyard inspect` command); remediation R1 wired the
+// shipping `dockyard inspect` to the verdicts, contracts, and App-preview
+// sources that were previously only test-reachable.
+//
+// The inspector is not a production MCP client. It performs exactly two
+// client-shaped operations, both read-only: it relays a server's obs/v1 SSE
+// stream, and — to render the server's Apps — it performs a read-only
+// resources/list + resources/read of the server's ui:// resources (D-103,
+// which extends D-099). It never issues a mutating MCP call, stays dev-gated
+// and localhost-only, and is never an arbitrary-execution proxy (P4).
 package inspector

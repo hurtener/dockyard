@@ -84,6 +84,14 @@ type Options struct {
 	// array of `{name, description, inputSchema, outputSchema}` objects.
 	Contracts ContractsSource
 
+	// Apps is the read-only source for the inspector's App-preview frame — the
+	// attached server's ui:// App resources, read via a read-only resources/read
+	// (RFC §12 line 711 — the inspector renders the server's Apps; D-103). When
+	// nil, `GET /api/apps` answers with an empty array and the App-frame renders
+	// its "No App attached" empty state. Use [AppsFromServer] to source it from
+	// a running MCP server's ui:// resources.
+	Apps AppSource
+
 	// Logger is the structured logger. When nil, a no-op logger is used.
 	Logger *slog.Logger
 }
