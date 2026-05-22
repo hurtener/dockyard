@@ -83,12 +83,12 @@
   .analytics-panel {
     display: flex;
     flex-direction: column;
-    gap: var(--dy-space-3, 0.75rem);
+    gap: var(--dy-space-3);
     min-height: 0;
   }
   .metrics {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: var(--dy-space-2, 0.5rem);
+    gap: var(--dy-space-2);
   }
 </style>

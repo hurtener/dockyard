@@ -75,15 +75,15 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--dy-space-2, 0.5rem);
+    gap: var(--dy-space-2);
   }
   .verdict-row {
     display: flex;
     align-items: center;
-    gap: var(--dy-space-2, 0.5rem);
+    gap: var(--dy-space-2);
   }
   .verdict-message {
-    font-size: var(--dy-font-size-sm, 0.875rem);
-    color: var(--dy-color-text, #18181b);
+    font-size: var(--dy-text-sm);
+    color: var(--dy-color-ink);
   }
 </style>

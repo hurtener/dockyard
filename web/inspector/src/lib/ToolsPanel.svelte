@@ -70,12 +70,12 @@
   .tools-panel {
     display: flex;
     flex-direction: column;
-    gap: var(--dy-space-2, 0.5rem);
+    gap: var(--dy-space-2);
     min-height: 0;
   }
   .tools-note {
     margin: 0;
-    font-size: var(--dy-font-size-xs, 0.75rem);
-    color: var(--dy-color-text-muted, #71717a);
+    font-size: var(--dy-text-xs);
+    color: var(--dy-color-ink-soft);
   }
 </style>

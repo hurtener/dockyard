@@ -127,50 +127,50 @@
   .fixtures-panel {
     display: flex;
     flex-direction: column;
-    gap: var(--dy-space-3, 0.75rem);
+    gap: var(--dy-space-3);
     min-height: 0;
   }
   .field {
     display: flex;
     flex-direction: column;
-    gap: var(--dy-space-1, 0.25rem);
+    gap: var(--dy-space-1);
   }
   .field-label {
-    font-size: var(--dy-font-size-sm, 0.875rem);
-    color: var(--dy-color-text-muted, #71717a);
+    font-size: var(--dy-text-sm);
+    color: var(--dy-color-ink-soft);
   }
   .fixture-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: var(--dy-space-2, 0.5rem);
+    gap: var(--dy-space-2);
   }
   .fixture-chip {
     display: flex;
     flex-direction: column;
-    gap: var(--dy-space-1, 0.25rem);
-    padding: var(--dy-space-2, 0.5rem);
+    gap: var(--dy-space-1);
+    padding: var(--dy-space-2);
     text-align: left;
-    border: 1px solid var(--dy-color-border, #d4d4d8);
-    border-radius: var(--dy-radius-md, 0.5rem);
-    background: var(--dy-color-surface, #ffffff);
+    border: 1px solid var(--dy-color-border);
+    border-radius: var(--dy-radius-md);
+    background: var(--dy-color-surface);
     cursor: pointer;
   }
   .fixture-chip.selected {
-    border-color: var(--dy-color-accent, #4f46e5);
-    box-shadow: 0 0 0 1px var(--dy-color-accent, #4f46e5);
+    border-color: var(--dy-color-accent);
+    box-shadow: 0 0 0 1px var(--dy-color-accent);
   }
   .fixture-name {
     font-weight: 600;
-    font-size: var(--dy-font-size-sm, 0.875rem);
+    font-size: var(--dy-text-sm);
   }
   .fixture-desc {
-    font-size: var(--dy-font-size-xs, 0.75rem);
-    color: var(--dy-color-text-muted, #71717a);
+    font-size: var(--dy-text-xs);
+    color: var(--dy-color-ink-soft);
   }
   .fixture-preview {
     display: flex;
     flex-direction: column;
-    gap: var(--dy-space-2, 0.5rem);
+    gap: var(--dy-space-2);
   }
   .preview-head {
     display: flex;
@@ -178,17 +178,17 @@
     justify-content: space-between;
   }
   .apply {
-    padding: var(--dy-space-1, 0.25rem) var(--dy-space-3, 0.75rem);
-    border: 1px solid var(--dy-color-accent, #4f46e5);
-    border-radius: var(--dy-radius-sm, 0.25rem);
-    background: var(--dy-color-accent, #4f46e5);
-    color: #ffffff;
+    padding: var(--dy-space-1) var(--dy-space-3);
+    border: 1px solid var(--dy-color-accent);
+    border-radius: var(--dy-radius-sm);
+    background: var(--dy-color-accent);
+    color: var(--dy-color-surface);
     cursor: pointer;
-    font-size: var(--dy-font-size-sm, 0.875rem);
+    font-size: var(--dy-text-sm);
   }
   .preview-error {
     margin: 0;
-    font-size: var(--dy-font-size-sm, 0.875rem);
-    color: var(--dy-color-state-error-fg, #b91c1c);
+    font-size: var(--dy-text-sm);
+    color: var(--dy-state-error-fg);
   }
 </style>

@@ -88,17 +88,17 @@
   .task-list {
     display: flex;
     flex-direction: column;
-    gap: var(--dy-space-4, 1rem);
+    gap: var(--dy-space-4);
   }
   .task-head {
     display: flex;
     align-items: center;
-    gap: var(--dy-space-2, 0.5rem);
-    margin-bottom: var(--dy-space-2, 0.5rem);
+    gap: var(--dy-space-2);
+    margin-bottom: var(--dy-space-2);
   }
   .task-id {
-    font-family: var(--dy-font-mono, monospace);
-    font-size: var(--dy-font-size-sm, 0.875rem);
+    font-family: var(--dy-font-mono);
+    font-size: var(--dy-text-sm);
     font-weight: 600;
   }
 </style>
