@@ -113,6 +113,47 @@ func sessionFromContext(ctx context.Context) string {
 	return v
 }
 
+// spanKey is the context key under which an in-flight unit of work threads its
+// [SpanContext] so a nested emit site can correlate to the enclosing span.
+type spanKey struct{}
+
+// WithSpan returns a copy of ctx carrying sc as the in-flight span. A
+// subsystem that opens a span (a tools/call, a resources/read) stamps it here
+// so any obs/v1 event emitted from *inside* that unit of work — most notably a
+// handler-emitted `log` event via the MCP-logging bridge — can derive a child
+// span of the enclosing one rather than minting an unrelated fresh trace.
+//
+// This is the correlation seam the Wave 6 checkpoint item S1 closes: before
+// it, a `log` event emitted inside a tool handler was not trace-correlated to
+// its `tool.call`. A zero-value sc leaves ctx unchanged. It mirrors
+// [WithSession]: the context is the carrier, the emit site reads it.
+func WithSpan(ctx context.Context, sc SpanContext) context.Context {
+	if sc.IsZero() {
+		return ctx
+	}
+	return context.WithValue(ctx, spanKey{}, sc)
+}
+
+// SpanFromContext returns the in-flight [SpanContext] stamped by [WithSpan],
+// and ok=false when ctx carries none. An emit site that wants to nest under an
+// enclosing span calls SpanFromContext and, when ok, uses sc.Child(); when not
+// ok it begins a fresh trace with [NewTrace].
+func SpanFromContext(ctx context.Context) (sc SpanContext, ok bool) {
+	v, ok := ctx.Value(spanKey{}).(SpanContext)
+	return v, ok
+}
+
+// ChildOrNewTrace returns a child span of the in-flight span carried by ctx,
+// or a fresh root trace when ctx carries none. It is the one-call form of the
+// "correlate if you can, else start a trace" pattern an emit site nested
+// inside a possibly-instrumented unit of work uses.
+func ChildOrNewTrace(ctx context.Context) SpanContext {
+	if sc, ok := SpanFromContext(ctx); ok {
+		return sc.Child()
+	}
+	return NewTrace()
+}
+
 // --- tool.call ---------------------------------------------------------------
 
 // ToolCall records the start of a tools/call and returns a function that

@@ -281,3 +281,44 @@ func TestWithSession(t *testing.T) {
 		t.Error("empty session id must not be stored")
 	}
 }
+
+func TestWithSpan(t *testing.T) {
+	t.Parallel()
+	span := NewTrace()
+	ctx := WithSpan(context.Background(), span)
+	got, ok := SpanFromContext(ctx)
+	if !ok {
+		t.Fatal("SpanFromContext: ok=false after WithSpan")
+	}
+	if got != span {
+		t.Errorf("SpanFromContext = %+v, want %+v", got, span)
+	}
+	// A zero-value span leaves ctx unchanged.
+	if _, ok := SpanFromContext(WithSpan(context.Background(), SpanContext{})); ok {
+		t.Error("a zero-value span must not be stored")
+	}
+}
+
+func TestChildOrNewTrace(t *testing.T) {
+	t.Parallel()
+	// With an enclosing span: a child — same trace id, parent set.
+	parent := NewTrace()
+	child := ChildOrNewTrace(WithSpan(context.Background(), parent))
+	if child.TraceID != parent.TraceID {
+		t.Errorf("child trace id = %q, want %q (enclosing span's)", child.TraceID, parent.TraceID)
+	}
+	if child.ParentID != parent.SpanID {
+		t.Errorf("child parent id = %q, want %q (enclosing span id)", child.ParentID, parent.SpanID)
+	}
+	if child.SpanID == parent.SpanID {
+		t.Error("child span id must differ from the parent's")
+	}
+	// Without an enclosing span: a fresh root trace.
+	root := ChildOrNewTrace(context.Background())
+	if root.TraceID == "" || root.SpanID == "" {
+		t.Error("ChildOrNewTrace with no enclosing span must mint a fresh trace")
+	}
+	if root.ParentID != "" {
+		t.Errorf("a fresh root trace must have no parent, got %q", root.ParentID)
+	}
+}
