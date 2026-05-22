@@ -88,7 +88,7 @@ generate:
 
 # Every web/ project gated by `make web` / installed by `make web-install`.
 # Add a project's directory here when it lands; both targets loop over the set.
-WEB_PROJECTS := web/bridge web/ui
+WEB_PROJECTS := web/bridge web/ui web/inspector
 
 # Frontend gate — type-check + unit tests for every web/ project. Gated like the
 # Go code: CI runs `make web`, the smoke script asserts it passes. No-ops

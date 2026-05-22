@@ -49,6 +49,9 @@ export {
   ReservedNotification,
   ViewMethod,
   ViewNotification,
+  isJsonRpcNotification,
+  isJsonRpcRequest,
+  isJsonRpcResponse,
 } from './protocol.js';
 export type {
   AppCapabilities,
@@ -62,6 +65,12 @@ export type {
   HostContextChangedParams,
   InitializeParams,
   InitializeResult,
+  JsonRpcError,
+  JsonRpcId,
+  JsonRpcMessage,
+  JsonRpcNotification,
+  JsonRpcRequest,
+  JsonRpcResponse,
   MessageParams,
   MessageRole,
   OpenLinkParams,
