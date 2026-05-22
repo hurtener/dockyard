@@ -231,3 +231,36 @@ not built.
 - [ ] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
 - [ ] New vocabulary added to `docs/glossary.md`
 - [ ] New / changed architectural decision filed in `docs/decisions.md`
+
+## Remediation history
+
+### R1 — inspector production wiring (pre-Wave-9 depth audit)
+
+A depth audit found that Phase 23 built `Options.Verdicts` and
+`Options.Contracts` and covered them in tests, but the shipping `dockyard
+inspect` command's `runInspect` (`internal/cli/inspect.go`) never set them — it
+built `inspector.Options` with only `Addr`/`Relay`/`Assets`/`ServerInfo`/
+`Logger`. So in the only shipping entry point, `/api/verdicts` and
+`/api/contracts` always returned `[]`, leaving the Verdicts panel and the
+Fixtures switcher permanently empty in the product.
+
+R1 fixed this. `dockyard inspect` gained a `--dir` flag (defaulting to the
+working directory, via the same `resolveProjectDir` seam `generate` / `validate`
+/ `test` use) and `runInspect` now wires `Options.Verdicts` from
+`VerdictsFromValidate(dir)` and `Options.Contracts` from the new
+`ContractsFromProject(dir)` — see D-104. `ContractsFromProject` reads the
+project manifest and the generated `internal/contracts/*.schema.json` files;
+both sources degrade to their honest empty state when `--dir` names no project.
+
+R1 also corrected the `inspect.go` doc/help text, which falsely claimed the
+inspector "runs automatically inside `dockyard dev`" — D-101 deliberately
+deferred that auto-attach; the text now describes reality. The auto-attach
+remains deferred (not implemented).
+
+The audit further noted that every prior inspector test constructed
+`inspector.Options` directly, bypassing `runInspect` — which is why the wiring
+gap shipped undetected. R1 added `test/integration/r1_inspector_test.go`, which
+drives the real `dockyard inspect` binary as a subprocess against a real HTTP
+MCP server and a real project directory and asserts `/api/verdicts`,
+`/api/contracts`, and `/api/apps` all return real content — so a future
+regression of the CLI wiring fails a test.

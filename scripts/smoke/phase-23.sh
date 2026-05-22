@@ -93,12 +93,13 @@ else
   skip "Tools/Resources panel not built"
 fi
 
-# 6. `dockyard inspect` is registered with --url / --port / --no-open.
+# 6. `dockyard inspect` is registered with --url / --dir / --port / --no-open.
 if [ -f internal/cli/inspect.go ]; then
   if grep -q '"url"' internal/cli/inspect.go \
+     && grep -q '"dir"' internal/cli/inspect.go \
      && grep -q '"port"' internal/cli/inspect.go \
      && grep -q '"no-open"' internal/cli/inspect.go; then
-    ok "dockyard inspect is wired with --url / --port / --no-open"
+    ok "dockyard inspect is wired with --url / --dir / --port / --no-open"
   else
     fail "internal/cli/inspect.go missing a flag"
   fi
@@ -106,6 +107,17 @@ if [ -f internal/cli/inspect.go ]; then
     ok "dockyard inspect is registered on the root command"
   else
     fail "dockyard inspect is not registered in root.go"
+  fi
+  # Remediation R1: the shipping `dockyard inspect` MUST wire the Verdicts,
+  # Contracts, and App-preview sources — a depth audit found `runInspect` set
+  # only Addr/Relay/Assets, leaving those panels permanently empty in the
+  # product. Assert runInspect wires all three.
+  if grep -q "VerdictsFromValidate" internal/cli/inspect.go \
+     && grep -q "ContractsFromProject" internal/cli/inspect.go \
+     && grep -q "AppsFromServer" internal/cli/inspect.go; then
+    ok "dockyard inspect wires Verdicts, Contracts, and the App-preview source (R1)"
+  else
+    fail "internal/cli/inspect.go does not wire the inspector sources (R1 Blockers 1/2)"
   fi
 else
   skip "dockyard inspect command not built"
