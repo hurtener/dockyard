@@ -1747,3 +1747,115 @@ implementation settles several shapes the RFC and brief 05 left as sketches:
    a signal is needed, an event is added (CLAUDE.md §6). The `obs/v1`
    `session_id` field and a `WithSession` context seam are defined now so
    Phase 16's transports can stamp session identity without a contract change.
+
+---
+
+## D-075 — the obs/v1 SSE sink is an out-of-band, localhost-bound emitter driver
+
+**Status:** Settled (Phase 16).
+
+Phase 16 implements RFC §11.3's out-of-band `SSESink`. The implementation
+settles its shape:
+
+1. **Out-of-band by construction.** `obs.SSESink` owns its OWN loopback
+   `net/http` listener; it holds no reference to the MCP transport and cannot
+   write to `os.Stdout`/`os.Stdin`. When the MCP transport is stdio, obs/v1
+   events go out the SSE channel and never onto the JSON-RPC pipe — a stdio
+   server stays debuggable without protocol corruption (brief 05 §2.2, §3.3).
+   The integration test proves it: every byte the server writes to the stdio
+   pipe parses as a `"jsonrpc":"2.0"` message, no obs event ever leaks.
+
+2. **Localhost-only.** `NewSSESink` rejects any non-loopback bind address
+   (`errSSENonLoopback`): a wildcard host (`":0"`, `0.0.0.0`) or a routable
+   address is refused; only `127.0.0.1`, `[::1]`, and `localhost` are accepted.
+   The SSE sink is a dev-mode surface and is never reachable off-localhost
+   (CLAUDE.md §7, P4). It is NOT an MCP client — it speaks SSE to dev tooling.
+
+3. **Non-blocking by construction.** Each subscriber has a bounded send queue
+   (`sseSubscriberBuffer`). A slow or stalled subscriber has events DROPPED for
+   that subscriber — `Emit` does a non-blocking channel send per subscriber and
+   never stalls the runtime's emit path (CLAUDE.md §8). Drops are counted via
+   `SSESink.Dropped()`. `SSESink` registers behind the Phase 15
+   `obs.RegisterDriver` seam under the driver name `sse`; its config string is
+   the loopback listen address.
+
+4. **Event framing.** Each obs/v1 event is one SSE message: the `event:` field
+   carries the event kind (so a consumer can filter without parsing the body)
+   and the `data:` field carries the canonical obs/v1 JSON. The endpoint is
+   `/obs/v1/stream`. The framing is documented so the Wave 8 inspector consumes
+   a stable surface.
+
+---
+
+## D-076 — the OTelEmitter is an off-by-default span adapter behind the obs seam; log events export as span events
+
+**Status:** Settled (Phase 16).
+
+Phase 16 implements RFC §11.3's optional `OTelEmitter` (brief 05 §3.4, Q-5
+answered "V1 scope"). The implementation settles three points:
+
+1. **Off by default.** The OTel adapter lives in its own package
+   (`runtime/obs/otel`) so the OTel dependency and the still-"Development" MCP
+   semantic conventions are contained — an attribute-name shift is a localized
+   edit, `obs/v1` stays the stable contract (brief 05 §4 risk 1). `otelobs.New`
+   with no span processor returns an emitter that discards every event; opening
+   the `otel` driver by name through the `obs` seam yields an `obs.NopEmitter`,
+   because the seam's string config cannot carry a live export pipeline. Local
+   observation (ring buffer + SSE) therefore needs ZERO OTel configuration
+   (CLAUDE.md §8); only an explicitly-supplied `sdktrace.SpanProcessor`
+   activates export.
+
+2. **W3C-derived span identity.** The adapter owns an internal `TracerProvider`
+   built with a context-keyed `IDGenerator`: the obs/v1 event's own W3C
+   trace-id and span-id (`obs.SpanContext`, set in Phase 15) become the exported
+   OTel span's trace-id and span-id. A Dockyard span therefore nests natively
+   under a calling Harbor agent's `execute_tool` span (RFC §11.2). A
+   `tool.call` event maps to a `span.mcp.server`-shaped span "tools/call
+   {tool}" with `mcp.method.name`, `gen_ai.tool.name`,
+   `gen_ai.operation.name=execute_tool`, `mcp.session.id`, `network.transport`,
+   and — on failure — `error.type`; a `resource.read` carries
+   `mcp.resource.uri`.
+
+3. **Log events as span events.** An obs/v1 `log` event has no lifecycle of its
+   own. The adapter exports it as an OTel **span event** on a one-shot
+   correlated span, NOT via the separate OpenTelemetry logs SDK — that SDK is
+   still `v0.x`, and keeping the new dependency surface to the stable OTel
+   trace SDK is deliberate. This is revisited if the OTel logs SDK reaches
+   `v1`. Only the start half of a start/end pair is skipped; the end/emit event
+   produces exactly one span per obs unit of work, with the correct duration.
+
+---
+
+## D-077 — the MCP logging capability is bridged into obs/v1, not bypassed
+
+**Status:** Settled (Phase 16).
+
+Phase 16 implements RFC §11.3's MCP `logging` → obs/v1 `log`-event bridge as
+`server.LogBridge`. The implementation settles the bridge's shape:
+
+1. **The bridge is an event SOURCE, not a back channel.** A Dockyard server
+   still speaks STANDARD MCP `logging`: `LogBridge.Log` delivers a record as an
+   MCP `notifications/message` through `ServerSession.Log` exactly as the spec
+   and the go-sdk define it — a client that negotiated `logging` and called
+   `SetLevel` receives `notifications/message` unchanged. The SAME record is
+   ALSO emitted as an obs/v1 `log` event through the shared `obs.Recorder`.
+   obs/v1 remains a one-way emitted stream; nothing reads runtime internals to
+   observe (P2, CLAUDE.md §6).
+
+2. **The session is threaded through the handler context.** A Dockyard typed
+   tool handler (`func(ctx, In) (Result[Out], error)`) does not receive a raw
+   SDK request, so it cannot reach the in-flight `*mcp.ServerSession`.
+   `runtime/server` therefore threads the request's `ServerSession` onto the
+   handler context (`withRequestSession`, applied in both `AddTool` and
+   `AddToolWithSchemas`); `LogBridge.Log` resolves it from the context. The
+   typed handler API never exposes a raw SDK session (P3, RFC §5.4).
+   `LogBridge.LogTo` is the lower-level entry point for a caller that already
+   holds a session. A record logged outside a request still emits the obs/v1
+   `log` event; only the MCP `notifications/message` delivery is skipped when
+   there is no client session.
+
+3. **obs/v1 log events are independent of the client's MCP log level.** The
+   MCP `notifications/message` honours the client's negotiated minimum level;
+   the obs/v1 `log` event is emitted regardless, so the inspector observes
+   every server log record even when the client did not raise its MCP log
+   level.

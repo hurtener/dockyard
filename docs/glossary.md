@@ -230,6 +230,16 @@ addressed by `(namespace, key)`; future sub-stores (`TaskStore`, `ObsStore`) eac
 one or more namespaces, and the migration runner reserves `__store_migrations__`.
 RFC §13. D-025.
 
+## L
+
+**logging bridge** — `server.LogBridge`, the Phase 16 MCP `logging` → `obs/v1`
+`log`-event source. `LogBridge.Log` delivers a server log record as a standard
+MCP `notifications/message` (a Dockyard server still speaks standard MCP
+`logging` to any client) AND emits the same record as an `obs/v1` `log` event.
+The bridge is an event source, never a back channel (P2); it resolves the
+in-flight MCP `ServerSession` from the handler context so a typed tool handler
+never touches a raw SDK session (P3). RFC §11.3. D-077.
+
 ## M
 
 **Manifest** — `dockyard.app.yaml`, an app's control plane: it declares tools,
@@ -237,6 +247,15 @@ RFC §13. D-025.
 `generate`, `dev`, `test`, `build`, and `install`. Loaded and structurally
 validated by `internal/manifest` into a typed `Manifest` Go struct; invalid
 manifests fail with source-located (`file:line`) errors. RFC §4.2. D-035, D-036.
+
+**MCP semconv** — the OpenTelemetry semantic conventions for the Model Context
+Protocol (the `mcp.*` and `gen_ai.*` attribute families, the `span.mcp.server`
+span shape). Dockyard's Phase 16 `OTelEmitter` emits them as the OTel *export
+vocabulary* — `mcp.method.name`, `gen_ai.tool.name`,
+`gen_ai.operation.name=execute_tool`, `mcp.session.id`, `mcp.resource.uri`,
+`network.transport`, `error.type`. The conventions are still "Development"
+upstream, so they are contained in `runtime/obs/otel`; `obs/v1` stays the
+stable contract. RFC §11.3. brief 05 §3.4. D-076.
 
 **`MigrationSet`** — an explicit, caller-owned, ordered collection of Store
 migrations (`store.MigrationSet`). It replaced the former mutable process-global
@@ -294,6 +313,15 @@ obs/v1; a new kind is a versioned addition. RFC §11.2. D-074.
 drivers register a factory in an `init()` block. Phase 15 ships the ring-buffer
 driver; Phase 16's SSE sink and OTel adapter plug in behind the same seam.
 CLAUDE.md §4.4. RFC §11.3. D-074.
+
+**`OTelEmitter`** — Dockyard's optional, off-by-default OpenTelemetry export
+adapter for `obs/v1` (`runtime/obs/otel`). It lowers an `obs.Event` onto an
+OpenTelemetry span carrying MCP-semconv attributes (`mcp.*` / `gen_ai.*`); the
+W3C Trace Context IDs `obs/v1` already assigns become the OTel span's
+trace-id / span-id, so a Dockyard span nests under a calling Harbor agent's
+`execute_tool` span. OTel is an interoperability *option*, never a prerequisite
+to observe locally — the ring buffer and the SSE sink work with zero OTel
+config. RFC §11.3. brief 05 §3.4. D-076.
 
 **OTel export adapter** — the optional `obs/v1` driver (Phase 16) that maps an
 `obs.Event` onto OpenTelemetry MCP semantic conventions for export to an
@@ -371,6 +399,14 @@ when a redaction-aware `obs.Redactor` is supplied. CLAUDE.md §7. RFC §11.2. D-
 **Single-file bundle** — the default build output for a Dockyard App UI: one HTML
 file with no external origins, so the deny-by-default CSP works without declaring
 domains. RFC §7.4.
+
+**SSE sink** — `obs.SSESink`, Dockyard's out-of-band, localhost-bound
+Server-Sent-Events `obs/v1` emitter driver (`runtime/obs`, driver name `sse`).
+It streams the live `obs/v1` event stream to dev tooling — the Wave 8 inspector
+consumes it — over its OWN loopback HTTP listener, so a stdio MCP server's
+JSON-RPC pipe is never corrupted. It is non-blocking (a slow subscriber has
+events dropped, never the runtime stalled) and refuses any non-loopback bind
+address. RFC §11.3. brief 05 §3.3. D-075.
 
 **`Store` seam** — the `Store` interface all durable state goes through (tasks,
 `obs/v1` history, inspector state). V1 driver: `modernc.org/sqlite`. The seam keeps

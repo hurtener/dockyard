@@ -202,6 +202,18 @@ func (r *Recorder) ServerLifecycle(ctx context.Context, sc SpanContext, p Server
 	r.emit(ctx, sc, KindServerLifecycle, PhaseEmit, p, nil, nil)
 }
 
+// --- log ---------------------------------------------------------------------
+
+// Log records a point-in-time obs/v1 log event — the obs/v1 carrier for an MCP
+// notifications/message log record. It is the emit side of the Phase 16 MCP
+// logging → obs/v1 bridge (RFC §11.3): server.LogBridge calls Log so a server
+// log record surfaces as an obs/v1 log event, in addition to the standard MCP
+// notifications/message a Dockyard server still emits. obs/v1 is a one-way
+// event stream, never a back channel (P2, CLAUDE.md §6).
+func (r *Recorder) Log(ctx context.Context, sc SpanContext, p LogPayload) {
+	r.emit(ctx, sc, KindLog, PhaseEmit, p, nil, nil)
+}
+
 // --- helpers -----------------------------------------------------------------
 
 // durMS returns the elapsed milliseconds between start and end, clamped at 0.
