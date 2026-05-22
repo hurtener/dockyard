@@ -59,6 +59,7 @@ func NewRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	root.AddCommand(newBuildCmd())
 	root.AddCommand(newDevCmd())
 	root.AddCommand(newGenerateCmd())
+	root.AddCommand(newInspectCmd())
 	root.AddCommand(newInstallCmd())
 	root.AddCommand(newNewCmd())
 	root.AddCommand(newRunCmd())
