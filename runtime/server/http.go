@@ -142,16 +142,29 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 		DisableLocalhostProtection: !sec.DNSRebindingProtection,
 	})
 
-	// The security middleware chain is layered inner-to-outer so the OUTERMOST
-	// check runs first: cross-origin (CSRF) protection is the outer layer, then
-	// Content-Type verification, then the SDK handler. A cross-site request is
-	// therefore rejected as cross-origin regardless of its Content-Type — the
-	// CSRF verdict does not depend on a body-shape check downstream of it.
+	// The middleware chain is layered inner-to-outer so the OUTERMOST check
+	// runs first: cross-origin (CSRF) protection is the outer layer, then
+	// Content-Type verification, then the optional Tasks transport mount, then
+	// the SDK handler. A cross-site request is therefore rejected as
+	// cross-origin regardless of method or body shape — the CSRF verdict does
+	// not depend on a body-shape check or routing downstream of it.
 	var h http.Handler = handler
+	if s.tasksMount != nil {
+		// When a Tasks engine is attached (D-108/109/110), wrap the SDK handler
+		// with the Tasks transport mount so tasks/* JSON-RPC frames are
+		// intercepted ahead of the SDK server and the capabilities.tasks block
+		// is injected into the initialize handshake (RFC §8.2). The mount sits
+		// INSIDE the security middleware applied below — DNS-rebinding,
+		// Content-Type, and cross-origin protection all wrap the mount, so a
+		// tasks/* frame is still subject to the explicit HTTPSecurity posture
+		// and the mount cannot weaken it (CLAUDE.md §7).
+		h = s.tasksMount.HTTPMiddleware(h)
+	}
 	if sec.ContentTypeVerification {
 		// Content-Type verification as Dockyard middleware — set explicitly,
 		// never inherited from an SDK default (AGENTS.md §7, D-112). A
-		// wrong-Content-Type POST is rejected before it reaches the SDK.
+		// wrong-Content-Type POST is rejected before it reaches the Tasks
+		// mount or the SDK.
 		h = contentTypeMiddleware(h)
 	}
 	if sec.CrossOriginProtection {
@@ -167,6 +180,10 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 				return nil, fmt.Errorf("dockyard/runtime/server: trusted origin %q: %w", origin, err)
 			}
 		}
+		// Wrap h (the SDK handler, plus the Tasks mount and Content-Type check
+		// where attached), not the raw SDK handler — cross-origin protection
+		// must sit OUTSIDE the Tasks mount so a tasks/* frame is CSRF-checked
+		// before the mount answers it.
 		h = cop.Handler(h)
 	}
 
