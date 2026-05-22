@@ -2,7 +2,6 @@ package devloop
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -14,7 +13,7 @@ import (
 
 // quietLogger is a slog.Logger that discards output — test runs stay quiet.
 func quietLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func TestChangeKindString(t *testing.T) {
