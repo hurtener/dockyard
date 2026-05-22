@@ -25,9 +25,11 @@ for f in RFC-001-Dockyard.md README.md LICENSE Makefile \
 done
 
 # 3. Phase plan <-> smoke script pairing.
+# The phase id allows digits, a lowercase-letter suffix (10a) and a dotted
+# suffix (21.5) — a lettered/dotted suffix inserts work without renumbering.
 if compgen -G "docs/plans/phase-*.md" >/dev/null; then
   for p in docs/plans/phase-*.md; do
-    nn=$(basename "$p" | sed -E 's/^phase-([0-9a-z]+)-.*/\1/')
+    nn=$(basename "$p" | sed -E 's/^phase-([0-9a-z.]+)-.*/\1/')
     [ -f "scripts/smoke/phase-${nn}.sh" ] || \
       note "phase plan $p has no scripts/smoke/phase-${nn}.sh"
   done

@@ -50,6 +50,7 @@ done-definition, dependency declarations, and coverage discipline.
 | 19 | `dockyard dev` — fsnotify orchestrator        | internal/devloop       | §9.2             | 06, 04    | 17, 18        | 75%  | Shipped |
 | 20 | `dockyard build` + `run` + `install`          | internal/cli           | §14              | 06, 01    | 17, 10        | 75%  | Shipped |
 | 21 | `dockyard test` — contract + compliance gate  | internal/cli           | §9.1, §9.4       | 04, 01    | 18            | 75%  | Shipped |
+| 21.5| Test-quality hardening                       | internal/coveragecheck | §9.4             | 04, 06    | 02–21         | §11  | Shipped |
 | 22 | Inspector core — bridge host-half + obs view  | internal/inspector     | §12              | 05, 04, 01| 09, 10a, 11, 16| 80% | Pending |
 | 23 | Inspector advanced + `dockyard inspect`       | internal/inspector     | §12              | 05, 04    | 22, 14, 21    | 80%  | Pending |
 | 24 | Template system + `analytical-card`           | templates              | §10              | 04, 01    | 19, 20, 10a   | 75%  | Pending |
@@ -60,8 +61,9 @@ done-definition, dependency declarations, and coverage discipline.
 | 29 | Agent skills & published tech-docs site       | skills / docs          | §1, §2           | 04        | 21, 26        | n/a  | Pending |
 | 30 | V1 release engineering + cut                  | release                | §1, §14          | —         | 27, 28, 29    | n/a  | Pending |
 
-**V1 critical path:** phases 01–30 plus 10a (31 phases beyond the skeleton), grouped
-into ten waves. Post-V1 follow-ups (the ChatGPT Apps SDK, the multi-server console, the
+**V1 critical path:** phases 01–30 plus 10a and 21.5 (32 phases beyond the skeleton),
+grouped into ten waves. Lettered/dotted phases (`10a`, `21.5`) insert work into a band
+without renumbering. Post-V1 follow-ups (the ChatGPT Apps SDK, the multi-server console, the
 remaining five templates, enterprise auth, `dockyard publish`) are tracked in
 RFC §19, not numbered here.
 
@@ -76,7 +78,7 @@ RFC §19, not numbered here.
 | 4 | 09, 10, 10a, 11, 12 | The MCP Apps extension + the shared UI design system |
 | 5 | 13, 14 | The MCP Tasks extension |
 | 6 | 15, 16 | The `obs/v1` observability protocol |
-| 7 | 17, 18, 19, 20, 21 | The `dockyard` CLI & developer experience |
+| 7 | 17, 18, 19, 20, 21, 21.5 | The `dockyard` CLI & developer experience |
 | 8 | 22, 23 | The local inspector |
 | 9 | 24, 25, 26 | Templates |
 | 10 | 27, 28, 29, 30 | Hardening, conformance, docs & skills, and the V1 cut |
@@ -322,6 +324,23 @@ spec-compliance + capability-degradation tests.
 **Acceptance.** The command runs all categories; a contract regression fails it; a
 spec-compliance violation fails it.
 **Briefs.** 04, 01. **Deps.** 18.
+
+#### 21.5 — test-quality hardening (RFC §9.4)
+
+**Goal.** Make the AGENTS.md §11 coverage bands a mechanical, CI-enforced gate
+(Go + frontend); add Go native fuzz targets for the parse/decode surfaces
+(`protocolcodec`, `manifest`, `codegen`, the JSON-RPC arg-frame path); add
+benchmarks for the hot reusable artifacts (the obs ring buffer, the codecs, the
+Store drivers); close the `LogBridge` / `validate` / `generate` concurrency-proof
+gaps. No product behaviour change.
+**Acceptance.** Coverage is mechanically enforced in CI for Go and frontend and
+fails on a regression; fuzz targets exist for the named parse surfaces and run
+their corpus in CI; benchmarks exist and run for the named hot paths; the
+concurrency + thin-package gaps are closed and every package meets its band.
+**Informing source.** The AGENTS.md §11 coverage bands + an independent test-
+quality audit — not an RFC subsystem; RFC §9.4 is the closest anchor (the
+"toolchain, not documentation" principle). **Briefs.** 04, 06. **Deps.** the
+phases whose packages it hardens — 02, 03, 04, 05, 06, 08, 15, 16, 17, 18, 21.
 
 ### Wave 8 — The local inspector
 

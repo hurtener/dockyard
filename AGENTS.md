@@ -150,9 +150,11 @@ they act on exists.
 ```bash
 make build         # build the dockyard binary (CGo-free static)
 make test          # go test -race ./...
+make coverage      # per-package coverage profile + the mechanical band gate
+make bench         # run the Go benchmarks (on demand — not a CI gate)
 make vet           # go vet ./...
 make lint          # golangci-lint run
-make web           # frontend gate: type-check + unit tests for web/ (svelte-check/tsc/vitest)
+make web           # frontend gate: type-check + unit tests + coverage for web/
 make web-install   # install web/ frontend dependencies
 make drift-audit   # design-coherence checks (RFC/plans/briefs/mirror/forbidden names)
 make check-mirror  # verify AGENTS.md == CLAUDE.md
@@ -306,6 +308,18 @@ These enforce P1–P4 (§1). They are binding on every phase.
 - Spec compliance is tested against the vendored specs, not against live hosts.
 - Coverage defaults (override per phase): 80% new packages; 85% the `Store` drivers
   and the conformance-tested subsystems; 70% CLI / tooling.
+- **The coverage bands are a mechanical gate, not an aspiration.** `make coverage`
+  runs the per-package coverage checker (`internal/coveragecheck`) against the
+  thresholds in `internal/coveragecheck/coverage.json`; CI runs it and a coverage
+  regression — or a new package with no configured threshold — fails the build.
+  A package below its band is raised by adding tests; a band genuinely
+  unreachable hermetically gets a documented override (class + reason) in the
+  config and a decision entry — never a silent lowering. The frontend half is
+  the Vitest `coverage.thresholds` enforced by `make web`.
+- Prime parse/decode surfaces carry Go `FuzzXxx` **fuzz targets** with a seed
+  corpus and an asserted invariant; the corpus runs as an ordinary CI test. Hot
+  reusable artifacts carry `BenchmarkXxx` **benchmarks** (run on demand via
+  `make bench` — a baseline, not a CI gate).
 
 ---
 
@@ -355,7 +369,9 @@ These enforce P1–P4 (§1). They are binding on every phase.
 - [ ] `make preflight` passes.
 - [ ] `go test -race ./...` and `golangci-lint run` are clean.
 - [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve.
-- [ ] Coverage on touched packages ≥ the phase's stated target.
+- [ ] Coverage on touched packages ≥ the phase's stated target — `make coverage`
+      passes (the mechanical band gate; a new package is added to
+      `internal/coveragecheck/coverage.json` in the same PR).
 - [ ] A new CLI command / manifest field / public API has a smoke check in this PR.
 - [ ] If a reusable artifact changed: a concurrent-reuse test passes under `-race`.
 - [ ] If a cross-subsystem seam was opened or consumed: an integration test exists
