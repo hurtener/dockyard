@@ -1,13 +1,15 @@
-.PHONY: help build test vet lint preflight drift-audit check-mirror install-hooks clean dev generate web web-install
+.PHONY: help build test vet lint preflight drift-audit check-mirror install-hooks clean dev generate web web-install coverage bench
 
 help:
 	@echo "Dockyard — make targets"
 	@echo "  build           Build the dockyard binary (CGo-free static)"
 	@echo "  test            go test -race ./..."
+	@echo "  coverage        Per-package coverage profile + the mechanical band gate"
+	@echo "  bench           Run the Go benchmarks (on demand — not a CI gate)"
 	@echo "  vet             go vet ./..."
 	@echo "  lint            golangci-lint run"
 	@echo "  generate        Run code generation (skipped until codegen lands)"
-	@echo "  web             Frontend gate: type-check + unit tests for web/"
+	@echo "  web             Frontend gate: type-check + unit tests + coverage for web/"
 	@echo "  web-install     Install web/ frontend dependencies"
 	@echo "  preflight       Build + run smoke checks + drift-audit"
 	@echo "  drift-audit     Verify design coherence (RFC, plans, briefs, mirror)"
@@ -32,6 +34,35 @@ test:
 	fi
 # CGO_ENABLED=1 is required by the -race detector. This is test-only; the
 # shipped binary is still CGo-free — `make build` pins CGO_ENABLED=0.
+
+# coverage — the mechanical AGENTS.md §11 coverage gate (Phase 21.5). Produces a
+# per-package coverage profile, then runs the coveragecheck tool, which compares
+# each package against its band in internal/coveragecheck/coverage.json and
+# exits non-zero on any shortfall. CI runs `make coverage`, so a coverage
+# regression fails the build. CGO_ENABLED=1 keeps the run consistent with
+# `make test`; -covermode=atomic is required when the race detector is on.
+coverage:
+	@if [ -n "$(GO_SOURCES)" ]; then \
+		CGO_ENABLED=1 go test -race -covermode=atomic \
+			-coverprofile=coverage.out ./... >/dev/null && \
+		go run ./internal/coveragecheck/cmd/coveragecheck \
+			-profile coverage.out \
+			-config internal/coveragecheck/coverage.json; \
+	else \
+		echo "skip coverage: no Go sources yet"; \
+	fi
+
+# bench — the Go benchmarks for the hot reusable artifacts (the obs ring buffer,
+# the protocolcodec codecs, the Store drivers). Run on demand for a baseline and
+# regression-spotting; NOT a CI gate. -race is deliberately omitted: a benchmark
+# needs real numbers. The default -benchtime is fine; pass BENCHTIME to shorten.
+BENCHTIME ?= 1x
+bench:
+	@if [ -n "$(GO_SOURCES)" ]; then \
+		go test -run '^$$' -bench . -benchmem -benchtime=$(BENCHTIME) ./...; \
+	else \
+		echo "skip bench: no Go sources yet"; \
+	fi
 
 vet:
 	@if [ -n "$(GO_SOURCES)" ]; then \
@@ -110,6 +141,7 @@ install-hooks:
 
 clean:
 	@rm -rf bin/ dist/ build/
+	@rm -f coverage.out
 	@for p in $(WEB_PROJECTS); do rm -rf "$$p/coverage" "$$p/dist"; done
 	@find . -name '*.test' -delete 2>/dev/null || true
 	@find . -name 'coverage.out' -delete 2>/dev/null || true

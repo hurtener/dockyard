@@ -18,7 +18,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "gate": "npm run check && npm run test"
+    "gate": "npm run check && npm run coverage"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",

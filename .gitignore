@@ -9,7 +9,11 @@
 # Test & coverage output
 *.test
 *.out
-coverage.*
+coverage.out
+coverage.txt
+coverage.html
+# internal/coveragecheck/coverage.json is the committed threshold config — not
+# an artifact — so it must stay tracked; the broad `coverage.*` glob is avoided.
 
 # Go workspace
 go.work

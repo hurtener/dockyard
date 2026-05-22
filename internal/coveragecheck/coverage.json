@@ -1,0 +1,112 @@
+{
+  "_comment": "Per-package coverage thresholds — the mechanical AGENTS.md §11 gate (Phase 21.5). Each `min` is keyed to a band: new-package 80%, conformance 85%, cli-tooling 70%. An override band (harness-override, subprocess-override) carries a `reason` documenting why the package cannot hit its product band hermetically. Adding a new Go package requires a new entry here OR an `exempt` line — coveragecheck fails on an unconfigured measured package by design.",
+  "packages": {
+    "github.com/hurtener/dockyard/internal/buildpkg": {
+      "min": 70,
+      "band": "subprocess-override",
+      "reason": "Orchestrates `go build` and Vite subprocesses; the toolchain-failure and cross-compile-matrix branches cannot be driven hermetically (Phase 20 documented this). Held to the CLI-tooling band, not the new-package band."
+    },
+    "github.com/hurtener/dockyard/internal/cli": {
+      "min": 70,
+      "band": "cli-tooling"
+    },
+    "github.com/hurtener/dockyard/internal/codegen": {
+      "min": 80,
+      "band": "new-package"
+    },
+    "github.com/hurtener/dockyard/internal/coveragecheck": {
+      "min": 80,
+      "band": "new-package"
+    },
+    "github.com/hurtener/dockyard/internal/devloop": {
+      "min": 70,
+      "band": "cli-tooling"
+    },
+    "github.com/hurtener/dockyard/internal/generate": {
+      "min": 80,
+      "band": "new-package"
+    },
+    "github.com/hurtener/dockyard/internal/installpkg": {
+      "min": 70,
+      "band": "subprocess-override",
+      "reason": "Runs the installed server's localhost boot check as a subprocess; the boot-failure and host-profile-detection branches are not hermetically reachable. Held to the CLI-tooling band."
+    },
+    "github.com/hurtener/dockyard/internal/manifest": {
+      "min": 80,
+      "band": "new-package"
+    },
+    "github.com/hurtener/dockyard/internal/protocolcodec": {
+      "min": 85,
+      "band": "conformance"
+    },
+    "github.com/hurtener/dockyard/internal/runpkg": {
+      "min": 70,
+      "band": "subprocess-override",
+      "reason": "Supervises the built server child process; the signal/exit-race branches cannot be driven deterministically in a hermetic suite (Phase 20 documented this). Held to the CLI-tooling band."
+    },
+    "github.com/hurtener/dockyard/internal/scaffold": {
+      "min": 70,
+      "band": "cli-tooling"
+    },
+    "github.com/hurtener/dockyard/internal/testgate": {
+      "min": 70,
+      "band": "cli-tooling"
+    },
+    "github.com/hurtener/dockyard/internal/validate": {
+      "min": 75,
+      "band": "cli-tooling",
+      "reason": "Phase 18 set a 75% target for the validate engine — above the 70% CLI-tooling floor; kept as the package's bar."
+    },
+    "github.com/hurtener/dockyard/runtime/apps": {
+      "min": 85,
+      "band": "conformance"
+    },
+    "github.com/hurtener/dockyard/runtime/obs": {
+      "min": 85,
+      "band": "conformance"
+    },
+    "github.com/hurtener/dockyard/runtime/obs/otel": {
+      "min": 80,
+      "band": "new-package"
+    },
+    "github.com/hurtener/dockyard/runtime/server": {
+      "min": 85,
+      "band": "conformance"
+    },
+    "github.com/hurtener/dockyard/runtime/store": {
+      "min": 85,
+      "band": "conformance"
+    },
+    "github.com/hurtener/dockyard/runtime/store/inmem": {
+      "min": 85,
+      "band": "conformance"
+    },
+    "github.com/hurtener/dockyard/runtime/store/sqlitestore": {
+      "min": 85,
+      "band": "conformance"
+    },
+    "github.com/hurtener/dockyard/runtime/store/storetest": {
+      "min": 65,
+      "band": "harness-override",
+      "reason": "Conformance harness — a test-helper package. Its statements are exercised when the sqlite/inmem drivers run the suite, not by its own thin self-test; self-coverage sits below every product band by construction."
+    },
+    "github.com/hurtener/dockyard/runtime/tasks": {
+      "min": 85,
+      "band": "conformance"
+    },
+    "github.com/hurtener/dockyard/runtime/tasks/taskstoretest": {
+      "min": 65,
+      "band": "harness-override",
+      "reason": "Conformance harness — a test-helper package. Its statements are exercised when the task-store drivers run the suite; self-coverage sits below every product band by construction."
+    },
+    "github.com/hurtener/dockyard/runtime/tool": {
+      "min": 85,
+      "band": "conformance"
+    }
+  },
+  "exempt": [
+    "github.com/hurtener/dockyard/cmd/dockyard",
+    "github.com/hurtener/dockyard/internal/coveragecheck/cmd/coveragecheck",
+    "github.com/hurtener/dockyard/test/integration"
+  ]
+}
