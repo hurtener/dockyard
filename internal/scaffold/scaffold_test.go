@@ -82,6 +82,25 @@ func TestGenerate_ProducesProject(t *testing.T) {
 	}
 }
 
+// TestScaffoldMainHonoursTransport proves the scaffolded main.go reads
+// DOCKYARD_TRANSPORT and wires the HTTP transport — the Phase 20↔17 wiring-gap
+// fix. A scaffold that only ever served stdio would make `dockyard run
+// --transport http` a silent no-op.
+func TestScaffoldMainHonoursTransport(t *testing.T) {
+	t.Parallel()
+	main := renderMainGo(Options{Name: "demo-server"})
+	for _, want := range []string{
+		`os.Getenv("DOCKYARD_TRANSPORT")`,
+		`case "http":`,
+		"HTTPHandler",
+		"ServeStdio",
+	} {
+		if !strings.Contains(main, want) {
+			t.Errorf("scaffolded main.go does not reference %q — the transport seam is not wired", want)
+		}
+	}
+}
+
 func TestGenerate_RejectsInvalidName(t *testing.T) {
 	t.Parallel()
 	_, err := Generate(Options{Name: "Bad_Name", Dir: t.TempDir()})

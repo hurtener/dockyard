@@ -15,8 +15,9 @@ An MCP server scaffolded with [Dockyard](https://github.com/hurtener/dockyard).
 ## Run
 
 ```sh
-go run .          # serve over stdio
-go test ./...     # run the contract tests
+go run .                          # serve over stdio (the default)
+DOCKYARD_TRANSPORT=http go run .   # serve the streamable-HTTP transport
+go test ./...                     # run the contract tests
 ```
 
 ## Next steps

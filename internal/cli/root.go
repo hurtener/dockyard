@@ -24,8 +24,8 @@ server, write typed Go tool handlers, and get generated contracts, a local
 inspector, quality gates, and one-command packaging.
 
 Phase 17 shipped the command tree and 'dockyard new'; Phase 18 added 'generate'
-and 'validate'; Phase 19 added 'dev'; Phase 20 adds 'build', 'run' and
-'install'. The remaining verb — test — lands in a later phase.`
+and 'validate'; Phase 19 added 'dev'; Phase 20 added 'build', 'run' and
+'install'; Phase 21 adds 'test' — completing the command tree.`
 
 // NewRootCmd builds the root `dockyard` cobra command with every subcommand
 // that has landed registered onto it. It is the single composition point: a
@@ -62,6 +62,7 @@ func NewRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	root.AddCommand(newInstallCmd())
 	root.AddCommand(newNewCmd())
 	root.AddCommand(newRunCmd())
+	root.AddCommand(newTestCmd())
 	root.AddCommand(newValidateCmd())
 
 	return root

@@ -57,9 +57,9 @@ type Options struct {
 	// Transport is the deployment mode to serve over. The zero value ("")
 	// defaults to stdio.
 	Transport Transport
-	// Addr is the listen address for the HTTP transport (e.g. ":8080").
-	// Ignored for stdio. An empty value with TransportHTTP defaults to
-	// defaultHTTPAddr.
+	// Addr is the listen address for the HTTP transport (e.g.
+	// "127.0.0.1:8080"). Ignored for stdio. An empty value with TransportHTTP
+	// defaults to defaultHTTPAddr.
 	Addr string
 	// Logger receives the run's structured output. A nil Logger falls back to
 	// a discarding logger so Run never panics on a missing logger.
@@ -67,7 +67,11 @@ type Options struct {
 }
 
 // defaultHTTPAddr is the HTTP listen address used when Options.Addr is empty.
-const defaultHTTPAddr = ":8080"
+// It is localhost-bound, not ":8080": a `dockyard run --transport http` with no
+// explicit --addr must not silently widen the scaffolded server's secure
+// localhost default to every interface. This matches the scaffold's own
+// httpAddr default (internal/scaffold main.go) and D-090.
+const defaultHTTPAddr = "127.0.0.1:8080"
 
 // envTransport / envHTTPAddr are the environment variables the server child
 // reads to select its transport. The project's main.go owns the wiring; runpkg

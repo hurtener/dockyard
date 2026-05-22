@@ -110,3 +110,13 @@ func registeredHostIDs() []string {
 	sort.Strings(ids)
 	return ids
 }
+
+// RegisteredHostIDs returns the sorted set of every registered host-profile id.
+// It is the read side of the host-profile seam for callers that need to
+// enumerate hosts — `dockyard test`'s capability-degradation category resolves
+// every App through every registered profile, proving no host is special-cased
+// outside the registry (CLAUDE.md §6 — never a hardcoded host matrix). The
+// returned slice is a fresh copy and safe to retain.
+func RegisteredHostIDs() []string {
+	return registeredHostIDs()
+}

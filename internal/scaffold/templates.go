@@ -78,32 +78,48 @@ func renderGoMod(o Options) string {
 }
 
 // renderMainGo renders main.go — the runnable entrypoint. It constructs a
-// Dockyard server, registers the example tool, and serves stdio. The blank
-// scaffold's acceptance bar is "builds and serves": this is the file that
-// makes it serve (RFC §9.1).
+// Dockyard server, registers the example tool, and serves the transport
+// selected by the DOCKYARD_TRANSPORT environment variable. The blank scaffold's
+// acceptance bar is "builds and serves": this is the file that makes it serve
+// (RFC §9.1).
+//
+// DOCKYARD_TRANSPORT is the contract `dockyard run` uses to tell a server which
+// transport to bring up: "stdio" (the local single-user mode, the default when
+// the variable is unset) or "http" (the streamable-HTTP service mode). Reading
+// it here means `dockyard run --transport http` genuinely serves HTTP without
+// the developer touching main.go.
 func renderMainGo(o Options) string {
 	return fmt.Sprintf(`// Command %s is an MCP server scaffolded by 'dockyard new'.
 //
-// It registers one example tool ("greet") and serves the MCP protocol over
-// stdio — the local, single-user transport. Run it directly, or wire it into
-// an MCP host (Claude, Cursor, …) with 'dockyard install' once that lands.
+// It registers one example tool ("greet") and serves the MCP protocol. The
+// transport is chosen by the DOCKYARD_TRANSPORT environment variable — "stdio"
+// (the default: the local, single-user transport) or "http" (the
+// streamable-HTTP service mode). 'dockyard run --transport http' sets it for
+// you; you can also set it by hand. Wire the server into an MCP host (Claude,
+// Cursor, …) with 'dockyard install'.
 package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 
 	"%s/runtime/server"
 )
 
+// httpAddr is the address the HTTP transport listens on when
+// DOCKYARD_TRANSPORT=http. DOCKYARD_HTTP_ADDR overrides it.
+const httpAddr = "127.0.0.1:8080"
+
 func main() {
 	// A text slog handler — readable local logs (Dockyard convention).
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	// Serve until the process is interrupted (Ctrl-C) or the host closes the
-	// stdio pipe.
+	// transport.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
@@ -122,10 +138,50 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := srv.ServeStdio(ctx); err != nil {
+	if err := serve(ctx, srv, logger); err != nil {
 		logger.Error("serve", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+}
+
+// serve brings up the transport named by DOCKYARD_TRANSPORT. An unset or
+// "stdio" value serves stdio; "http" serves the streamable-HTTP transport. An
+// unrecognised value is a clean, explained failure rather than a silent
+// fallback.
+func serve(ctx context.Context, srv *server.Server, logger *slog.Logger) error {
+	switch transport := os.Getenv("DOCKYARD_TRANSPORT"); transport {
+	case "", "stdio":
+		return srv.ServeStdio(ctx)
+	case "http":
+		return serveHTTP(ctx, srv, logger)
+	default:
+		return errors.New("unsupported DOCKYARD_TRANSPORT " + transport + " (want \"stdio\" or \"http\")")
+	}
+}
+
+// serveHTTP serves the streamable-HTTP transport. The HTTP security posture is
+// the runtime's secure default — DNS-rebinding and cross-origin protection both
+// on (runtime/server.DefaultHTTPSecurity). The listen address is httpAddr,
+// overridable with DOCKYARD_HTTP_ADDR.
+func serveHTTP(ctx context.Context, srv *server.Server, logger *slog.Logger) error {
+	handler, err := srv.HTTPHandler(nil)
+	if err != nil {
+		return err
+	}
+	addr := httpAddr
+	if override := os.Getenv("DOCKYARD_HTTP_ADDR"); override != "" {
+		addr = override
+	}
+	httpSrv := &http.Server{Addr: addr, Handler: handler}
+	go func() {
+		<-ctx.Done()
+		_ = httpSrv.Close()
+	}()
+	logger.Info("serving streamable-HTTP transport", slog.String("addr", addr))
+	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 `, o.Name, dockyardModule, o.Name, titleCase(o.Name))
 }
@@ -250,8 +306,9 @@ func renderReadme(o Options) string {
 		"  hand-edit a generated file; change the Go struct and regenerate.\n\n"+
 		"## Run\n\n"+
 		"```sh\n"+
-		"go run .          # serve over stdio\n"+
-		"go test ./...     # run the contract tests\n"+
+		"go run .                          # serve over stdio (the default)\n"+
+		"DOCKYARD_TRANSPORT=http go run .   # serve the streamable-HTTP transport\n"+
+		"go test ./...                     # run the contract tests\n"+
 		"```\n\n"+
 		"## Next steps\n\n"+
 		"- Add a tool: write a handler and a `tool.New(...)` call in `greet.go`.\n"+
