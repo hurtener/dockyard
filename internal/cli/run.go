@@ -68,6 +68,6 @@ down cleanly with no orphan process.`,
 	cmd.Flags().StringVar(&transport, "transport", "stdio",
 		"transport to serve on: stdio or http")
 	cmd.Flags().StringVar(&addr, "addr", "",
-		"HTTP listen address (default :8080; ignored for stdio)")
+		"HTTP listen address (default 127.0.0.1:8080; ignored for stdio)")
 	return cmd
 }
