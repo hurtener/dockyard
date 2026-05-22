@@ -124,10 +124,16 @@ func AddTool[In, Out any](s *Server, def ToolDef, fn ToolFunc[In, Out]) error {
 		// MCP logging → obs/v1 bridge (Phase 16, RFC §11.3) can reach it without
 		// the typed handler signature exposing a raw SDK session (P3).
 		ctx = withRequestSession(ctx, req)
+		// Open the tool.call span and thread it onto the handler context so any
+		// obs/v1 event emitted from inside the handler — a handler-emitted log
+		// event via the MCP-logging bridge — correlates to this span as a child
+		// rather than minting an unrelated trace (Wave 6 checkpoint S1; D-079).
+		span := obs.NewTrace()
+		ctx = obs.WithSpan(ctx, span)
 		// Emit the obs/v1 tool.call lifecycle (RFC §11.2, P2). The end event
 		// carries the shape+size capture of input/output — full content only
 		// under an opted-in, redaction-aware policy (CLAUDE.md §7).
-		endObs := s.rec.ToolCall(ctx, obs.NewTrace(), def.Name, toolTransport(req))
+		endObs := s.rec.ToolCall(ctx, span, def.Name, toolTransport(req))
 		var out Out
 		err := guardHandler(ctx, s.log, "tool", def.Name, func() error {
 			var herr error
@@ -208,8 +214,13 @@ func AddToolWithSchemas[In, Out any](
 		// MCP logging → obs/v1 bridge (Phase 16, RFC §11.3) can reach it without
 		// the typed handler signature exposing a raw SDK session (P3).
 		ctx = withRequestSession(ctx, req)
+		// Open the tool.call span and thread it onto the handler context so a
+		// handler-emitted obs/v1 log event correlates to this span as a child
+		// rather than minting an unrelated trace (Wave 6 checkpoint S1; D-079).
+		span := obs.NewTrace()
+		ctx = obs.WithSpan(ctx, span)
 		// Emit the obs/v1 tool.call lifecycle (RFC §11.2, P2).
-		endObs := s.rec.ToolCall(ctx, obs.NewTrace(), def.Name, toolTransport(req))
+		endObs := s.rec.ToolCall(ctx, span, def.Name, toolTransport(req))
 		// guardHandler converts a panic in the app author's handler into a
 		// typed error result — the server survives a panicking tool on a live
 		// tools/call (AGENTS.md §5, §13; D-053).

@@ -1,0 +1,27 @@
+# Golden Server
+
+An MCP server scaffolded with [Dockyard](https://github.com/hurtener/dockyard).
+
+## Layout
+
+- `dockyard.app.yaml` — the manifest (server identity, tools, quality gates).
+- `main.go` — the entrypoint: constructs the server, serves stdio.
+- `greet.go` — the example `greet` tool and its handler.
+- `greet_test.go` — a contract test for the example tool.
+- `internal/contracts/` — the typed Go contract structs (the source of
+  truth, P1) plus their **generated** JSON Schema and TypeScript. Never
+  hand-edit a generated file; change the Go struct and regenerate.
+
+## Run
+
+```sh
+go run .          # serve over stdio
+go test ./...     # run the contract tests
+```
+
+## Next steps
+
+- Add a tool: write a handler and a `tool.New(...)` call in `greet.go`.
+- Edit a contract: change the struct in `internal/contracts`, then
+  regenerate the schema with `dockyard generate`.
+- Validate the project with `dockyard validate`.

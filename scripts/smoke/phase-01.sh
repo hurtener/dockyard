@@ -35,11 +35,13 @@ else
   fail "runtime/server tests failed"
 fi
 
-# AC: cmd/dockyard placeholder binary runs.
-if go run ./cmd/dockyard version 2>/dev/null | grep -q '^dockyard '; then
-  ok "dockyard version placeholder runs"
+# AC: the cmd/dockyard binary runs and reports a version. Phase 17 replaced the
+# Phase 01 placeholder with the real cobra CLI, so the version is queried via
+# the cobra-standard `--version` flag rather than the old `version` arg.
+if go run ./cmd/dockyard --version 2>/dev/null | grep -q '^dockyard version '; then
+  ok "the dockyard binary runs and reports a version"
 else
-  fail "dockyard version placeholder did not run"
+  fail "the dockyard binary did not report a version"
 fi
 
 smoke_summary

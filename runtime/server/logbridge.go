@@ -138,7 +138,15 @@ func (b *LogBridge) LogTo(ctx context.Context, sess *mcpsdk.ServerSession, rec L
 
 	// 1. obs/v1 log event — the new event source. Independent of the client's
 	//    MCP log level so the inspector observes every record.
-	b.rec.Log(ctx, obs.NewTrace(), obs.LogPayload{
+	//
+	//    The log event correlates to its enclosing unit of work: when ctx
+	//    carries an in-flight span (a tool handler's tool.call span, threaded
+	//    by runtime/server via obs.WithSpan), the log event is emitted as a
+	//    CHILD of that span — same trace id, parent span id set — so a
+	//    handler-emitted log record is trace-correlated to its tool.call
+	//    (Wave 6 checkpoint S1; D-079). Outside a request — a record logged
+	//    with no enclosing span — ChildOrNewTrace begins a fresh root trace.
+	b.rec.Log(ctx, obs.ChildOrNewTrace(ctx), obs.LogPayload{
 		Level:   string(level),
 		Logger:  rec.Logger,
 		Message: rec.Message,

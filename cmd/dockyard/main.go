@@ -1,29 +1,27 @@
-// Command dockyard is the entrypoint for the Dockyard CLI / generator.
+// Command dockyard is the entrypoint for the Dockyard CLI (RFC §9).
 //
-// Phase 01 ships a placeholder: the cobra command tree, project scaffolding,
-// codegen, the dev loop, and the inspector land in Wave 7+ (RFC §9, master
-// plan phases 17–23). The placeholder exists now so the module layout matches
-// AGENTS.md §3 and `make build` produces a CGo-free binary from Phase 01 on.
+// Dockyard ships as one statically-linked, CGo-free binary. This file is a
+// thin shell: it owns process-level concerns — signal handling and the exit
+// code — and delegates the command tree to internal/cli.
+//
+// Phase 17 ships the cobra command tree and the `dockyard new` verb. The
+// remaining verbs (generate, validate, dev, build, run, install, test) land in
+// later Wave 7 phases, each registering itself onto the same root command.
 package main
 
 import (
-	"fmt"
+	"context"
 	"os"
+	"os/signal"
+
+	"github.com/hurtener/dockyard/internal/cli"
 )
 
-// version is the Dockyard CLI version. It is a build-time placeholder until
-// Phase 30 wires release versioning (RFC §14).
-const version = "0.0.0-dev"
-
 func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "version", "--version", "-v":
-			fmt.Printf("dockyard %s\n", version)
-			return
-		}
-	}
-	fmt.Fprintln(os.Stderr, "dockyard: CLI not yet implemented — see RFC §9 (lands in phase 17+)")
-	fmt.Fprintf(os.Stderr, "dockyard %s\n", version)
-	os.Exit(1)
+	// A cancellable context wired to SIGINT so a long-running verb (a future
+	// `dockyard dev`) stops cleanly on Ctrl-C.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	os.Exit(cli.Execute(ctx))
 }

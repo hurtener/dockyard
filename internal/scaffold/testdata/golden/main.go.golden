@@ -1,0 +1,45 @@
+// Command golden-server is an MCP server scaffolded by 'dockyard new'.
+//
+// It registers one example tool ("greet") and serves the MCP protocol over
+// stdio — the local, single-user transport. Run it directly, or wire it into
+// an MCP host (Claude, Cursor, …) with 'dockyard install' once that lands.
+package main
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"os/signal"
+
+	"github.com/hurtener/dockyard/runtime/server"
+)
+
+func main() {
+	// A text slog handler — readable local logs (Dockyard convention).
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	// Serve until the process is interrupted (Ctrl-C) or the host closes the
+	// stdio pipe.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	srv, err := server.New(server.Info{
+		Name:    "golden-server",
+		Title:   "Golden Server",
+		Version: "0.1.0",
+	}, &server.Options{Logger: logger})
+	if err != nil {
+		logger.Error("create server", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	if err := registerTools(srv); err != nil {
+		logger.Error("register tools", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	if err := srv.ServeStdio(ctx); err != nil {
+		logger.Error("serve", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+}
