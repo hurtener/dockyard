@@ -2,6 +2,7 @@ package inspector
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -68,9 +69,30 @@ type Options struct {
 	// frontend being built.
 	Assets fs.FS
 
+	// Verdicts is the read-only source for the inspector's Verdicts panel —
+	// contract-drift, schema-validation, and spec-compliance results (RFC §12).
+	// When nil, `GET /api/verdicts` returns an empty array and the UI renders
+	// its four-state empty state. Use [VerdictsFromValidate] to source it from
+	// the `dockyard validate` engine.
+	Verdicts VerdictSource
+
+	// Contracts is the read-only source for the inspector's generated tool
+	// contracts — the JSON array the fixture switcher derives its fixtures
+	// from (RFC §12, §6 — P1, contract-first). When nil, `GET /api/contracts`
+	// returns an empty array and the Fixtures/Tools panels render their
+	// four-state empty state. The source returns the contracts as a JSON
+	// array of `{name, description, inputSchema, outputSchema}` objects.
+	Contracts ContractsSource
+
 	// Logger is the structured logger. When nil, a no-op logger is used.
 	Logger *slog.Logger
 }
+
+// ContractsSource produces the attached server's generated tool contracts as
+// a JSON array, on demand. The inspector calls it per `GET /api/contracts`
+// request. It is content-free of any runtime internal — it returns the same
+// generated-contract JSON the inspector frontend's contract model decodes.
+type ContractsSource func() json.RawMessage
 
 func (o Options) addr() string {
 	if o.Addr == "" {
