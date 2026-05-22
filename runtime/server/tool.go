@@ -120,6 +120,10 @@ func AddTool[In, Out any](s *Server, def ToolDef, fn ToolFunc[In, Out]) error {
 	// never a process crash — the "no panic across the MCP boundary" rule made
 	// a toolchain guarantee (AGENTS.md §5, §13; D-053).
 	handler := func(ctx context.Context, req *mcpsdk.CallToolRequest, in In) (*mcpsdk.CallToolResult, Out, error) {
+		// Thread the in-flight MCP ServerSession onto the handler context so the
+		// MCP logging → obs/v1 bridge (Phase 16, RFC §11.3) can reach it without
+		// the typed handler signature exposing a raw SDK session (P3).
+		ctx = withRequestSession(ctx, req)
 		// Emit the obs/v1 tool.call lifecycle (RFC §11.2, P2). The end event
 		// carries the shape+size capture of input/output — full content only
 		// under an opted-in, redaction-aware policy (CLAUDE.md §7).
@@ -200,6 +204,10 @@ func AddToolWithSchemas[In, Out any](
 		if req != nil && req.Params != nil {
 			ctx = WithRawArguments(ctx, req.Params.Arguments)
 		}
+		// Thread the in-flight MCP ServerSession onto the handler context so the
+		// MCP logging → obs/v1 bridge (Phase 16, RFC §11.3) can reach it without
+		// the typed handler signature exposing a raw SDK session (P3).
+		ctx = withRequestSession(ctx, req)
 		// Emit the obs/v1 tool.call lifecycle (RFC §11.2, P2).
 		endObs := s.rec.ToolCall(ctx, obs.NewTrace(), def.Name, toolTransport(req))
 		// guardHandler converts a panic in the app author's handler into a
