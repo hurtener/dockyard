@@ -77,6 +77,14 @@ func resolveTSConfig(opts []TSOption) tsConfig {
 // drift cross-check meaningful (RFC §6.2, brief 06 R1).
 //
 // On a tygo parse or convert failure the error wraps ErrTypeScriptGen.
+//
+// Malformed Go source — a struct field carrying a syntactically invalid struct
+// tag is the known case — can drive the tygo dependency to panic rather than
+// return an error (tygo parses tags via reflect.StructTag, which panics on a
+// malformed pair). TypeScriptForSource contains that panic and converts it to
+// an ErrTypeScriptGen error: a malformed contract file must fail the codegen
+// step cleanly, never crash the process (CLAUDE.md §13 — never panic across a
+// process boundary). Found by the Phase 21.5 FuzzTypeScriptForSource target.
 func TypeScriptForSource(goSource string, opts ...TSOption) ([]byte, error) {
 	cfg := resolveTSConfig(opts)
 
@@ -95,12 +103,27 @@ func TypeScriptForSource(goSource string, opts ...TSOption) ([]byte, error) {
 		pc.OptionalType = "null"
 	}
 
-	body, err := tygo.ConvertGoToTypescript(decls, pc)
+	body, err := convertGoToTypeScript(decls, pc)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrTypeScriptGen, err)
 	}
 
 	return assembleTS(body), nil
+}
+
+// convertGoToTypeScript calls tygo.ConvertGoToTypescript under a recover guard:
+// tygo panics (rather than returning an error) on some malformed input — a
+// struct field with a syntactically invalid struct tag is the known case. The
+// recover turns such a panic into an ordinary error so the caller's
+// `%w: ErrTypeScriptGen` wrapping holds for every failure mode.
+func convertGoToTypeScript(decls string, pc tygo.PackageConfig) (body string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			body = ""
+			err = fmt.Errorf("tygo conversion panicked on malformed input: %v", r)
+		}
+	}()
+	return tygo.ConvertGoToTypescript(decls, pc)
 }
 
 // TypeScriptForDir reads the .go files of a contracts directory and generates

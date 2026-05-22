@@ -214,10 +214,23 @@ func TestPhase19_DevLoopRestartsAndRegenerates(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("dev loop did not return after context cancel")
 	}
-	afterGoroutines := stableGoroutines()
-	if afterGoroutines > beforeGoroutines+4 {
-		t.Fatalf("goroutine leak after teardown: before=%d after=%d",
-			beforeGoroutines, afterGoroutines)
+	// Poll until the goroutine count settles back to the baseline. devloop's
+	// child-process, supervisor and fsnotify goroutines unwind asynchronously
+	// after cancel, so a one-shot snapshot can catch teardown mid-flight on a
+	// loaded CI runner; polling-until-settled with a deadline is deterministic.
+	leakDeadline := time.Now().Add(10 * time.Second)
+	var afterGoroutines int
+	for {
+		runtime.GC()
+		afterGoroutines = runtime.NumGoroutine()
+		if afterGoroutines <= beforeGoroutines+4 {
+			break
+		}
+		if time.Now().After(leakDeadline) {
+			t.Fatalf("goroutine leak after teardown: before=%d after=%d",
+				beforeGoroutines, afterGoroutines)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

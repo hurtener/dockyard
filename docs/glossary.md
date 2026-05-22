@@ -15,6 +15,12 @@ delegates the protocol weight to the app runtime. RFC §3. D-020.
 
 ## B
 
+**Benchmark** — a Go `BenchmarkXxx` function (standard `go test` toolchain)
+measuring the cost of a hot reusable artifact — the obs ring buffer, a
+`protocolcodec` codec, a `Store` driver operation. Benchmarks are a performance
+baseline and a regression-spotting tool, run on demand via `make bench`; they
+are deliberately not a CI gate. RFC §9.4. Phase 21.5. D-092.
+
 **Build blocker** — a `dockyard validate` diagnostic class severe enough to fail
 the build: an invalid manifest or schema, a missing or mismatched `ui://`
 resource, an invalid MIME, an Apps/Tasks construct that violates the vendored
@@ -93,6 +99,18 @@ empty `TextContent` block is emitted when `Text` is empty. RFC §6.3. D-043.
 `tools[].input` / `tools[].output` field holds: a reference to a Go contract
 struct, not inline schema. Resolved to a JSON Schema through the manifest's
 `ContractResolver` seam (the codegen pipeline). RFC §4.2, §6.1. D-037.
+
+**Coverage band** — one of the three AGENTS.md §11 coverage tiers a Go package
+is held to: 80% for a new package, 85% for the `Store` drivers and the
+conformance-tested subsystems, 70% for CLI / tooling. Phase 21.5 makes the bands
+a mechanical gate (see *coverage gate*). AGENTS.md §11. D-092.
+
+**Coverage gate** — the mechanical per-package coverage check
+(`internal/coveragecheck`) that parses a Go coverage profile, compares each
+package to its coverage band, and fails the build on a shortfall — or on a
+measured package with no configured threshold. Wired into `make coverage` and
+CI; the frontend half is the Vitest `coverage.thresholds` enforced by
+`make web`. RFC §9.4. Phase 21.5. D-092, D-093.
 
 **Cross-compile matrix** — the set of GOOS/GOARCH target triples `dockyard
 build` produces an artifact and a SHA-256 checksum for: darwin, linux and
@@ -227,6 +245,13 @@ so the generated JSON Schema carries an `enum` array. Reflection cannot see a
 Go `const` block, so the values must be registered. RFC §6.1. D-051.
 
 ## F
+
+**Fuzz target** — a Go `FuzzXxx` function (standard `go test` toolchain) that
+exercises a parse or decode surface — a `protocolcodec` wire decoder, the
+`dockyard.app.yaml` loader, the codegen Go-source parser, the JSON-RPC tool-
+argument frame path — against arbitrary input, asserting an invariant (no panic;
+round-trip stability; never a malformed value). The seed corpus runs as an
+ordinary CI test; a longer `-fuzz` session is run on demand. Phase 21.5. D-094.
 
 **Forward-only migration** — an append-only, ordered, idempotent schema or data step
 applied through the `Store` seam's migration runner. Once a migration has merged it

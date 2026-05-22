@@ -2312,3 +2312,108 @@ bound, and P1 (contract-first) and P4 (server-side only — the install boot
 check is the throwaway localhost carve-out of D-088) are upheld. No blocker was
 found; the audit punch-list is should-fix and nit hygiene, fixed in the
 checkpoint PR.
+
+---
+
+## D-092 — Coverage bands become a mechanical CI gate (`internal/coveragecheck`)
+
+**Status:** Settled (Phase 21.5).
+
+The AGENTS.md §11 coverage bands — 80% new packages, 85% the Store drivers and
+conformance-tested subsystems, 70% CLI / tooling — were, until Phase 21.5,
+enforced only by reviewer diligence: `make test` ran `go test -race ./...` with
+no `-coverprofile` and no threshold. Phase 21.5 makes the bands mechanical, the
+way RFC §9.4 makes the quality bar a toolchain gate rather than documentation.
+
+1. **`internal/coveragecheck` is the gate.** It parses a Go coverage profile,
+   aggregates per-package statement coverage, and compares each package to a
+   required threshold. It exits non-zero on a shortfall, and also on a *measured
+   package with no config entry* — a new package must be gated deliberately,
+   never silently ungated. It is wired into `make coverage` and the CI `go` job.
+
+2. **The threshold config is `internal/coveragecheck/coverage.json`** — a
+   per-package map keyed to the §11 bands. Thresholds are set **at the band**;
+   every package currently measures above its band with margin.
+
+3. **Two override classes, each carrying a documented reason in the config:**
+   - `subprocess-override` (70%) — `internal/buildpkg` / `runpkg` / `installpkg`
+     orchestrate subprocesses with toolchain-failure / signal-race branches a
+     hermetic suite cannot drive (the Phase 20 finding). Held to the CLI-tooling
+     band, not the new-package band.
+   - `harness-override` (65%) — `runtime/store/storetest` and
+     `runtime/tasks/taskstoretest` are conformance *harness* packages; their
+     statements are exercised when a driver runs the suite, so self-coverage
+     sits below every product band by construction.
+   An override is never a silent lowering of a band: the class and its reason
+   travel in the config and are reviewable.
+
+4. **Informing source.** Phase 21.5 is hygiene hardening, not an RFC-specified
+   subsystem. Its informing source is the §11 bands plus an independent test-
+   quality audit; RFC §9.4 is the closest anchor (the "toolchain, not
+   documentation" principle). Recorded honestly here rather than retro-fitting
+   an RFC section.
+
+---
+
+## D-093 — The "no web UI tests" audit finding was wrong; only frontend coverage thresholds are added
+
+**Status:** Settled (Phase 21.5).
+
+The test-quality audit claimed Dockyard had "no web UI tests." It was
+investigated and **rejected**: `web/ui/src/__tests__/` (5 files) and
+`web/bridge/src/__tests__/` (6 files) hold ~94 Vitest tests, run by `make web`
+(`npm run gate`). The audit had grepped for Go `_test.go` files and missed the
+Vitest suites.
+
+Phase 21.5 therefore does **not** add web tests. It adds frontend coverage
+*enforcement*: `web/ui` and `web/bridge` already carried `coverage.thresholds`
+in their `vitest.config.ts` and a `coverage` script, but the `gate` script ran
+plain `vitest run`. Phase 21.5 changes each `gate` to `check && coverage`, so
+`make web` now runs `vitest run --coverage` and a frontend coverage regression
+fails the gate — the frontend half of D-092's mechanical coverage gate. A wrong
+audit finding is recorded as a decision so it is not re-litigated.
+
+---
+
+## D-094 — `codegen.TypeScriptForSource` recovers a tygo panic on malformed input
+
+**Status:** Settled (Phase 21.5).
+
+The Phase 21.5 `FuzzTypeScriptForSource` fuzz target found a genuine bug: a Go
+contract source fragment with a syntactically invalid struct tag (e.g. a bare
+backtick-quoted tag value, not a `key:"value"` pair) drove the `tygo`
+dependency to **panic** ("bad syntax for struct tag pair") rather than return
+an error — `tygo` parses tags via `reflect.StructTag`, which panics on a
+malformed pair.
+
+A panic across the `dockyard generate` process boundary violates CLAUDE.md §13.
+The fix (CLAUDE.md §17 — fix the bug the test surfaced, in the same PR) wraps
+the `tygo.ConvertGoToTypescript` call in a `recover` guard that converts the
+panic into an ordinary `ErrTypeScriptGen`-wrapped error, so a malformed
+contract file fails the codegen step cleanly. The recover is at one well-
+defined seam guarding a third-party dependency — it is not panic-for-control-
+flow. The fuzzer's minimised crasher is committed as a regression seed under
+`internal/codegen/testdata/fuzz/`, and `TestTypeScriptForSource_MalformedStructTagNoPanic`
+locks the fix.
+
+---
+
+## D-095 — The shared Store benchmark suite lives in `storetest`, exercised by a self-guard
+
+**Status:** Settled (Phase 21.5).
+
+Phase 21.5 adds a shared Store benchmark suite, `storetest.RunBenchmarks`,
+mirroring `RunConformance`: one suite, every driver (`inmem`, `sqlite`) runs it.
+Like `RunConformance`, it must be in a regular `.go` file (`benchmark.go`), not
+a `_test.go` file, so the driver packages can import the exported entry point —
+a `_test.go` file is visible only to its own package's tests.
+
+A consequence: `benchmark.go`'s statements count toward the `storetest`
+package's coverage total, but `go test` does not run benchmarks by default, so
+they would read as uncovered and drag the harness package below even its
+override threshold. Rather than lower the threshold to hide un-run code,
+`storetest_test.go` gains `TestRunBenchmarksSmoke`, which drives the benchmark
+suite via `testing.Benchmark` inside an ordinary test. The benchmark code is
+then genuinely covered, and a silently-broken benchmark — a panicking seed, a
+misnamed namespace — is caught by the normal `go test` run, not only by
+`make bench`. It mirrors the conformance harness self-guard.

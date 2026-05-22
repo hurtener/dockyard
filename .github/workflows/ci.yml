@@ -45,6 +45,12 @@ jobs:
       - run: make build
       - run: make vet
       - run: make test
+      # The mechanical AGENTS.md §11 coverage gate (Phase 21.5): produces a
+      # per-package coverage profile and fails the build on any package below
+      # its band in internal/coveragecheck/coverage.json. A coverage regression
+      # is a build failure, not a reviewer's catch.
+      - name: coverage gate
+        run: make coverage
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
@@ -53,7 +59,7 @@ jobs:
         continue-on-error: false
 
   web:
-    name: web — frontend type-check + tests
+    name: web — frontend type-check + tests + coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -65,7 +71,9 @@ jobs:
             web/bridge/package-lock.json
             web/ui/package-lock.json
       # `make web` installs deps on first run, then runs the frontend gate
-      # (svelte-check + tsc + vitest). It no-ops gracefully before web/ lands.
+      # (svelte-check + tsc + vitest run --coverage). The per-project Vitest
+      # coverage.thresholds fail the gate on a frontend coverage regression
+      # (Phase 21.5). It no-ops gracefully before web/ lands.
       - run: make web
 
   preflight:

@@ -159,6 +159,27 @@ func TestTypeScriptForSource_InvalidSource(t *testing.T) {
 	}
 }
 
+// TestTypeScriptForSource_MalformedStructTagNoPanic is a Phase 21.5 regression
+// test: the FuzzTypeScriptForSource target found that a struct field carrying a
+// syntactically invalid struct tag drove the tygo dependency to panic ("bad
+// syntax for struct tag pair") rather than return an error. TypeScriptForSource
+// must now contain that panic and return an ErrTypeScriptGen error — a
+// malformed contract file fails the codegen step cleanly, never crashes the
+// process (CLAUDE.md §13).
+func TestTypeScriptForSource_MalformedStructTagNoPanic(t *testing.T) {
+	t.Parallel()
+	// The tag `0` (a bare backtick-quoted value, not a key:"value" pair) is the
+	// minimised crasher the fuzzer surfaced.
+	const crasher = "type A0 struct {A0`0`} "
+	_, err := codegen.TypeScriptForSource(crasher)
+	if err == nil {
+		t.Fatal("expected an error for a malformed struct tag, got nil")
+	}
+	if !errors.Is(err, codegen.ErrTypeScriptGen) {
+		t.Errorf("error should wrap ErrTypeScriptGen, got %v", err)
+	}
+}
+
 // TestGeneratedTSIsStructurallyValid checks the golden TypeScript fixtures are
 // structurally valid TS: balanced braces, every declaration is a recognised
 // export, and no `any /* ... */` fallback markers (tygo emits those for an
