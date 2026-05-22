@@ -114,14 +114,23 @@ describe('Transport', () => {
     });
   });
 
-  it('dispatches inbound notifications to handlers', () => {
+  it('dispatches inbound notifications to handlers', async () => {
     const ch = makeChannel();
     cleanup.push(ch.close);
     const transport = new Transport({ peer: ch.bridgeSink, source: ch.bridgeSource });
     cleanup.push(() => transport.close());
 
+    // Await the real signal — the notification handler firing — rather than an
+    // arbitrary setTimeout(0). MessageChannel delivery is its own event-loop
+    // task, so a single setTimeout(0) can race ahead of the `message` event on
+    // a loaded runner; resolving from inside the handler is deterministic.
     const seen: { method: string; params: unknown }[] = [];
-    transport.onNotification((params, method) => seen.push({ method, params }));
+    const dispatched = new Promise<void>((resolve) => {
+      transport.onNotification((params, method) => {
+        seen.push({ method, params });
+        resolve();
+      });
+    });
 
     ch.hostSink.postMessage({
       jsonrpc: '2.0',
@@ -129,17 +138,13 @@ describe('Transport', () => {
       params: { width: 100, height: 50 },
     });
 
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        expect(seen).toEqual([
-          {
-            method: 'ui/notifications/size-changed',
-            params: { width: 100, height: 50 },
-          },
-        ]);
-        resolve();
-      }, 0);
-    });
+    await dispatched;
+    expect(seen).toEqual([
+      {
+        method: 'ui/notifications/size-changed',
+        params: { width: 100, height: 50 },
+      },
+    ]);
   });
 
   it('ignores reserved sandbox-proxy notifications (forward-compat)', () => {
