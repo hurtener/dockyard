@@ -58,11 +58,19 @@ fi
 # 6. The frontend gate: the web/bridge type-check + unit tests pass (make web).
 if [ -f web/bridge/package.json ]; then
   if command -v npm >/dev/null 2>&1; then
-    if make web >/dev/null 2>&1; then
+    # Capture `make web` output to a temp log and surface it on failure so a CI
+    # frontend-gate failure is diagnosable; stay quiet on success (C1, Wave 6
+    # checkpoint).
+    web_log="$(mktemp -t dockyard-smoke-phase11-web.XXXXXX)"
+    if make web >"$web_log" 2>&1; then
       ok "web/bridge type-check + unit tests pass (make web)"
     else
       fail "web/bridge frontend gate (make web) failed"
+      echo "--- make web output (last 60 lines) ---" >&2
+      tail -n 60 "$web_log" >&2
+      echo "--- end make web output ---" >&2
     fi
+    rm -f "$web_log"
   else
     skip "npm not installed — web/bridge frontend gate deferred"
   fi
