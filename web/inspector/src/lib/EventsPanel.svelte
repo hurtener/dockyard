@@ -85,16 +85,16 @@
   .events-panel {
     display: flex;
     flex-direction: column;
-    gap: var(--dy-space-3, 0.75rem);
+    gap: var(--dy-space-3);
     min-height: 0;
   }
   .events-body {
     display: flex;
     flex-direction: column;
-    gap: var(--dy-space-3, 0.75rem);
+    gap: var(--dy-space-3);
   }
   .event-detail h3 {
-    margin: 0 0 var(--dy-space-2, 0.5rem);
-    font-size: var(--dy-font-size-sm, 0.875rem);
+    margin: 0 0 var(--dy-space-2);
+    font-size: var(--dy-text-sm);
   }
 </style>

@@ -1,6 +1,7 @@
 package inspector
 
 import (
+	"context"
 	"encoding/json"
 	"io/fs"
 	"log/slog"
@@ -80,10 +81,48 @@ func newMux(opts Options, log *slog.Logger) http.Handler {
 		_, _ = w.Write([]byte("[]"))
 	})
 
+	// /api/apps — the read-only App-preview source. It performs a read-only
+	// resources/list + resources/read of the attached server's ui:// resources
+	// (RFC §12 line 711 — the inspector renders the server's Apps; D-103). When
+	// no source is configured the endpoint answers with an empty array so the
+	// App-frame renders its "No App attached" empty state. A discovery failure
+	// (the server is unreachable, or a ui:// resource carried no HTML) answers
+	// 502 with a typed message so the App-frame surfaces an honest error state.
+	mux.HandleFunc("GET /api/apps", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		apps, err := loadApps(r.Context(), opts.Apps)
+		if err != nil {
+			log.WarnContext(r.Context(), "dockyard inspector: App discovery failed",
+				slog.String("error", err.Error()))
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(apps)
+	})
+
 	// The web/inspector frontend (its built dist/ tree), or a placeholder.
 	mux.Handle("/", frontendHandler(opts.Assets, log))
 
 	return mux
+}
+
+// loadApps invokes the configured App source, tolerating a nil source. A nil
+// source yields an empty slice (the inspector is detached) — never an error,
+// so a detached inspector still renders the App-frame's empty state cleanly.
+func loadApps(ctx context.Context, src AppSource) ([]AppPreview, error) {
+	if src == nil {
+		return []AppPreview{}, nil
+	}
+	apps, err := src(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if apps == nil {
+		return []AppPreview{}, nil
+	}
+	return apps, nil
 }
 
 // frontendHandler serves the embedded web/inspector frontend. When assets is

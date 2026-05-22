@@ -20,9 +20,11 @@ import (
 // the server's obs/v1 stream to it, read-only.
 //
 // The inspector is dev-mode-gated, localhost-only, and read-only — `dockyard
-// inspect` is the explicit, deliberate entry into that surface (the inspector
-// also runs automatically inside `dockyard dev`). The inspector binds a
-// loopback address only: a non-loopback `--port` host is rejected by
+// inspect` is the standalone entry into that surface. RFC §12 also names an
+// automatic attach inside `dockyard dev`; that auto-attach is a deferred seam
+// (D-101) and is not yet implemented — `dockyard inspect` is the only shipping
+// entry point. The inspector binds a loopback address only: a non-loopback
+// `--port` host is rejected by
 // internal/inspector's ErrNonLoopbackBind gate before the listener opens, the
 // mechanical enforcement of RFC §12 and the CVE-2025-49596 lesson.
 //
@@ -31,6 +33,7 @@ import (
 func newInspectCmd() *cobra.Command {
 	var (
 		serverURL string
+		dir       string
 		port      int
 		noOpen    bool
 	)
@@ -46,20 +49,33 @@ by --url to it. The inspector renders the server's Apps in a sandboxed iframe,
 shows the live obs/v1 stream and the JSON-RPC log, switches fixtures, runs
 contract/spec verdicts, and emulates host capability sets.
 
-  --url      the running MCP server's obs/v1 stream URL (e.g.
-             http://127.0.0.1:8080); the inspector relays its obs stream.
+  --url      the running MCP server's base URL (e.g. http://127.0.0.1:8080);
+             the inspector relays its obs stream and reads its ui:// Apps.
+  --dir      the Dockyard project directory (default: the current directory);
+             sources the contract verdicts and the generated tool contracts.
   --port     the inspector's own loopback port (default: an OS-assigned port).
   --no-open  do not open a browser — for CI and headless use.
+
+The Verdicts panel and the Fixtures switcher are sourced from the project at
+--dir: the verdicts re-run 'dockyard validate', the fixtures derive from the
+project's generated tool contracts (P1). When --dir names no Dockyard project,
+those panels degrade to their honest empty state. The App preview reads the
+attached server's ui:// resources read-only.
 
 The inspector is dev-mode-gated, localhost-only, and read-only: it is never a
 production MCP client and never reachable off-localhost. A non-loopback bind is
 refused before the listener opens. Press Ctrl-C to stop.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			projectDir, err := resolveProjectDir(dir)
+			if err != nil {
+				return err
+			}
 			return runInspect(cmd.Context(), inspectConfig{
-				serverURL: serverURL,
-				port:      port,
-				noOpen:    noOpen,
+				serverURL:  serverURL,
+				projectDir: projectDir,
+				port:       port,
+				noOpen:     noOpen,
 				logger: slog.New(slog.NewTextHandler(cmd.ErrOrStderr(),
 					&slog.HandlerOptions{Level: slog.LevelInfo})),
 				out: func(format string, args ...any) {
@@ -70,7 +86,9 @@ refused before the listener opens. Press Ctrl-C to stop.`,
 	}
 
 	cmd.Flags().StringVar(&serverURL, "url", "",
-		"the running MCP server's base URL (its obs/v1 stream is relayed)")
+		"the running MCP server's base URL (its obs stream is relayed, its Apps read)")
+	cmd.Flags().StringVar(&dir, "dir", "",
+		"project directory — sources verdicts and contracts (default: current directory)")
 	cmd.Flags().IntVar(&port, "port", 0,
 		"the inspector's loopback port (default: an OS-assigned port)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false,
@@ -81,11 +99,12 @@ refused before the listener opens. Press Ctrl-C to stop.`,
 // inspectConfig is the resolved input to runInspect — extracted so the
 // orchestration is unit-testable without a cobra command.
 type inspectConfig struct {
-	serverURL string
-	port      int
-	noOpen    bool
-	logger    *slog.Logger
-	out       func(format string, args ...any)
+	serverURL  string
+	projectDir string
+	port       int
+	noOpen     bool
+	logger     *slog.Logger
+	out        func(format string, args ...any)
 }
 
 // runInspect serves the inspector backend until ctx is cancelled. It is the
@@ -97,6 +116,7 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 	}
 
 	var relay *inspector.Relay
+	var appSource inspector.AppSource
 	serverInfo := inspector.ServerInfo{Name: "inspector", Transport: "detached"}
 	if cfg.serverURL != "" {
 		obsURL, infErr := obsStreamURLFor(cfg.serverURL)
@@ -104,10 +124,26 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 			return infErr
 		}
 		relay = inspector.NewRelay(obsURL)
+		// The App-preview source reads the server's ui:// resources read-only
+		// (RFC §12 line 711, D-103) — it takes the bare MCP base URL, not the
+		// derived obs stream URL.
+		appSource = inspector.AppsFromServer(cfg.serverURL)
 		serverInfo = inspector.ServerInfo{
 			Name:      cfg.serverURL,
 			Transport: "http",
 		}
+	}
+
+	// The Verdicts panel re-runs `dockyard validate` against the project, and
+	// the Fixtures switcher derives its fixtures from the project's generated
+	// tool contracts (P1). Both are sourced from the project at --dir; when
+	// --dir names no Dockyard project the sources degrade to an honest empty
+	// state rather than crashing (see VerdictsFromValidate / ContractsFromProject).
+	var verdicts inspector.VerdictSource
+	var contracts inspector.ContractsSource
+	if cfg.projectDir != "" {
+		verdicts = inspector.VerdictsFromValidate(cfg.projectDir)
+		contracts = inspector.ContractsFromProject(cfg.projectDir)
 	}
 
 	insp, err := inspector.New(inspector.Options{
@@ -115,6 +151,9 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 		Relay:      relay,
 		Assets:     inspector.EmbeddedAssets(),
 		ServerInfo: serverInfo,
+		Verdicts:   verdicts,
+		Contracts:  contracts,
+		Apps:       appSource,
 		Logger:     cfg.logger,
 	})
 	if err != nil {

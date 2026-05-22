@@ -164,7 +164,7 @@
   .app-frame {
     display: flex;
     flex-direction: column;
-    gap: var(--dy-space-2, 0.5rem);
+    gap: var(--dy-space-2);
     min-height: 0;
     height: 100%;
   }
@@ -172,11 +172,11 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--dy-space-2, 0.5rem);
+    gap: var(--dy-space-2);
   }
   .frame-title {
     font-weight: 600;
-    font-size: var(--dy-font-size-sm, 0.875rem);
+    font-size: var(--dy-text-sm);
   }
   .frame-region {
     position: relative;
@@ -187,9 +187,9 @@
     width: 100%;
     height: 100%;
     min-height: 22rem;
-    border: 1px solid var(--dy-color-border, #d4d4d8);
-    border-radius: var(--dy-radius-md, 0.5rem);
-    background: var(--dy-color-surface, #ffffff);
+    border: 1px solid var(--dy-color-border);
+    border-radius: var(--dy-radius-md);
+    background: var(--dy-color-surface);
   }
   .frame-overlay {
     position: absolute;
@@ -197,7 +197,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--dy-color-surface, #ffffff);
-    border-radius: var(--dy-radius-md, 0.5rem);
+    background: var(--dy-color-surface);
+    border-radius: var(--dy-radius-md);
   }
 </style>

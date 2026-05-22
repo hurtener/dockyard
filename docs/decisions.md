@@ -2569,3 +2569,62 @@ It continues to use `wave1_test.go`'s robust poll-until-settled
 `assertNoGoroutineLeak` (the Wave 7 checkpoint's fix), never a one-shot
 snapshot. This is an E2E-test-design choice, not a runtime change; the relay's
 own teardown contract is unchanged.
+
+---
+
+## D-103 — The inspector renders Apps via a read-only `resources/read`; supersedes D-099's "no MCP client"
+
+**Status:** Settled (remediation R1).
+
+D-099 settled that `dockyard inspect --url` attaches "a read-only obs relay,
+not an MCP client" — and scoped the inspector too narrowly. RFC §12 line 711 is
+binding: the inspector "implements the host half of the `ui/` postMessage
+bridge to **render Apps locally**." Rendering an App requires obtaining the
+App's HTML, and the App's HTML is a `ui://` resource of the attached MCP server.
+The pre-Wave-9 depth audit found the consequence: the `AppFrame` → `HostBridge`
+→ fixture-switcher chain was unreachable from the shipping `dockyard inspect`,
+because nothing ever fetched an App.
+
+This decision extends D-099. The inspector additionally performs two
+**read-only** MCP client operations against the attached server, only to render
+its Apps: a `resources/list` to find the server's `ui://` resources, and a
+`resources/read` of each. `internal/inspector.AppsFromServer` opens a fresh,
+short-lived MCP client session per `GET /api/apps` request, reads every `ui://`
+resource, and closes the session — it holds no long-lived client. It never
+issues a mutating MCP call (`tools/call` against the previewed App stays
+fixture-backed — D-100), the inspector's listener stays loopback-bound by the
+`ErrNonLoopbackBind` gate, and it is still dev-mode-gated. P4 is intact: a
+read-only resource read by the lone client-shaped dev surface is not "a
+production MCP client" and not "an arbitrary-execution proxy." `internal/
+inspector` may use the SDK client internally exactly as `runtime/server` uses
+the SDK server — no raw SDK type leaks through `AppSource` / `AppPreview` (P3).
+
+The `obs/v1` relay path of D-099 is unchanged: a server's obs stream is still a
+pure SSE consume, never an MCP session. The two paths are distinct — the relay
+URL appends `/obs/v1/stream`; the App source connects the bare MCP base URL.
+
+---
+
+## D-104 — `dockyard inspect` sources verdicts and contracts from a project directory
+
+**Status:** Settled (remediation R1).
+
+The inspector's `Options.Verdicts` and `Options.Contracts` were built and
+test-covered in Phase 22/23, but the shipping `dockyard inspect` command's
+`runInspect` never set them — so `/api/verdicts` and `/api/contracts` always
+returned `[]` in the product, leaving the Verdicts panel and the Fixtures
+switcher permanently empty (the pre-Wave-9 depth audit's Blocker 1).
+
+`dockyard inspect` now resolves a project directory — a new `--dir` flag
+defaulting to the current working directory, the same `resolveProjectDir` seam
+`dockyard generate` / `validate` / `test` already use — and wires
+`Options.Verdicts` from `inspector.VerdictsFromValidate(dir)` and
+`Options.Contracts` from `inspector.ContractsFromProject(dir)`.
+`ContractsFromProject` loads the project's `dockyard.app.yaml` for the tool
+list and reads each tool's generated `<tool>_<side>.schema.json` from
+`internal/contracts/` — the files `dockyard generate` writes (P1: the fixtures
+derive from the generated schema, never a hand-written one). Both sources
+degrade gracefully: a `--dir` that names no Dockyard project, or a project
+never `dockyard generate`d, yields the panels' honest four-state empty state,
+never a crash — so `dockyard inspect --url <remote>` with no local project
+still works.

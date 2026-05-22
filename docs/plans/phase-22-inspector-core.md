@@ -180,3 +180,26 @@ deferred to Phase 23 by the master plan, not a departure.
 - [x] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
 - [x] New vocabulary added to `docs/glossary.md`
 - [x] New / changed architectural decision filed in `docs/decisions.md`
+
+## Remediation history
+
+### R1 — inspector production wiring (pre-Wave-9 depth audit)
+
+A depth audit found that Phase 22 built the App-preview frame (`AppFrame` →
+`HostBridge` → fixture switcher) but the shipping inspector had **no production
+entry point for it**: `web/inspector/src/main.ts` mounted `App` with no props,
+so `App.svelte`'s `appHtml` was always `''` and the frame always rendered "No
+App attached"; there was no backend endpoint serving App HTML. RFC §12 line 711
+("renders Apps locally") was therefore unmet in the product.
+
+R1 closed this. The inspector backend gained a read-only `/api/apps` endpoint
+(`internal/inspector/appsource.go`): `AppsFromServer` performs a read-only
+`resources/list` + `resources/read` of the attached server's `ui://` resources
+and returns the App HTML — a P4-honest path recorded in D-103, which extends
+D-099. `App.svelte` now loads a real App from `/api/apps` and routes the
+preview region through the four-state `PageState` (loading / empty / error /
+ready). The `appHtml` prop is retained as a test-only override. A token audit
+also repointed ~22 inspector `--dy-*` references to the real token names in
+`web/ui/src/tokens.css` and removed their ad-hoc hex fallbacks (§20). No
+behaviour from the original Phase 22 acceptance criteria changed; the
+remediation only wired surface that was built but unreachable.

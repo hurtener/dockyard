@@ -22,6 +22,8 @@
     ConnectionFooter,
     StatusChip,
     EmptyState,
+    LoadingState,
+    ErrorState,
     type PageStateValue,
   } from '@dockyard/ui';
   import EventsPanel from './lib/EventsPanel.svelte';
@@ -38,9 +40,11 @@
     fetchRpcLog,
     fetchVerdicts,
     fetchContracts,
+    fetchApps,
     obsStreamURL,
     type ServerInfo,
     type VerdictRow,
+    type AppPreview,
   } from './lib/api.js';
   import { ObsStream, type ObsEvent } from './lib/obs.js';
   import type { RpcEntry } from './lib/rpc.js';
@@ -57,7 +61,12 @@
   interface Props {
     /** API base URL — empty in production (served same-origin); set in tests. */
     base?: string;
-    /** The App HTML to preview. Empty shows the App-frame empty state. */
+    /**
+     * A test-only App HTML override. When set, the App-frame previews it
+     * directly and the `/api/apps` fetch is skipped. In production this is
+     * unset and the inspector loads the attached server's ui:// App(s) from
+     * the backend's `/api/apps` endpoint.
+     */
     appHtml?: string;
   }
 
@@ -90,6 +99,15 @@
 
   // -- fixture switcher state --
   let activeFixture = $state<CallToolFixtureResult | undefined>(undefined);
+
+  // -- App preview (the attached server's ui:// Apps) --
+  let apps = $state<AppPreview[]>([]);
+  let appsState = $state<PageStateValue>('loading');
+  let appsError = $state('');
+  // The HTML the App-frame renders: the test override when set, otherwise the
+  // first App discovered from the attached server's ui:// resources.
+  const previewHtml = $derived(appHtml !== '' ? appHtml : (apps[0]?.html ?? ''));
+  const previewName = $derived(apps[0]?.name ?? serverInfo?.name);
 
   // The inspector DetailRail tabs.
   const tabs = ['Events', 'RPC', 'Fixtures', 'Tools', 'Verdicts', 'Tasks', 'Analytics'];
@@ -161,6 +179,29 @@
     }
   }
 
+  /**
+   * Loads the attached server's renderable Apps from the backend's
+   * `/api/apps` endpoint. A test `appHtml` override skips the fetch. The
+   * preview region routes a real four-state: loading while the read is in
+   * flight, empty when the server registers no ui:// App, error (with a
+   * working retry) when discovery fails, ready once an App is rendered.
+   */
+  async function loadApps(): Promise<void> {
+    if (appHtml !== '') {
+      appsState = 'ready';
+      return;
+    }
+    appsState = 'loading';
+    appsError = '';
+    try {
+      apps = await fetchApps(base);
+      appsState = apps.length > 0 ? 'ready' : 'empty';
+    } catch (err) {
+      appsError = err instanceof Error ? err.message : 'App discovery failed';
+      appsState = 'error';
+    }
+  }
+
   /** Applies a fixture from the switcher — feeds the App synthetic content. */
   function applyFixture(fixture: Fixture, _contract: ToolContract): void {
     activeFixture = {
@@ -182,7 +223,7 @@
       serverInfo = { name: 'disconnected', version: '', transport: '' };
     }
     startStream();
-    await Promise.all([loadRpcLog(), loadVerdicts(), loadContracts()]);
+    await Promise.all([loadRpcLog(), loadVerdicts(), loadContracts(), loadApps()]);
   });
 
   onDestroy(() => stream?.close());
@@ -285,15 +326,24 @@
     </ConnectionFooter>
   {/snippet}
 
-  <div class="preview-region">
-    {#if appHtml}
+  <div class="preview-region" data-state={appsState} data-testid="preview-state">
+    {#if previewHtml !== ''}
       <AppFrame
-        html={appHtml}
-        appName={serverInfo?.name}
+        html={previewHtml}
+        appName={previewName}
         onRpc={onHostRpc}
         hostContext={emulatedHostContext}
         hostCapabilities={emulatedHostCapabilities}
         fixtureResult={activeFixture}
+      />
+    {:else if appsState === 'loading'}
+      <LoadingState message="Reading the attached server's ui:// App resources…" />
+    {:else if appsState === 'error'}
+      <ErrorState
+        title="Could not load the server's Apps"
+        description={appsError ||
+          'The inspector could not read the attached server. Retry.'}
+        onretry={loadApps}
       />
     {:else}
       <EmptyState
@@ -310,7 +360,7 @@
     min-height: 0;
   }
   .header-meta {
-    font-size: var(--dy-font-size-sm, 0.875rem);
-    color: var(--dy-color-text-muted, #71717a);
+    font-size: var(--dy-text-sm);
+    color: var(--dy-color-ink-soft);
   }
 </style>

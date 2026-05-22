@@ -103,3 +103,54 @@ export async function fetchContracts(
   }
   return parseContracts(await resp.json());
 }
+
+/** One MCP App the inspector can render, from `GET /api/apps`. */
+export interface AppPreview {
+  /** The App's ui:// resource URI. */
+  uri: string;
+  /** The App's display name. */
+  name: string;
+  /** The App's HTML document — the App-frame's iframe srcdoc. */
+  html: string;
+}
+
+/**
+ * Fetches the attached server's renderable MCP Apps from `GET /api/apps`. The
+ * backend obtains each App's HTML by a read-only `resources/read` of the
+ * server's ui:// resources (RFC §12 — the inspector renders the server's
+ * Apps). A detached inspector yields an empty list and the App-frame renders
+ * its "No App attached" empty state; an unreachable server is a thrown error
+ * the App-frame surfaces as its error state.
+ */
+export async function fetchApps(
+  base = '',
+  fetchImpl: typeof fetch = fetch,
+): Promise<AppPreview[]> {
+  const resp = await fetchImpl(`${base}/api/apps`);
+  if (!resp.ok) {
+    let detail = `inspector: /api/apps returned ${resp.status}`;
+    try {
+      const body: unknown = await resp.json();
+      if (
+        typeof body === 'object' &&
+        body !== null &&
+        typeof (body as { error?: unknown }).error === 'string'
+      ) {
+        detail = (body as { error: string }).error;
+      }
+    } catch {
+      // A non-JSON error body — keep the status-code detail.
+    }
+    throw new Error(detail);
+  }
+  const data: unknown = await resp.json();
+  if (!Array.isArray(data)) return [];
+  return data
+    .filter((d): d is Record<string, unknown> => typeof d === 'object' && d !== null)
+    .map((d) => ({
+      uri: typeof d.uri === 'string' ? d.uri : '',
+      name: typeof d.name === 'string' ? d.name : '',
+      html: typeof d.html === 'string' ? d.html : '',
+    }))
+    .filter((a) => a.html !== '');
+}

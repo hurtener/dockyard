@@ -88,6 +88,32 @@ else
   skip "web/inspector App not built"
 fi
 
+# 6b. The App-preview surface has a production entry point (remediation R1): the
+#     backend serves the server's ui:// App HTML over `/api/apps`, and the
+#     frontend loads a real App from it (RFC §12 line 711 — the inspector
+#     renders the server's Apps). A depth audit found the AppFrame chain was
+#     unreachable in the shipped inspector.
+if [ -f internal/inspector/appsource.go ]; then
+  if grep -q "AppsFromServer" internal/inspector/appsource.go \
+     && grep -q "ReadResource" internal/inspector/appsource.go \
+     && grep -q '/api/apps' internal/inspector/assets.go; then
+    ok "the inspector backend serves the server's Apps over /api/apps (R1)"
+  else
+    fail "internal/inspector App-preview backend incomplete (R1 Blocker 2)"
+  fi
+else
+  skip "internal/inspector App-preview backend not built"
+fi
+if [ -f web/inspector/src/App.svelte ]; then
+  if grep -q "fetchApps" web/inspector/src/App.svelte; then
+    ok "web/inspector App.svelte loads a real App from /api/apps (R1)"
+  else
+    fail "web/inspector App.svelte has no production App-load path (R1 Blocker 2)"
+  fi
+else
+  skip "web/inspector App not built"
+fi
+
 # 7. The web/inspector frontend gate passes (type-check + unit tests + coverage).
 if [ -f web/inspector/package.json ]; then
   if ! command -v npm >/dev/null 2>&1; then
