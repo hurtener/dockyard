@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 )
@@ -14,8 +12,18 @@ import (
 const migrationNamespace = "__store_migrations__"
 
 // Migration is one forward-only schema or data step. Migrations are
-// append-only: once a Migration has merged its Up function is never edited
-// (CLAUDE.md §9). The runner detects a reorder/removal and refuses to proceed.
+// append-only and forward-only: the runner detects a reorder or removal of an
+// already-applied migration and refuses to proceed (ErrMigrationOutOfOrder).
+//
+// "Never edit a migration's Up body after it merges" (CLAUDE.md §9) is a
+// REVIEW-ENFORCED rule, NOT a runtime-enforced one — and deliberately so. A
+// Migration's effect is a Go func (Up), and a func value cannot be reliably
+// content-hashed: Go offers no stable hash of a closure's body, and two
+// closures over different source share an entry point. The runner therefore
+// cannot detect an edit to an Up body that keeps the same ID and ordinal. It
+// does not pretend to: it enforces ordering and non-removal at runtime, and the
+// no-post-merge-edit rule is enforced in code review and CI diff (D-111, which
+// supersedes D-027's runtime-enforcement claim).
 type Migration struct {
 	// ID uniquely identifies the migration and fixes its order. Use a
 	// zero-padded numeric prefix, e.g. "0001_init", "0002_add_obs".
@@ -25,14 +33,6 @@ type Migration struct {
 	// idempotent-safe in the sense that it only runs once per store, but it
 	// need not itself guard against re-runs — the runner records completion.
 	Up func(ctx context.Context, tx Tx) error
-}
-
-// fingerprint is a content hash of a migration, used to detect post-merge
-// reordering. It hashes the migration's ordinal position and ID; combined with
-// the recorded sequence-prefix check this catches reordering and removal.
-func (m Migration) fingerprint(ordinal int) string {
-	h := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s", ordinal, m.ID)))
-	return hex.EncodeToString(h[:])
 }
 
 // MigrationSet is an explicit, caller-owned, ordered collection of migrations
@@ -122,10 +122,15 @@ func (s *MigrationSet) list() []Migration {
 	return s.migrations
 }
 
-// appliedRecord is the JSON value stored per applied migration.
+// appliedRecord is the JSON value stored per applied migration. It records the
+// ordinal position the migration was applied at, so the runner can detect a
+// post-merge reorder. It deliberately stores no content hash of the migration's
+// Up function: a Go func cannot be reliably content-hashed (see [Migration]),
+// so a per-migration fingerprint could never detect an edited Up body and would
+// be a false guarantee. Detecting an edited Up body is a review-enforced rule
+// (D-111).
 type appliedRecord struct {
-	Ordinal     int    `json:"ordinal"`
-	Fingerprint string `json:"fingerprint"`
+	Ordinal int `json:"ordinal"`
 }
 
 // RunMigrations applies every migration of set not yet recorded in s, inside
@@ -133,11 +138,14 @@ type appliedRecord struct {
 // method delegates to, so migration semantics are identical across drivers
 // (CLAUDE.md §9). A nil set is a valid no-op. It is forward-only and idempotent:
 //
-//   - A migration already recorded with a matching fingerprint is skipped.
-//   - A recorded migration whose fingerprint no longer matches the registered
-//     one yields ErrMigrationMutated (a migration was reordered after merge).
-//   - A registered sequence that does not extend the applied sequence as a
-//     prefix yields ErrMigrationOutOfOrder.
+//   - A migration already recorded at its current ordinal is skipped.
+//   - A recorded migration now registered at a different ordinal, or an applied
+//     migration no longer registered at all, yields ErrMigrationOutOfOrder — a
+//     migration was reordered or removed after merge.
+//
+// It does NOT detect an edit to a migration's Up body that keeps the same ID
+// and ordinal: a Go func cannot be content-hashed (see [Migration]), so that
+// rule is review-enforced, not runtime-enforced (D-111).
 func RunMigrations(ctx context.Context, s Store, set *MigrationSet) error {
 	regs := set.list()
 
@@ -171,9 +179,6 @@ func RunMigrations(ctx context.Context, s Store, set *MigrationSet) error {
 			return fmt.Errorf("%w: migration %q applied at ordinal %d, now at %d",
 				ErrMigrationOutOfOrder, m.ID, rec.Ordinal, ordinal)
 		}
-		if rec.Fingerprint != m.fingerprint(ordinal) {
-			return fmt.Errorf("%w: migration %q", ErrMigrationMutated, m.ID)
-		}
 	}
 	// Any applied migration absent from the registered set means a migration
 	// was removed — also forbidden.
@@ -197,7 +202,7 @@ func RunMigrations(ctx context.Context, s Store, set *MigrationSet) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rec := appliedRecord{Ordinal: ordinal, Fingerprint: m.fingerprint(ordinal)}
+		rec := appliedRecord{Ordinal: ordinal}
 		recBytes, err := json.Marshal(rec)
 		if err != nil {
 			return fmt.Errorf("store: encode migration record %q: %w", m.ID, err)

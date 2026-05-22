@@ -35,9 +35,10 @@ type Store interface {
 	// Migrate applies every migration of set that has not yet been applied, in
 	// the set's order. Migrations are forward-only and idempotent: a clean run
 	// and any later re-run are both safe and leave identical schema state. A
-	// nil set is a valid no-op. Migrate returns ErrMigrationMutated or
-	// ErrMigrationOutOfOrder if the set diverges from what was previously
-	// applied.
+	// nil set is a valid no-op. Migrate returns ErrMigrationOutOfOrder if the
+	// set diverges from what was previously applied — an applied migration was
+	// reordered or removed. (An in-place edit to a migration's Up body is also
+	// forbidden but cannot be detected at runtime — D-111.)
 	//
 	// set is supplied explicitly — not read from a process global — so two
 	// stores can migrate concurrently from independent sets with no shared

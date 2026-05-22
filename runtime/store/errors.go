@@ -16,14 +16,15 @@ var (
 	// ErrClosed is returned by any operation on a Store after Close.
 	ErrClosed = errors.New("store: store is closed")
 
-	// ErrMigrationMutated is returned by Migrate when a previously-applied
-	// migration's recorded identity no longer matches the registered one — a
-	// migration was edited after it merged, which is forbidden (AGENTS.md §9).
-	ErrMigrationMutated = errors.New("store: applied migration was mutated")
-
 	// ErrMigrationOutOfOrder is returned by Migrate when the registered
 	// migration sequence does not extend the already-applied sequence as a
-	// prefix — migrations are append-only and forward-only.
+	// prefix — an applied migration was reordered or removed. Migrations are
+	// append-only and forward-only.
+	//
+	// Note: editing a migration's Up body in place (same ID, same ordinal) is
+	// also forbidden (CLAUDE.md §9) but is NOT detected here — a Go func cannot
+	// be content-hashed, so that rule is review-enforced, not runtime-enforced
+	// (D-111).
 	ErrMigrationOutOfOrder = errors.New("store: migration registered out of order")
 
 	// ErrReadOnly is returned by Tx.Put and Tx.Delete when they are called on
