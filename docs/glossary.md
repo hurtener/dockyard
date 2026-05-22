@@ -15,6 +15,13 @@ delegates the protocol weight to the app runtime. RFC §3. D-020.
 
 ## B
 
+**Build blocker** — a `dockyard validate` diagnostic class severe enough to fail
+the build: an invalid manifest or schema, a missing or mismatched `ui://`
+resource, an invalid MIME, an Apps/Tasks construct that violates the vendored
+spec, stale generated contracts, or a missing required UI state. A `validate`
+run carrying any build blocker exits non-zero. The complement is a *warning* —
+reported but non-fatal. RFC §9.4. D-082.
+
 **Bridge shell library** — the Svelte/TypeScript library (`web/bridge/`) vendored
 into every Dockyard app. It implements the *View half* of the `ui/` `postMessage`
 JSON-RPC dialect — the side that runs inside the App's sandboxed iframe — so app
@@ -66,6 +73,19 @@ struct, not inline schema. Resolved to a JSON Schema through the manifest's
 `ContractResolver` seam (the codegen pipeline). RFC §4.2, §6.1. D-037.
 
 ## D
+
+**`dockyard generate`** — the contract-first codegen CLI verb (Phase 18). It
+runs the Design A pipeline (RFC §6.2) over a project: it regenerates the
+per-contract JSON Schema files and the TypeScript contract types from the typed
+Go contract structs, which are the single source of truth (P1). `generate` is
+idempotent — a rerun with no contract change is a byte-identical no-op. RFC §6,
+§9.1. D-081.
+
+**`dockyard validate`** — the quality-gate CLI verb (Phase 18). It runs the
+RFC §9.4 checks — manifest, schemas, tool↔UI mappings, MIME, spec compliance, UI
+states, stale-codegen drift — and exits non-zero on any *build blocker*. It
+wraps the reusable `internal/validate` engine, the same gate `dockyard build`
+and `dockyard test` consume. RFC §9.4, §9.1. D-082, D-083.
 
 **Design token** — a named, single-source visual constant — colour, spacing,
 typography, radius, or elevation — shipped by Phase 10a as a `--dy-*` CSS custom
@@ -132,6 +152,15 @@ binary via `//go:embed all:dist`. One `embed.FS` backs both the `ui://` MCP
 resource handler and (Phase 22) the inspector's HTTP preview — there is never a
 second copy of the UI assets. Surfaced at runtime as an `apps.Bundle`. RFC §14.
 D-057.
+
+**Ephemeral generator** — the small Go `main` `dockyard generate` templates into
+a temp directory inside a project, `go run`s, and deletes, to produce the
+contracts' JSON Schema files. It exists because the schema engine reflects on
+real Go types the `dockyard` binary cannot see — the project's contract structs
+live in a different module — and `internal/codegen` is not importable from a
+scaffolded project. The ephemeral generator imports only the project's own
+contracts package and the public `runtime/tool` API, so it compiles inside the
+project's module. RFC §6.2. D-081.
 
 **Embedded-struct flattening** — the `internal/codegen` step that inlines an
 embedded (anonymous) struct's fields into the embedding interface's generated
