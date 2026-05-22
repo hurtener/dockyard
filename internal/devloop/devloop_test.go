@@ -305,9 +305,13 @@ func TestRunConcurrentChangesNoDeadlock(t *testing.T) {
 }
 
 // waitFileExists fails the test if path does not appear within a bounded wait.
+// The loop returns the instant the file appears; the ceiling is generous so a
+// CPU-saturated CI run — many -race packages compiling and testing in parallel
+// — cannot starve a supervised child's spawn-and-write past the deadline and
+// produce a spurious failure. A genuine never-appears bug still fails.
 func waitFileExists(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(path); err == nil {
 			return
