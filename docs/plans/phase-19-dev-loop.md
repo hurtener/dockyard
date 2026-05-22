@@ -92,20 +92,20 @@ only the Go server), consistent with RFC §4.1 ("a UI resource is additive").
 
 ## Acceptance criteria
 
-- [ ] `dockyard dev` is a registered cobra verb; `dockyard --help` lists it and
+- [x] `dockyard dev` is a registered cobra verb; `dockyard --help` lists it and
       `dockyard dev --help` describes it.
-- [ ] Editing a contract source file regenerates the contract types live (the
+- [x] Editing a contract source file regenerates the contract types live (the
       `internal/generate` API is invoked in-process on a contract-file event).
-- [ ] The Go MCP server is restarted on a `.go` source change (old process
+- [x] The Go MCP server is restarted on a `.go` source change (old process
       terminated, new process started — no orphan, no port leak).
-- [ ] Svelte HMR works via the supervised Vite dev server (Vite is started and
+- [x] Svelte HMR works via the supervised Vite dev server (Vite is started and
       supervised for a project with a `web/` UI; Dockyard does not reimplement
       HMR).
-- [ ] A project with no `web/` UI degrades gracefully — `dev` supervises only
+- [x] A project with no `web/` UI degrades gracefully — `dev` supervises only
       the Go server, logs that no UI project was found, and does not error.
-- [ ] One `dockyard dev` process, no external dev tool (no `air`/`wgo`/`npx`
+- [x] One `dockyard dev` process, no external dev tool (no `air`/`wgo`/`npx`
       shell-out for the watch loop; `fsnotify` is embedded).
-- [ ] `context` cancellation tears down the whole process tree cleanly — proven
+- [x] `context` cancellation tears down the whole process tree cleanly — proven
       under `-race` with no goroutine leak and no orphan child process.
 
 ## Files added or changed
@@ -237,14 +237,14 @@ A check against unbuilt surface `skip()`s, never `fail()`s.
 
 ## Pre-merge checklist
 
-- [ ] `make drift-audit` passes
-- [ ] `make check-mirror` passes
-- [ ] `make preflight` passes
-- [ ] `go test -race ./...` and `golangci-lint run` clean
-- [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
-- [ ] Coverage on touched packages ≥ stated target
-- [ ] New CLI command / manifest field / public API has a smoke check in this PR
-- [ ] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
-- [ ] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
-- [ ] New vocabulary added to `docs/glossary.md`
-- [ ] New / changed architectural decision filed in `docs/decisions.md`
+- [x] `make drift-audit` passes
+- [x] `make check-mirror` passes
+- [x] `make preflight` passes
+- [x] `go test -race ./...` and `golangci-lint run` clean
+- [x] All cross-references (`RFC §X.Y`, `brief NN`) resolve
+- [x] Coverage on touched packages ≥ stated target
+- [x] New CLI command / manifest field / public API has a smoke check in this PR
+- [x] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
+- [x] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
+- [x] New vocabulary added to `docs/glossary.md`
+- [x] New / changed architectural decision filed in `docs/decisions.md`

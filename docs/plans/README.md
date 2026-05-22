@@ -46,9 +46,9 @@ done-definition, dependency declarations, and coverage discipline.
 | 15 | `obs/v1` event model + headless emitter       | runtime/obs            | §11.1, §11.2     | 05        | 07            | 85%  | Shipped |
 | 16 | `obs/v1` transports — SSE + OTel + log bridge | runtime/obs            | §11.3            | 05, 01    | 15            | 80%  | Shipped |
 | 17 | `dockyard` CLI skeleton + `new`               | internal/cli, scaffold | §9, §10          | 04, 06    | 06            | 70%  | Shipped |
-| 18 | `dockyard generate` + `dockyard validate`     | internal/cli, codegen  | §6, §9.4         | 06, 01, 02| 17, 05, 09, 13| 75%  | Pending |
-| 19 | `dockyard dev` — fsnotify orchestrator        | internal/devloop       | §9.2             | 06, 04    | 17, 18        | 75%  | Pending |
-| 20 | `dockyard build` + `run` + `install`          | internal/cli           | §14              | 06, 01    | 17, 10        | 75%  | Pending |
+| 18 | `dockyard generate` + `dockyard validate`     | internal/cli, codegen  | §6, §9.4         | 06, 01, 02| 17, 05, 09, 13| 75%  | Shipped |
+| 19 | `dockyard dev` — fsnotify orchestrator        | internal/devloop       | §9.2             | 06, 04    | 17, 18        | 75%  | Shipped |
+| 20 | `dockyard build` + `run` + `install`          | internal/cli           | §14              | 06, 01    | 17, 10        | 75%  | Shipped |
 | 21 | `dockyard test` — contract + compliance gate  | internal/cli           | §9.1, §9.4       | 04, 01    | 18            | 75%  | Shipped |
 | 22 | Inspector core — bridge host-half + obs view  | internal/inspector     | §12              | 05, 04, 01| 09, 10a, 11, 16| 80% | Pending |
 | 23 | Inspector advanced + `dockyard inspect`       | internal/inspector     | §12              | 05, 04    | 22, 14, 21    | 80%  | Pending |
