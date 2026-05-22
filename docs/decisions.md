@@ -2176,3 +2176,69 @@ struct in `internal/installpkg`. This is a filesystem-path derivation, not a
 capability matrix — CLAUDE.md §6 forbids a hardcoded *capability* matrix; a
 two-entry path-derivation struct is the correct, non-sprawling shape here, and
 isolating it means a host's config-location change is one localized edit.
+
+---
+
+## D-089 — `dockyard test` is a reusable gate engine composing the existing seams
+
+**Status:** Settled (Phase 21).
+
+`dockyard test` runs five test categories — `go test`, the contract-first
+assertions, the fixture/golden snapshots, MCP spec compliance, and
+capability-degradation tests — as one command (RFC §9.1, §9.4). The
+orchestration lives in `internal/testgate` as a reusable `Run(Options)
+(*Report, error)` engine; the cobra `test` command is a thin wrapper over it.
+
+This mirrors D-082 (`dockyard validate`) and D-084 (`dockyard dev`): the gate is
+testable and `-race`-provable as a package, the integration test drives the
+exact same `Run` the CLI does, and a later phase that wants to embed the gate
+(a CI surface, a richer subcommand) consumes the package, not the verb.
+
+`testgate.Run` does not reimplement any check. It **composes the existing
+seams**: the contract category regenerates via `internal/generate.Plan` and
+diffs with `internal/codegen.CheckStale`/`CrossCheck`; the spec-compliance
+category calls `internal/validate.Run` and reports its `CheckSpec` diagnostics;
+the capability category resolves every App through the `runtime/apps`
+host-profile registry. Each category yields a `Result` with an explicit
+`Gating` flag — every V1 category is gating (RFC §9.4 build blockers), and the
+flag keeps the exit-code logic open to a future informational category.
+
+The capability-degradation category never consults a per-host capability matrix
+(CLAUDE.md §6): it exercises the project across the *registered host profiles*
+(the interface+factory+driver seam) and the Apps-negotiated/not-negotiated
+axis, asserting a UI-bearing tool always has a model-facing fallback.
+
+---
+
+## D-090 — The scaffolded server selects its transport from `DOCKYARD_TRANSPORT` — the Phase 20↔17 wiring-gap fix
+
+**Status:** Settled (Phase 21).
+
+Phase 17's scaffold generated a `main.go` that called `srv.ServeStdio`
+unconditionally. Phase 20's `dockyard run --transport http` launches the
+scaffolded server child and needs a way to tell it which transport to bring up
+— but a stdio-only `main.go` would ignore that instruction, so
+`dockyard run --transport http` would silently serve stdio. That is a real
+wiring gap between the two phases.
+
+**Decision.** The scaffolded server's `main.go` reads the `DOCKYARD_TRANSPORT`
+environment variable and serves the selected transport: `stdio` (the default
+when the variable is unset — the local single-user mode) or `http` (the
+streamable-HTTP service mode, served via `runtime/server.HTTPHandler` with the
+secure-by-default HTTP posture). An unrecognised value is a clean, explained
+failure, never a silent fallback. The HTTP listen address defaults to
+`127.0.0.1:8080` and is overridable with `DOCKYARD_HTTP_ADDR`.
+
+`DOCKYARD_TRANSPORT` is the **contract** Phase 20's `dockyard run` honours: its
+`run --transport <t>` sets `DOCKYARD_TRANSPORT=<t>` and `DOCKYARD_HTTP_ADDR` on
+the server child, and the scaffold reads both. Phase 21 owns this fix — folded
+in deliberately because it is self-contained in the Phase 17 scaffold and the
+environment-variable contract. This branch was authored before Phase 20 landed
+and was later rebased onto it; the contract was then verified directly against
+`internal/runpkg`. One mismatch was found and fixed in the same change:
+`runpkg`'s `defaultHTTPAddr` was `:8080` (all interfaces), which would have
+silently widened the scaffold's secure `127.0.0.1:8080` localhost default for a
+no-`--addr` HTTP run — `runpkg` now defaults to `127.0.0.1:8080`, matching the
+scaffold (CLAUDE.md §17 cross-phase fix). A scaffold integration test builds the
+generated server and proves it completes a real MCP initialize over HTTP under
+`DOCKYARD_TRANSPORT=http`, closing the seam end to end.

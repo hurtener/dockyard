@@ -52,6 +52,13 @@ inspector. RFC §7.2, §7.3. D-016, D-059, D-060, D-061.
 advertises the extensions and capabilities it supports. Dockyard reads this at run
 time and adapts; it never hardcodes a per-host capability matrix. RFC §7.5. D-011.
 
+**Capability-degradation test** — a `dockyard test` category (Phase 21) that
+exercises a project across host capability sets — Apps negotiated or not, a
+display mode supported or not — and asserts the project degrades gracefully:
+never a crash, never a hardcoded host matrix. It resolves every App through the
+registered `runtime/apps` host profiles and checks every UI-bearing tool has a
+model-facing fallback. RFC §7.5, §12. D-089.
+
 **Component inventory** — the shared set of Svelte components in `web/ui/` that
 every Dockyard frontend surface composes rather than re-implementing. Phase 10a
 delivers the V1 inventory; a genuinely new shared component lands in `web/ui/`
@@ -112,6 +119,20 @@ per-contract JSON Schema files and the TypeScript contract types from the typed
 Go contract structs, which are the single source of truth (P1). `generate` is
 idempotent — a rerun with no contract change is a byte-identical no-op. RFC §6,
 §9.1. D-081.
+
+**`dockyard test`** — the contract + compliance gate CLI verb (Phase 21). It
+runs, as one command, every test category Dockyard's quality bar is built on —
+the project's `go test`, the contract-first assertions, the fixture/golden
+snapshots, MCP spec compliance against the vendored specs, and
+capability-degradation tests — and exits non-zero on a regression in any gating
+category. A thin wrapper over the reusable `internal/testgate` engine. RFC §9.4,
+§9.1. D-089.
+
+**`DOCKYARD_TRANSPORT`** — the environment variable a scaffolded Dockyard server
+reads to select its transport: `stdio` (the default when unset — the local
+single-user mode) or `http` (the streamable-HTTP service mode). It is the
+contract `dockyard run --transport` sets on the server child so a chosen
+transport is actually honoured. Phase 21. D-090.
 
 **`dockyard validate`** — the quality-gate CLI verb (Phase 18). It runs the
 RFC §9.4 checks — manifest, schemas, tool↔UI mappings, MIME, spec compliance, UI
@@ -546,6 +567,12 @@ a build blocker, never a warning. RFC §6.2. D-034.
 request: instead of blocking for the final result, the receiver returns a task
 the requestor polls and resumes. A task carries an ID, a lifecycle status, and
 the underlying request's eventual result (RFC §8.1, brief 02 §2.1).
+
+**Test gate** — the `dockyard test` command and its `internal/testgate` engine:
+the contract + compliance gate that runs five test categories — `go test`, the
+contract-first assertions, the fixture/golden snapshots, MCP spec compliance,
+and capability-degradation tests — against a Dockyard project as one command,
+exiting non-zero on a regression in any gating category. RFC §9.4. D-089.
 
 **Task lifecycle** — the five-status state machine a task moves through:
 `working` (mandatory initial), `input_required`, and the terminal `completed` /
