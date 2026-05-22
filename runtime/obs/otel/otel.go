@@ -103,6 +103,12 @@ func init() {
 // span-id rather than fresh OTel-generated IDs: a Dockyard span therefore nests
 // natively under a calling Harbor agent's execute_tool span (RFC §11.2).
 //
+// When an obs/v1 event carries a ParentSpanID — e.g. a handler `log` event that
+// is a true child of its enclosing `tool.call` (the obs/v1 trace-correlation,
+// D-079) — the emitter additionally seats a remote parent span context on the
+// start context so the exported OTel span nests under that parent rather than
+// being a trace root (D-114).
+//
 // The otel.OTelEmitter "stutter" is intentional: OTelEmitter is the RFC
 // §11.3-binding name for this adapter — it appears verbatim in the RFC and the
 // master plan — so it is the intended public vocabulary, not an accident.
@@ -168,7 +174,7 @@ func (o *OTelEmitter) Emit(ctx context.Context, e obs.Event) {
 	if !ok {
 		return
 	}
-	startCtx := o.idGen.withIDs(ctx, ids)
+	startCtx := o.startContext(ctx, ids)
 	_, span := o.tracer.Start(startCtx, spanName(e),
 		oteltrace.WithSpanKind(oteltrace.SpanKindServer),
 	)
@@ -188,7 +194,7 @@ func (o *OTelEmitter) emitLogEvent(ctx context.Context, e obs.Event) {
 	if !ok {
 		return
 	}
-	startCtx := o.idGen.withIDs(ctx, ids)
+	startCtx := o.startContext(ctx, ids)
 	_, span := o.tracer.Start(startCtx, spanName(e),
 		oteltrace.WithSpanKind(oteltrace.SpanKindInternal),
 	)
@@ -209,9 +215,12 @@ func (o *OTelEmitter) emitLogEvent(ctx context.Context, e obs.Event) {
 	span.End()
 }
 
-// obsIDs parses an obs.Event's W3C trace-id and span-id into OTel ID types so
-// the exported span carries the event's own identity. It reports false if the
-// event's IDs are not well-formed W3C IDs.
+// obsIDs parses an obs.Event's W3C trace-id, span-id, and (when present)
+// parent-span-id into OTel ID types so the exported span carries the event's
+// own identity and nests under its parent. It reports false if the event's
+// trace-id or span-id is not a well-formed W3C ID. A ParentSpanID that is
+// absent or malformed is treated as "no parent" — the span is exported as a
+// trace root — rather than failing the whole event.
 func obsIDs(e obs.Event) (otelIDs, bool) {
 	tid, err := oteltrace.TraceIDFromHex(e.TraceID)
 	if err != nil {
@@ -221,7 +230,36 @@ func obsIDs(e obs.Event) (otelIDs, bool) {
 	if err != nil {
 		return otelIDs{}, false
 	}
-	return otelIDs{trace: tid, span: sid}, true
+	ids := otelIDs{trace: tid, span: sid}
+	if e.ParentSpanID != "" {
+		// A well-formed parent span-id makes the exported span a child of that
+		// span — preserving the obs/v1 trace-correlation (D-079) on OTel export
+		// (D-114). A malformed value is ignored: better a root span than a
+		// dropped event.
+		if pid, perr := oteltrace.SpanIDFromHex(e.ParentSpanID); perr == nil {
+			ids.parent = pid
+		}
+	}
+	return ids, true
+}
+
+// startContext builds the context the OTelEmitter passes to tracer.Start. It
+// always stashes the event's own IDs for the IDGenerator; when the event named
+// a parent span it additionally seats a remote parent span context on the
+// context, so tracer.Start parents the new span under it. Without the parent
+// step every exported span would be a trace root (the Finding-D bug, D-114).
+func (o *OTelEmitter) startContext(ctx context.Context, ids otelIDs) context.Context {
+	ctx = o.idGen.withIDs(ctx, ids)
+	if ids.hasParent() {
+		parentSC := oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
+			TraceID:    ids.trace,
+			SpanID:     ids.parent,
+			TraceFlags: oteltrace.FlagsSampled,
+			Remote:     true,
+		})
+		ctx = oteltrace.ContextWithRemoteSpanContext(ctx, parentSC)
+	}
+	return ctx
 }
 
 // spanName is the OTel span name for an event — "{mcp.method.name} {target}"
