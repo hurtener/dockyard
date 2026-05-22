@@ -1,0 +1,44 @@
+package main
+
+import (
+	"context"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/hurtener/dockyard/runtime/server"
+	"github.com/hurtener/dockyard/runtime/tool"
+
+	"example.com/golden-server/internal/contracts"
+)
+
+// registerTools declares and registers every tool this server exposes. main
+// calls it once, before serving. Add a tool by writing its handler and one
+// more Register call here.
+func registerTools(srv *server.Server) error {
+	// The 'greet' tool — the example tool 'dockyard new' scaffolds. It is
+	// contract-first (P1, RFC §6): GreetInput and GreetOutput are typed Go
+	// structs in internal/contracts; their JSON Schema is generated, and the
+	// runtime validates an incoming call against it before greet runs.
+	return tool.New[contracts.GreetInput, contracts.GreetOutput]("greet").
+		Describe("Greet a person by name and return the assembled greeting.").
+		Handler(greet).
+		Register(srv)
+}
+
+// greet is the 'greet' tool's handler. It receives the decoded, schema-valid
+// input and returns the typed output split: Text is model-facing, Structured
+// is the typed, UI-facing payload (RFC §6.3).
+func greet(_ context.Context, in contracts.GreetInput) (tool.Result[contracts.GreetOutput], error) {
+	greeting := in.Greeting
+	if strings.TrimSpace(greeting) == "" {
+		greeting = "Hello"
+	}
+	message := greeting + ", " + in.Name + "!"
+	return tool.Result[contracts.GreetOutput]{
+		Text: message,
+		Structured: contracts.GreetOutput{
+			Message: message,
+			Length:  utf8.RuneCountInString(message),
+		},
+	}, nil
+}

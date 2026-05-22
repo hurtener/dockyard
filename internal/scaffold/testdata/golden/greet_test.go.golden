@@ -1,0 +1,47 @@
+package main
+
+import (
+	"context"
+	"testing"
+
+	"example.com/golden-server/internal/contracts"
+)
+
+// TestGreet is the example tool's contract test. It exercises the handler
+// directly — no transport, no server — which is the fast inner loop for a
+// contract-first tool.
+func TestGreet(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      contracts.GreetInput
+		wantMsg string
+	}{
+		{
+			name:    "default greeting",
+			in:      contracts.GreetInput{Name: "Ada"},
+			wantMsg: "Hello, Ada!",
+		},
+		{
+			name:    "custom greeting",
+			in:      contracts.GreetInput{Name: "Grace", Greeting: "Hi"},
+			wantMsg: "Hi, Grace!",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := greet(context.Background(), tt.in)
+			if err != nil {
+				t.Fatalf("greet: %v", err)
+			}
+			if res.Structured.Message != tt.wantMsg {
+				t.Errorf("Message = %q, want %q", res.Structured.Message, tt.wantMsg)
+			}
+			if res.Structured.Length != len([]rune(tt.wantMsg)) {
+				t.Errorf("Length = %d, want %d", res.Structured.Length, len([]rune(tt.wantMsg)))
+			}
+			if res.Text != tt.wantMsg {
+				t.Errorf("Text = %q, want %q", res.Text, tt.wantMsg)
+			}
+		})
+	}
+}

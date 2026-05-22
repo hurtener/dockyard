@@ -1,0 +1,234 @@
+package scaffold
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/hurtener/dockyard/internal/codegen"
+)
+
+// ErrInvalidName is the sentinel for a rejected project name. Callers branch
+// with errors.Is(err, ErrInvalidName).
+var ErrInvalidName = errors.New("dockyard/internal/scaffold: invalid project name")
+
+// ErrTargetExists is the sentinel for a non-empty / pre-existing target
+// directory. `dockyard new` never overwrites an existing project.
+var ErrTargetExists = errors.New("dockyard/internal/scaffold: target directory already exists and is not empty")
+
+// nameRE constrains a project name to a short kebab-case token: it becomes the
+// directory name, the manifest `name`, the Go module path tail and the MCP
+// server identity, so it must be a safe identifier on every one of those axes.
+var nameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{1,62}[a-z0-9]$`)
+
+// Options configures one `dockyard new` invocation.
+type Options struct {
+	// Name is the project name — also the directory name, the manifest name,
+	// and the MCP server identity. Required; validated against nameRE.
+	Name string
+	// Dir is the parent directory the project directory is created under.
+	// Empty means the current working directory.
+	Dir string
+	// ModulePath is the Go module path for the scaffolded project's go.mod.
+	// Empty falls back to "example.com/<name>" — a placeholder a developer
+	// renames; the scaffold compiles either way.
+	ModulePath string
+	// DockyardReplace, when non-empty, adds a `replace` directive to the
+	// scaffolded go.mod pointing the Dockyard runtime import at a local
+	// checkout. It is the pre-release workflow: until Dockyard is published to
+	// a module registry, a scaffolded project cannot `go get` it, so the CLI
+	// and the integration test set this to a local Dockyard path. A released
+	// Dockyard leaves it empty and the scaffold depends on the published
+	// module version directly.
+	DockyardReplace string
+}
+
+// modulePath returns the effective Go module path.
+func (o Options) modulePath() string {
+	if o.ModulePath != "" {
+		return o.ModulePath
+	}
+	return "example.com/" + o.Name
+}
+
+// projectDir returns the absolute-or-relative path of the project directory.
+func (o Options) projectDir() string {
+	if o.Dir == "" {
+		return o.Name
+	}
+	return filepath.Join(o.Dir, o.Name)
+}
+
+// Result reports what Generate produced.
+type Result struct {
+	// Dir is the project directory that was created.
+	Dir string
+	// Files is the project-relative path of every file written, sorted.
+	Files []string
+}
+
+// validateName checks a project name and returns a typed error on rejection.
+func validateName(name string) error {
+	if name == "" {
+		return fmt.Errorf("%w: name is empty", ErrInvalidName)
+	}
+	if !nameRE.MatchString(name) {
+		return fmt.Errorf(
+			"%w: %q — a project name is a short kebab-case token: lowercase letters, "+
+				"digits and hyphens, starting with a letter (e.g. my-mcp-server)",
+			ErrInvalidName, name)
+	}
+	return nil
+}
+
+// Generate scaffolds a blank, working MCP server project (RFC §9.1, §10). It
+// validates the name, refuses a non-empty target, builds the file set in
+// memory (so a generation failure leaves nothing half-written), then writes
+// the tree to disk.
+//
+// The returned Result lists every file written. Generate is deterministic: the
+// same Options always yields the same bytes.
+func Generate(opts Options) (Result, error) {
+	if err := validateName(opts.Name); err != nil {
+		return Result{}, err
+	}
+
+	dir := opts.projectDir()
+	if err := checkTarget(dir); err != nil {
+		return Result{}, err
+	}
+
+	files, err := buildFiles(opts)
+	if err != nil {
+		return Result{}, err
+	}
+
+	if err := writeTree(dir, files); err != nil {
+		return Result{}, err
+	}
+
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	return Result{Dir: dir, Files: paths}, nil
+}
+
+// checkTarget rejects a target directory that already exists with content. A
+// missing directory is fine — Generate creates it. An empty directory is fine
+// — scaffolding into an empty dir is a common workflow. A directory with any
+// entry is refused: `dockyard new` never overwrites a project.
+func checkTarget(dir string) error {
+	info, err := os.Stat(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("dockyard/internal/scaffold: stat target %s: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%w: %s exists and is a file", ErrTargetExists, dir)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("dockyard/internal/scaffold: read target %s: %w", dir, err)
+	}
+	if len(entries) > 0 {
+		return fmt.Errorf("%w: %s", ErrTargetExists, dir)
+	}
+	return nil
+}
+
+// buildFiles assembles the full project file set in memory, keyed by
+// project-relative path. The contract artifacts (JSON Schema, TypeScript) are
+// GENERATED here from the Go contract types via internal/codegen — P1: the
+// scaffold ships generated contracts, never hand-written ones.
+func buildFiles(opts Options) (map[string][]byte, error) {
+	schemaFiles, err := generateContractArtifacts()
+	if err != nil {
+		return nil, err
+	}
+
+	files := map[string][]byte{
+		"dockyard.app.yaml":               []byte(renderManifest(opts)),
+		"go.mod":                          []byte(renderGoMod(opts)),
+		"main.go":                         []byte(renderMainGo(opts)),
+		"greet.go":                        []byte(renderGreetTool(opts)),
+		"greet_test.go":                   []byte(renderGreetTest(opts)),
+		"internal/contracts/contracts.go": []byte(contractsGoSource),
+		"README.md":                       []byte(renderReadme(opts)),
+		".gitignore":                      []byte(gitignoreContent),
+	}
+	for path, content := range schemaFiles {
+		files[path] = content
+	}
+	return files, nil
+}
+
+// generateContractArtifacts produces the example tool's generated contract
+// files: the input/output JSON Schemas and the TypeScript types. They are
+// generated from the GreetInput / GreetOutput Go types — the contract-first
+// guarantee made concrete (P1, RFC §6.1).
+func generateContractArtifacts() (map[string][]byte, error) {
+	inSchema, err := codegen.SchemaFor[GreetInput]()
+	if err != nil {
+		return nil, fmt.Errorf("dockyard/internal/scaffold: generate input schema: %w", err)
+	}
+	outSchema, err := codegen.SchemaFor[GreetOutput]()
+	if err != nil {
+		return nil, fmt.Errorf("dockyard/internal/scaffold: generate output schema: %w", err)
+	}
+	inJSON, err := codegen.Marshal(inSchema)
+	if err != nil {
+		return nil, fmt.Errorf("dockyard/internal/scaffold: marshal input schema: %w", err)
+	}
+	outJSON, err := codegen.Marshal(outSchema)
+	if err != nil {
+		return nil, fmt.Errorf("dockyard/internal/scaffold: marshal output schema: %w", err)
+	}
+	ts, err := codegen.TypeScriptForSource(contractsGoSource)
+	if err != nil {
+		return nil, fmt.Errorf("dockyard/internal/scaffold: generate TypeScript: %w", err)
+	}
+	return map[string][]byte{
+		"internal/contracts/greet_input.schema.json":  inJSON,
+		"internal/contracts/greet_output.schema.json": outJSON,
+		"internal/contracts/contracts.ts":             ts,
+	}, nil
+}
+
+// writeTree writes files (keyed by project-relative path) under dir, creating
+// parent directories as needed.
+func writeTree(dir string, files map[string][]byte) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // a project directory is browsable, not a secret
+		return fmt.Errorf("dockyard/internal/scaffold: create %s: %w", dir, err)
+	}
+	for rel, content := range files {
+		full := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil { //nolint:gosec // a project directory is browsable, not a secret
+			return fmt.Errorf("dockyard/internal/scaffold: create dir for %s: %w", rel, err)
+		}
+		if err := os.WriteFile(full, content, 0o644); err != nil { //nolint:gosec // generated source, not a secret
+			return fmt.Errorf("dockyard/internal/scaffold: write %s: %w", rel, err)
+		}
+	}
+	return nil
+}
+
+// titleCase renders a kebab-case project name as a human title:
+// "my-mcp-server" -> "My Mcp Server".
+func titleCase(name string) string {
+	parts := strings.Split(name, "-")
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+	}
+	return strings.Join(parts, " ")
+}
