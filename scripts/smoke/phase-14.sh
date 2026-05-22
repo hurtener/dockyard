@@ -167,4 +167,36 @@ else
   skip "test/integration/phase14_taskstore_test.go not built"
 fi
 
+# 13. The transport mount is genuinely JOINED to runtime/server (R2 — D-108):
+#     Phase 14 shipped the standalone mount but never wired it into the server.
+#     Remediation R2 added the Options.Tasks / WithTasks attachment seam and the
+#     HTTPHandler / ServeStdio mount wiring. This check guards against the seam
+#     regressing back to an isolated, never-connected mount.
+if [ -f runtime/server/server.go ]; then
+  if grep -q 'runtime/tasks' runtime/server/server.go \
+     && grep -q 'Tasks \*tasks.Engine' runtime/server/server.go \
+     && grep -q 'func (s \*Server) WithTasks' runtime/server/server.go \
+     && grep -q 'tasksMount.HTTPMiddleware' runtime/server/http.go \
+     && grep -q 'serveStdioWithTasks' runtime/server/stdio.go; then
+    ok "the Tasks transport mount is joined to runtime/server (HTTP + stdio)"
+  else
+    fail "runtime/server does not wire the Tasks transport mount (R2 regression)"
+  fi
+else
+  skip "runtime/server not built — server-tasks wiring check deferred"
+fi
+
+# 14. The R2 integration test drives tasks/* over the REAL server transport with
+#     a real MCP SDK client — not a hand-written sdkStandIn.
+if [ -f test/integration/r2_tasks_mount_test.go ]; then
+  if grep -q 'mcpsdk.NewClient' test/integration/r2_tasks_mount_test.go \
+     && grep -q 'HTTPHandler' test/integration/r2_tasks_mount_test.go; then
+    ok "the R2 integration test drives tasks/* over a real server + real SDK client"
+  else
+    fail "the R2 integration test does not use a real server + real SDK client"
+  fi
+else
+  skip "test/integration/r2_tasks_mount_test.go not built — R2 E2E check deferred"
+fi
+
 smoke_summary

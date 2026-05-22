@@ -695,6 +695,10 @@ deployment cannot identify requestors.
 JSON-RPC frames into `Engine.Dispatch` ahead of the SDK server (the go-sdk
 rejects unknown methods before middleware) and injects the `capabilities.tasks`
 block into the `initialize` handshake. RFC §8.2's "shim, by necessity"; D-071.
+A `runtime/server` server joins the mount onto its transports by attaching a
+`tasks.Engine` via `server.Options.Tasks` / `Server.WithTasks` — `HTTPHandler`
+wraps the SDK handler with `Mount.HTTPMiddleware` (inside the HTTP security
+boundary) and `ServeStdio` runs the mount's stdio frame pump; D-108–D-110.
 
 **Tool builder** — the `runtime/tool` fluent, typed API an app author uses to
 declare an MCP tool: `tool.New[In, Out](name)` binds the input and output

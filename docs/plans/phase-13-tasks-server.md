@@ -84,7 +84,10 @@ phase leaves the `TaskStore` seam they plug into.
 - Auth-context binding and `tasks/list` withholding when unauthenticated
   (Phase 14 — the seam carries an `AuthContext` so Phase 14 enforces it).
 - Mounting the engine onto the live SDK transport dispatch (Phase 14 wires the
-  transport seam; Phase 13 ships the engine and its `Dispatch`).
+  transport seam; Phase 13 ships the engine and its `Dispatch`). *Phase 14
+  shipped the standalone `runtime/tasks.Mount` but did not join it to
+  `runtime/server`; remediation **R2** completed that wiring — see D-108–D-110
+  and the Phase 14 plan's remediation note.*
 - `dockyard.app.yaml` `task_support` manifest field (Phase 06 owns the manifest;
   surfaced end-to-end in a later CLI phase).
 

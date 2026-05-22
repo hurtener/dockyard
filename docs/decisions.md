@@ -2635,6 +2635,103 @@ still works.
 
 ---
 
+## D-108 — The Tasks transport mount is joined to `runtime/server` via an `Options.Tasks` engine attachment
+
+**Status:** Settled (remediation R2 — pre-Wave-9 depth audit).
+
+A depth audit found a wiring gap: the MCP Tasks transport mount
+(`runtime/tasks.Mount` — `NewMount`, `HTTPMiddleware`, `ServeStdioFrames`)
+shipped in Phase 14 and was tested in isolation, but nothing joined it to the
+real server transport. `runtime/server` carried zero `tasks` references;
+`cmd/`, `internal/cli`, and `internal/runpkg` never constructed a
+`tasks.Mount`. So a real MCP client could not drive `tasks/*` over a real
+Dockyard server — the Phase 14 acceptance criterion "a real MCP client drives
+`tasks/*` over a real transport" was met only by an integration test using a
+hand-written `sdkStandIn` HTTP handler, not by the product.
+
+R2 closes the seam with an engine-attachment option on `runtime/server`,
+matching the existing server-options idiom (the `obs` emitter attaches via
+`Options.Obs`): `Options.Tasks *tasks.Engine` (plus an imperative
+`WithTasks(engine, authContext)` for a caller that builds the engine after the
+server) attaches a Tasks engine; `New`/`WithTasks` build the `tasks.Mount`
+once and store it unexported on the `Server`. When a Tasks engine is attached
+the streamable-HTTP handler is wrapped with `Mount.HTTPMiddleware` and the
+stdio transport path runs the mount's frame pump (D-109); when no engine is
+attached the server is byte-for-byte a plain MCP server with no `tasks/*`
+interception and no added overhead. `Options.TasksAuthContext` carries the
+HTTP requestor-identity seam (RFC §8.5); `TasksEnabled()` exposes the wiring
+for a transport entrypoint and a smoke check without reaching into server
+internals. The mount itself is unchanged — R2 *connects* the existing shim
+(RFC §8.2), it does not reinvent it. P3 is preserved: `runtime/server` depends
+only on the `tasks` package's exported `Engine`/`Mount` surface; no raw MCP
+extension wire type crosses out of `internal/protocolcodec`.
+
+**Scope of R2 and an owned follow-up.** R2's non-negotiable deliverable — a
+real MCP client genuinely drives `tasks/*` over a real `runtime/server`
+transport — is met: the `runtime/server` seam is the core fix, proven by
+`test/integration/r2_tasks_mount_test.go`. R2 deliberately does **not** make
+`dockyard run` / the scaffolded `main.go` *construct and attach* a
+`tasks.Engine` automatically: the scaffold currently declares its example tool
+`task_support: forbidden`, builds no engine, and constructs no `Store` in
+`main.go`; auto-attaching one needs per-tool task-support detection from the
+manifest, engine + `Store` construction in the generated entrypoint, and an
+identifiability decision per transport — a substantial scaffold/CLI change with
+its own surface and tests, larger than the seam fix. That work is a recorded,
+owned follow-up: **a later CLI/scaffold phase wires `dockyard run` and the
+scaffolded `main.go` to attach a `tasks.Engine` when the project declares
+task-supporting tools.** Until then, an app author reaches the wiring directly
+through `server.Options.Tasks` / `Server.WithTasks` in their own `main.go`.
+
+---
+
+## D-109 — The stdio Tasks mount runs the SDK server on a forwarded in-process pipe pair
+
+**Status:** Settled (remediation R2).
+
+The streamable-HTTP transport has a natural middleware seam — `HTTPHandler`
+wraps the SDK handler with `Mount.HTTPMiddleware`. The stdio transport has
+none: the go-sdk's `StdioTransport` reads `os.Stdin` and writes `os.Stdout`
+itself, and the go-sdk rejects an unknown JSON-RPC method (every `tasks/*`
+method) before any interception point. So `Server.ServeStdio`, when a Tasks
+engine is attached, runs `serveStdioWithTasks`: the SDK server is run on an
+`mcp.IOTransport` over an in-process pipe pair, and the mount's
+`ServeStdioFrames` pump owns the real `os.Stdin`/`os.Stdout`. A `tasks/*`
+request frame on real stdin is answered by the engine and written to real
+stdout; every other frame is forwarded into the SDK's input pipe, and a
+dedicated copy goroutine relays the SDK's output pipe verbatim to real stdout —
+so SDK-initiated frames (notifications, server→client requests) are never
+dropped. The mount pump's `forward` callback therefore writes the frame and
+returns `nil` (no synchronous response); the response arrives asynchronously on
+the SDK output pipe. Teardown closes the pipes and joins both goroutines;
+pipe-closed / EOF / context-cancelled errors from the SDK serve and the pump
+are recognised as benign shutdown, not faults. With no Tasks engine attached,
+`ServeStdio` is unchanged — the SDK serves real stdio directly.
+
+---
+
+## D-110 — The HTTP Tasks mount sits inside the explicit HTTPSecurity boundary
+
+**Status:** Settled (remediation R2).
+
+When `HTTPHandler` wraps the SDK handler with `Mount.HTTPMiddleware`, the
+ordering is deliberate: the mount is wrapped *inside* the explicit HTTPSecurity
+middleware chain. After R3's Content-Type check landed in the same chain
+(D-112), the final handler stack is
+`CrossOriginProtection( ContentType( Mount( SDKHandler ) ) )`. A `tasks/*` POST
+is therefore subject to the same explicit `HTTPSecurity` posture (DNS-rebinding
+protection, cross-origin/CSRF protection — D-040, D-041; Content-Type
+verification — D-112) as every other request before the mount ever inspects it; the mount cannot bypass or weaken the security posture
+(CLAUDE.md §7 — the HTTP posture is set explicitly, never inherited or
+sidestepped). This corrected a latent ordering bug found while wiring R2: the
+cross-origin middleware previously wrapped the raw SDK handler
+(`cop.Handler(handler)`); once the mount was inserted, that would have left the
+mount *outside* the CSRF boundary. `HTTPHandler` now wraps the composed handler
+(`cop.Handler(h)`), keeping security outermost. A `tasks/*` cross-site POST is
+rejected with 403 exactly as a `tools/call` cross-site POST is — proven by
+`runtime/server` `TestTasksMount_HTTP_SecurityStillEnforced`.
+
+---
+
 ## D-111 — "no migration edits after merge" is a review-enforced rule, not a runtime-enforced one (supersedes D-027's enforcement claim)
 
 **Status:** Settled (depth-audit remediation R3).

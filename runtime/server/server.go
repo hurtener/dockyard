@@ -10,6 +10,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/hurtener/dockyard/runtime/obs"
+	"github.com/hurtener/dockyard/runtime/tasks"
 )
 
 // ErrNoTransport is returned by Run when it is called with a nil transport.
@@ -72,6 +73,29 @@ type Options struct {
 	// Redactor is the redaction-aware hook obs.CapturePolicyFull requires.
 	// Without it, full-content capture degrades to shape+size.
 	Redactor obs.Redactor
+
+	// Tasks is the MCP Tasks engine to mount onto the server's transports
+	// (RFC §8.2). When non-nil the server intercepts tasks/* JSON-RPC frames
+	// at the raw-frame layer ahead of the SDK server — the go-sdk rejects an
+	// unknown JSON-RPC method before any middleware runs, so tasks/get,
+	// tasks/result, tasks/cancel and tasks/list cannot reach the engine
+	// through the SDK's dispatch table; the Tasks transport mount
+	// (runtime/tasks.Mount) is the "shim, by necessity" that routes them.
+	// The capabilities.tasks block is injected into the initialize handshake
+	// response (the SDK has no native field for it).
+	//
+	// When Tasks is nil the server behaves exactly as a plain MCP server with
+	// no tasks/* interception and no added overhead. The engine is attached
+	// via WithTasks too — Tasks is the option-struct idiom matching Obs.
+	Tasks *tasks.Engine
+
+	// TasksAuthContext derives a requestor's opaque authorization-context
+	// token from an HTTP request — for example a verified bearer-token
+	// subject. It is consulted only when Tasks is non-nil and the server
+	// serves over the streamable-HTTP transport, enabling auth-context
+	// binding of tasks/* (RFC §8.5). A nil value treats every requestor as
+	// unauthenticated, which is the correct posture for single-user stdio.
+	TasksAuthContext tasks.AuthContextFunc
 }
 
 // ExtensionCapability is one MCP extension-capability advertisement: a
@@ -130,6 +154,12 @@ type Server struct {
 	tools             []string      // registered tool names, in registration order
 	resources         []string      // registered resource URIs, in registration order
 	resourceTemplates []string      // registered resource-template URI templates, in registration order
+
+	// tasksMount routes tasks/* JSON-RPC frames into the attached Tasks engine
+	// ahead of the SDK server (RFC §8.2). It is nil unless a Tasks engine was
+	// attached via Options.Tasks or WithTasks; a nil mount means the server is
+	// a plain MCP server with no tasks/* interception.
+	tasksMount *tasks.Mount
 }
 
 // New constructs a Dockyard MCP server. It returns an error rather than
@@ -158,12 +188,53 @@ func New(info Info, opts *Options) (*Server, error) {
 		Title:   info.Title,
 		Version: info.Version,
 	}, sdkOpts)
-	return &Server{
+	s := &Server{
 		info: info,
 		log:  log,
 		mcp:  mcpSrv,
 		rec:  newRecorder(info, opts),
-	}, nil
+	}
+	// Attach the Tasks transport mount when a Tasks engine was supplied. The
+	// mount is the seam that routes tasks/* frames into the engine ahead of
+	// the SDK server; HTTPHandler and ServeStdio consult s.tasksMount (RFC
+	// §8.2). A nil opts.Tasks leaves s.tasksMount nil — a plain MCP server.
+	if opts != nil && opts.Tasks != nil {
+		s.attachTasks(opts.Tasks, opts.TasksAuthContext)
+	}
+	return s, nil
+}
+
+// WithTasks attaches a Tasks engine to the server, mounting tasks/* onto its
+// transports (RFC §8.2). It is the imperative counterpart of Options.Tasks for
+// a caller that constructs the server before the engine exists; calling it
+// replaces any previously attached engine. authContext derives an HTTP
+// requestor's authorization context (RFC §8.5) — pass nil for the
+// unauthenticated single-user case. WithTasks must be called before Run /
+// ServeStdio / HTTPHandler; it is not safe to call concurrently with serving.
+func (s *Server) WithTasks(engine *tasks.Engine, authContext tasks.AuthContextFunc) *Server {
+	if s == nil || engine == nil {
+		return s
+	}
+	s.attachTasks(engine, authContext)
+	return s
+}
+
+// attachTasks builds the Tasks transport mount over engine and records it on
+// the server. It is the single place s.tasksMount is set, shared by New (the
+// Options path) and WithTasks (the imperative path).
+func (s *Server) attachTasks(engine *tasks.Engine, authContext tasks.AuthContextFunc) {
+	mount := tasks.NewMount(engine)
+	if authContext != nil {
+		mount = mount.WithAuthContext(authContext)
+	}
+	s.tasksMount = mount
+}
+
+// TasksEnabled reports whether a Tasks engine is attached — true once
+// Options.Tasks or WithTasks has supplied one. It lets a transport entrypoint
+// and a smoke check observe the wiring without reaching into server internals.
+func (s *Server) TasksEnabled() bool {
+	return s != nil && s.tasksMount != nil
 }
 
 // newRecorder builds the server's obs/v1 emit helper from opts. It is never
@@ -244,7 +315,16 @@ func (s *Server) Run(ctx context.Context, t mcpsdk.Transport) error {
 // ServeStdio serves the server over the stdio transport — the local
 // deployment mode (RFC §5.2). It blocks until ctx is cancelled or the host
 // closes the pipe.
+//
+// When a Tasks engine is attached (Options.Tasks / WithTasks) the stdio path
+// runs the Tasks transport mount: tasks/* JSON-RPC frames on stdin are
+// intercepted and answered by the engine, every other frame is forwarded to
+// the SDK server (RFC §8.2). With no Tasks engine attached the SDK serves
+// stdin/stdout directly, exactly as before.
 func (s *Server) ServeStdio(ctx context.Context) error {
+	if s.tasksMount != nil {
+		return s.serveStdioWithTasks(ctx)
+	}
 	return s.Run(ctx, &mcpsdk.StdioTransport{})
 }
 
