@@ -33,3 +33,12 @@ go.work.sum
 
 # Private, non-repo discussion notes (monetization, etc. — never committed)
 /_private/
+
+# The inspector's embedded SPA bundle is built by `make build` from
+# web/inspector/dist/ and staged into internal/inspector/dist/ so the
+# `//go:embed all:dist` directive in internal/inspector/assets_embed.go picks
+# it up. The directory is anchored by a tracked .gitkeep so the embed is
+# always resolvable; the bundle output itself is a build artifact, never
+# committed (otherwise every `make build` would dirty the working tree).
+internal/inspector/dist/*
+!internal/inspector/dist/.gitkeep

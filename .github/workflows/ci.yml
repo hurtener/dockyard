@@ -42,6 +42,19 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
+      # Node is required because `make build` depends on `make inspector-bundle`,
+      # which runs `vite build` for web/inspector and stages the result into
+      # internal/inspector/dist/ so the //go:embed directive picks up the real
+      # SPA (remediation R4 B1). Without Node here the build embeds only the
+      # .gitkeep anchor and the inspector serves its in-Go placeholder page.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/bridge/package-lock.json
+            web/ui/package-lock.json
+            web/inspector/package-lock.json
       - run: make build
       - run: make vet
       - run: make test
@@ -70,6 +83,7 @@ jobs:
           cache-dependency-path: |
             web/bridge/package-lock.json
             web/ui/package-lock.json
+            web/inspector/package-lock.json
       # `make web` installs deps on first run, then runs the frontend gate
       # (svelte-check + tsc + vitest run --coverage). The per-project Vitest
       # coverage.thresholds fail the gate on a frontend coverage regression
@@ -92,5 +106,7 @@ jobs:
           cache-dependency-path: |
             web/bridge/package-lock.json
             web/ui/package-lock.json
-      # preflight runs the per-phase smoke scripts; phase-11 asserts `make web`.
+            web/inspector/package-lock.json
+      # preflight runs the per-phase smoke scripts; phase-11 asserts `make web`,
+      # phase-22/23 assert the inspector bundle is real (remediation R4 S6).
       - run: make preflight

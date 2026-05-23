@@ -2,6 +2,7 @@ package inspector
 
 import (
 	"context"
+	"io/fs"
 	"testing"
 	"testing/fstest"
 )
@@ -66,13 +67,28 @@ func TestFrontendHandler_PlaceholderWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestEmbeddedAssets confirms the embedded inspector bundle is wired and
-// carries an index document.
+// TestEmbeddedAssets confirms the embedded inspector bundle wiring resolves —
+// the //go:embed directive points at a real, non-empty directory — and that
+// the inspector accepts the embedded FS regardless of whether a real Vite
+// bundle has been staged. The directory is anchored by a tracked .gitkeep so
+// the embed always resolves (remediation R4 B1; supersedes D-098's committed
+// `index.html` placeholder). When a `make inspector-bundle` has run, the FS
+// carries a real index.html; when not, the inspector serves its in-Go
+// placeholder page (covered by TestFrontendHandler_PlaceholderWhenEmpty).
 func TestEmbeddedAssets(t *testing.T) {
 	t.Parallel()
 	assets := EmbeddedAssets()
-	if !fileExists(assets, "index.html") {
-		t.Fatal("EmbeddedAssets: index.html missing from the embedded bundle")
+	if assets == nil {
+		t.Fatal("EmbeddedAssets returned nil")
+	}
+	// The directory anchor (.gitkeep, possibly augmented by a staged bundle) is
+	// readable — the //go:embed all:dist directive resolves at build time.
+	entries, err := fs.ReadDir(assets, ".")
+	if err != nil {
+		t.Fatalf("EmbeddedAssets ReadDir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("EmbeddedAssets: dist/ tree embedded empty — the .gitkeep anchor is missing")
 	}
 	insp, err := New(Options{Assets: assets})
 	if err != nil {
