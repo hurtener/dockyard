@@ -127,8 +127,22 @@ func (s *Server) AddResource(def ResourceDef, fn ResourceFunc) error {
 		if req != nil && req.Params != nil && req.Params.URI != "" {
 			uri = req.Params.URI
 		}
+		// Stamp the in-flight MCP session id onto ctx so every obs/v1 event
+		// emitted inside the read — the resource.read lifecycle here, and any
+		// app.load minted by a runtime/apps read handler — carries SessionID
+		// (R5; D-120).
+		ctx = withResourceRequestSession(ctx, req)
+		// Open the resource.read span and thread it onto ctx so an obs/v1 event
+		// emitted from inside the handler (most notably an `app.load` minted by
+		// a runtime/apps read handler) correlates as a child of the read, rather
+		// than minting an unrelated fresh trace (R5 — depth-audit remediation;
+		// D-121, mirroring tool.go's D-079 pattern). NewTraceFromContext also
+		// inherits an inbound W3C traceparent extracted by the HTTP transport's
+		// traceparentMiddleware (D-122).
+		span := obs.NewTraceFromContext(ctx)
+		ctx = obs.WithSpan(ctx, span)
 		// Emit the obs/v1 resource.read lifecycle (RFC §11.2, P2).
-		endObs := s.rec.ResourceRead(ctx, obs.NewTrace(), uri)
+		endObs := s.rec.ResourceRead(ctx, span, uri)
 		var content ResourceContent
 		err := guardHandler(ctx, s.log, "resource", uri, func() error {
 			var herr error
@@ -269,8 +283,18 @@ func (s *Server) AddResourceTemplate(def ResourceTemplateDef, fn ResourceFunc) e
 		if req != nil && req.Params != nil {
 			uri = req.Params.URI
 		}
+		// Stamp the in-flight MCP session id onto ctx so emitted events
+		// carry SessionID (R5; D-120).
+		ctx = withResourceRequestSession(ctx, req)
+		// Open the resource.read span and thread it onto ctx — same as the
+		// non-template AddResource handler, so a nested obs/v1 event
+		// (an app.load from a runtime/apps read handler) correlates as a
+		// child of this read (R5; D-121). NewTraceFromContext also inherits an
+		// inbound W3C traceparent extracted by traceparentMiddleware (D-122).
+		span := obs.NewTraceFromContext(ctx)
+		ctx = obs.WithSpan(ctx, span)
 		// Emit the obs/v1 resource.read lifecycle (RFC §11.2, P2).
-		endObs := s.rec.ResourceRead(ctx, obs.NewTrace(), uri)
+		endObs := s.rec.ResourceRead(ctx, span, uri)
 		var content ResourceContent
 		err := guardHandler(ctx, s.log, "resource", uri, func() error {
 			var herr error
