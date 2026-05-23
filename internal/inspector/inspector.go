@@ -99,6 +99,17 @@ type Options struct {
 	// [FixturesFromDir] to source it from the developer's project directory.
 	Fixtures FixtureSource
 
+	// Invoker performs one operator-initiated tools/call against the attached
+	// MCP server (RFC §12, P4; D-131). When nil, `POST /api/tools/invoke`
+	// answers 503 — the inspector is detached. Use [ToolsFromServer] to source
+	// it from a running MCP server. D-131 extends D-099 + D-103: the inspector
+	// additionally issues real tools/call to the attached server when an
+	// operator initiates it through the UI; still within P4 (the inspector is
+	// the lone client-shaped component, dev-mode-gated, localhost-bound; the
+	// operator is the one driving the write — not arbitrary off-localhost
+	// execution).
+	Invoker ToolInvoker
+
 	// Logger is the structured logger. When nil, a no-op logger is used.
 	Logger *slog.Logger
 }

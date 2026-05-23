@@ -46,6 +46,7 @@
     type ServerInfo,
     type VerdictRow,
     type AppPreview,
+    type ToolInvokeResult,
   } from './lib/api.js';
   import { ObsStream, type ObsEvent } from './lib/obs.js';
   import type { RpcEntry } from './lib/rpc.js';
@@ -108,6 +109,13 @@
 
   // -- fixture switcher state --
   let activeFixture = $state<CallToolFixtureResult | undefined>(undefined);
+
+  // -- operator-initiated invoke result (D-131) --
+  // Filled when the ToolsPanel's Invoke succeeds. Threaded into the AppFrame
+  // alongside (and superseding) the active fixture so the App preview
+  // re-renders with the operator's typed parameters — the same pushToolResult
+  // path the fixture switcher uses (D-129).
+  let invokeResult = $state<CallToolFixtureResult | undefined>(undefined);
 
   // -- App preview (the attached server's ui:// Apps) --
   let apps = $state<AppPreview[]>([]);
@@ -229,6 +237,26 @@
       text: fixture.text,
       error: fixture.error,
     };
+    // A new fixture supersedes any prior operator invocation result — the
+    // App preview shows one source of truth at a time.
+    invokeResult = undefined;
+  }
+
+  /**
+   * Forwards an operator-initiated tools/call result (D-131) into the App
+   * preview. Same shape the fixture switcher feeds through `pushToolResult`
+   * (D-129) — so a real invocation re-renders the App with the operator's
+   * parameters. A tool-level error sets the error channel; transport failures
+   * never reach here (they surface in ToolsPanel's own ErrorState region).
+   */
+  function applyInvokeResult(result: ToolInvokeResult, _contract: ToolContract): void {
+    invokeResult = {
+      structuredContent: result.structuredContent,
+      text: undefined,
+      error: result.isError
+        ? { code: -32000, message: 'tool returned isError=true' }
+        : undefined,
+    };
   }
 
   /** Re-runs the App handshake against the new emulated capability set. */
@@ -317,6 +345,8 @@
               {contracts}
               panelState={contractsState}
               onRetry={loadContracts}
+              onInvokeResult={applyInvokeResult}
+              {base}
             />
           </RailCard>
         {:else if index === 4}
@@ -363,8 +393,8 @@
         onRpc={onHostRpc}
         hostContext={emulatedHostContext}
         hostCapabilities={emulatedHostCapabilities}
-        fixtureResult={activeFixture}
-        pushToolResult={activeFixture?.structuredContent}
+        fixtureResult={invokeResult ?? activeFixture}
+        pushToolResult={invokeResult?.structuredContent ?? activeFixture?.structuredContent}
       />
     {:else if appsState === 'loading'}
       <LoadingState message="Reading the attached server's ui:// App resources…" />
