@@ -72,12 +72,30 @@ type LogRecord struct {
 type sessionKey struct{}
 
 // withRequestSession returns a copy of ctx carrying the request's MCP
-// ServerSession. runtime/server calls it at the tool-handler edge.
+// ServerSession AND its obs/v1 session id. runtime/server calls it at the
+// tool-handler edge so the logging bridge can reach the raw SDK session, and
+// so every obs/v1 event emitted from inside the handler carries the in-flight
+// SessionID (R5 — depth-audit remediation; D-120). The two threadings share
+// one helper so the tool and resource edges cannot drift.
 func withRequestSession(ctx context.Context, req *mcpsdk.CallToolRequest) context.Context {
 	if req == nil || req.Session == nil {
 		return ctx
 	}
-	return context.WithValue(ctx, sessionKey{}, req.Session)
+	ctx = context.WithValue(ctx, sessionKey{}, req.Session)
+	return obs.WithSession(ctx, req.Session.ID())
+}
+
+// withResourceRequestSession is the resources/read counterpart of
+// [withRequestSession]: it stamps obs.WithSession from the read request's
+// session id so an obs/v1 resource.read (or an app.load minted inside it)
+// carries SessionID. The ServerSession itself is not threaded onto ctx for a
+// resource request — there is no resource-side logging bridge yet — only the
+// session id needed by the obs emit sites.
+func withResourceRequestSession(ctx context.Context, req *mcpsdk.ReadResourceRequest) context.Context {
+	if req == nil || req.Session == nil {
+		return ctx
+	}
+	return obs.WithSession(ctx, req.Session.ID())
 }
 
 // sessionFromContext extracts the in-flight MCP ServerSession threaded by
