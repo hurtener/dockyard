@@ -28,9 +28,17 @@
 //     gate is opted in, the App's .svelte source is checked for the required
 //     loading / empty / error / permission state markers;
 //   - stale codegen — the generated schema and TypeScript on disk are compared
-//     byte-for-byte against a fresh regeneration (internal/codegen.CheckStale)
-//     and cross-checked for schema↔TS drift (internal/codegen.CrossCheck).
-//     Stale or drifted generated output is a build blocker (RFC §6.2, P1).
+//     byte-for-byte against a fresh regeneration (internal/codegen.CheckStale).
+//     Stale generated output is a build blocker (RFC §6.2, P1).
+//   - cross-codegen — the committed schema and the committed TypeScript on
+//     disk are cross-checked with internal/codegen.CrossCheck so a hand-edited
+//     `contracts.ts` that disagrees with the schema is a build blocker (RFC §6.2,
+//     P1). `validate` deliberately checks what is checked in, not a fresh
+//     regeneration; this gates a desync that, at the validate-standalone or
+//     `dockyard test` entrypoint, has not been rewritten by a regeneration
+//     step. (`dockyard build` runs a regeneration BEFORE invoking the validate
+//     gate, so at build time a hand-edited drift is repaired rather than
+//     reported — see D-113. Either way the build artifact upholds P1.)
 //
 // # Reusable seam
 //

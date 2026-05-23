@@ -264,3 +264,39 @@ drives the real `dockyard inspect` binary as a subprocess against a real HTTP
 MCP server and a real project directory and asserts `/api/verdicts`,
 `/api/contracts`, and `/api/apps` all return real content — so a future
 regression of the CLI wiring fails a test.
+
+### R4 B1 + S6 — `make build` embeds the real web/inspector SPA (depth-audit-2)
+
+A second pre-Wave-9 depth audit found that D-098's "wiring the production
+`web/inspector` build into the binary is the Phase 23 `dockyard inspect`
+packaging step" was settled but **never built**: `internal/inspector/dist/`
+shipped only a placeholder `index.html` ("run `make web` to build it"), and
+neither `Makefile` nor `.github/workflows/ci.yml` had a step that ran
+`vite build` for `web/inspector` and copied the result into
+`internal/inspector/dist/` before `go build`. So the shipped `dockyard
+inspect` command served a placeholder page — the inspector UI was unusable
+to a developer who installed the binary.
+
+R4 closes the packaging step. A new `make inspector-bundle` target runs the
+`web/inspector` Vite build (after `npm ci` if `node_modules/` is absent) and
+stages the output (`web/inspector/dist/`) into `internal/inspector/dist/` so
+the `//go:embed all:dist` directive in `internal/inspector/assets_embed.go`
+picks up the real SPA. `make build` declares this target as a prerequisite,
+so the canonical `make build` produces a `bin/dockyard` whose inspector is
+the real Svelte SPA. The CI `go` job (`build / vet / test / lint`) gained a
+`setup-node` step so the build pipeline has `npm` available; the `preflight`
+job's Node cache list now includes `web/inspector/package-lock.json` for
+parity. `make build` still pins `CGO_ENABLED=0` — the staged frontend is a
+build artifact, not a CGo dependency. The placeholder `index.html` was
+replaced with a tracked `.gitkeep` anchor (so `//go:embed all:dist` always
+resolves) and the dist tree was added to `.gitignore` (so a rebuild never
+dirties the working tree); when the bundle has not been staged the inspector
+backend falls back to its in-Go `placeholderHTML` page, exactly as before.
+
+S6 lands the regression guard: `scripts/smoke/phase-23.sh` now asserts the
+committed/staged `internal/inspector/dist/index.html` is the real Vite SPA
+(a `<script type="module" crossorigin src=...>` reference to the hashed
+asset bundle), failing CI loud when the legacy placeholder string returns or
+when no script tag is present. Together B1 + S6 mean a future regression of
+the `make inspector-bundle` prerequisite — or a hand-edit that re-injects a
+non-SPA index.html — fails preflight, not the user.
