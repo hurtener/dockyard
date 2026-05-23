@@ -7,6 +7,13 @@ same PR that introduces it. When in doubt, the RFC wins (AGENTS.md §15).
 
 ## A
 
+**`analytics-widgets`** — the V1 product-pattern template (Phase 24, RFC §10):
+one MCP App that exposes three contract-first widget tools
+(`create_chart`, `create_table`, `create_metric_card`) and renders each
+inline through a Svelte App that composes the shared `web/ui` inventory
+(plus the new `Sparkline`). Replaces the master plan's original name
+`analytical-card`. D-124.
+
 **App runtime** — the Dockyard runtime library (`runtime/`): the importable Go
 package tree — `runtime/server` (the MCP server core), and later
 `runtime/apps`, `runtime/tasks`, `runtime/obs`, `runtime/store` — vendored into
@@ -57,6 +64,13 @@ inspector. RFC §7.2, §7.3. D-016, D-059, D-060, D-061.
 **Capability negotiation** — the MCP `initialize` handshake in which a host
 advertises the extensions and capabilities it supports. Dockyard reads this at run
 time and adapts; it never hardcodes a per-host capability matrix. RFC §7.5. D-011.
+
+**`ChartFrame`** — the template-local Svelte wrapper around Apache ECharts in
+`templates/analytics-widgets/web/src/widgets/`. Owns ECharts setup, responsive
+resizing, theme propagation via `hostContext.styles.variables`, and
+cleanup-on-unmount. Lives in the template, not `web/ui/`, because wrappers
+around third-party fat libraries do not belong in the shared inventory
+(CLAUDE.md §20). D-127.
 
 **Capability-set emulation** — the inspector's Host control: a set of capability
 toggles (Apps on/off, Tasks on/off, which display modes the host grants) the
@@ -605,6 +619,11 @@ address. RFC §11.3. brief 05 §3.3. D-075.
 `obs/v1` history, inspector state). V1 driver: `modernc.org/sqlite`. The seam keeps
 a future Postgres driver addable without a rewrite. RFC §13. D-007, D-025.
 
+**`Sparkline`** — the small, token-driven, pure-SVG inline chart added to
+the shared `web/ui/` inventory in Phase 24. Reusable beyond
+`analytics-widgets` (the inspector, the docs site, and any future template
+may compose it). Documented in `docs/design/CONVENTIONS.md` §3. D-127.
+
 **Store driver** — a concrete implementation of the `Store` seam registered via an
 `init()` blank-import. V1 ships two: `inmem` (in-memory, for single-user stdio apps)
 and `sqlite` (durable, `modernc.org/sqlite`). Every driver must pass the conformance
@@ -699,6 +718,13 @@ A `runtime/server` server joins the mount onto its transports by attaching a
 `tasks.Engine` via `server.Options.Tasks` / `Server.WithTasks` — `HTTPHandler`
 wraps the SDK handler with `Mount.HTTPMiddleware` (inside the HTTP security
 boundary) and `ServeStdio` runs the mount's stdio frame pump; D-108–D-110.
+
+**Template-discovery seam** — `internal/scaffold.Registry` + the `Template`
+interface (Phase 24): the extensibility seam that lets a future
+`templates/<name>/` directory register itself with `dockyard new --template`
+without modifying the CLI. Follows CLAUDE.md §4.4's interface + Registry +
+`init()`-blank-import driver pattern; `LookupTemplate` returns
+`ErrUnknownTemplate` on an unregistered name. D-128.
 
 **Tool builder** — the `runtime/tool` fluent, typed API an app author uses to
 declare an MCP tool: `tool.New[In, Out](name)` binds the input and output

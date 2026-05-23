@@ -93,6 +93,15 @@ So mcp-use has *types* but not *contracts*. The braindump's "killer feature: con
 8. **React-only widgets** — `resources/` auto-discovery, `useWidget`, `useMcp`, `McpUseProvider` are all React. Svelte/Vue/plain-TS are not first-class.
 9. **Multi-package install friction** — `mcp-use` + `@mcp-use/cli` + `@mcp-use/inspector` + `create-mcp-use-app` plus `npx` resolution; version skew across the four is a live failure mode.
 
+<!--
+EDITOR'S NOTE (Phase 24, 2026-05-23): the master plan's original template name
+`analytical-card` was renamed to `analytics-widgets` when the template
+actually shipped (decision D-124). The two `analytical-card` mentions
+below are preserved as historical research content per CLAUDE.md §16
+(research briefs are *context*, not the design source of truth); the
+shipped V1 template name is `analytics-widgets`.
+-->
+
 ## 3. Go-flavored shapes / API sketches (Dockyard CLI surface, command-by-command)
 
 Dockyard ships **one statically-linked CGo-free binary** (`dockyard`). No `npx`, no package fan-out, no Node on the install target. Proposed command surface — explicitly a superset of mcp-use's, closing each gap from §2.9:
