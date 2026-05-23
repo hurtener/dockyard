@@ -135,6 +135,29 @@ else
   skip "bin/dockyard not built — dockyard inspect runtime check deferred"
 fi
 
+# 7b. The shipped `dockyard` binary embeds the REAL web/inspector Vite bundle,
+#     not the in-Go placeholder page (remediation R4 B1 + S6). `make build`
+#     depends on `make inspector-bundle`, which runs `vite build` and stages
+#     `web/inspector/dist/` into `internal/inspector/dist/` so the
+#     `//go:embed all:dist` directive picks it up. The discriminator: a real
+#     Vite build emits `<script type="module" crossorigin src=...>` referencing
+#     the hashed asset bundle, which the placeholder dist anchor (.gitkeep
+#     only) and the in-Go placeholderHTML never carry. Without this assertion
+#     a regression that breaks the inspector-bundle prerequisite would ship a
+#     dockyard binary whose inspector is permanently unusable.
+DIST_INDEX=internal/inspector/dist/index.html
+if [ -f "$DIST_INDEX" ]; then
+  if grep -q 'has not been built yet' "$DIST_INDEX"; then
+    fail "internal/inspector/dist/index.html is the legacy placeholder (R4 B1 regressed)"
+  elif grep -qE '<script[^>]+type="module"[^>]+src=' "$DIST_INDEX"; then
+    ok "internal/inspector/dist/index.html is the real Vite SPA bundle (R4 B1)"
+  else
+    fail "internal/inspector/dist/index.html is present but carries no Vite module script (R4 B1)"
+  fi
+else
+  skip "internal/inspector/dist/index.html not staged — run \`make build\` to stage the inspector bundle"
+fi
+
 # 8. The web/inspector frontend gate passes (type-check + unit tests + coverage).
 if [ -f web/inspector/package.json ]; then
   if ! command -v npm >/dev/null 2>&1; then
