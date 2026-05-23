@@ -394,6 +394,14 @@ ok / warn / error `StatusChip`. Sourced from `internal/validate.Run` — the sam
 `dockyard validate` quality-gate engine — so the inspector never reimplements
 the checks. RFC §12. D-099.
 
+**Invoker** — the inspector backend seam that performs one
+operator-initiated `tools/call` against the attached MCP server.
+`inspector.ToolInvoker` is the typed function shape;
+`inspector.ToolsFromServer` is the V1 implementation: a short-lived MCP
+client session per request, no long-lived client. Reached over the
+inspector's `POST /api/tools/invoke` endpoint, gated by the existing
+loopback bind. RFC §12. D-131.
+
 **Install host profile** — the small per-MCP-host (`claude`, `cursor`)
 structure in `internal/installpkg` that derives that host's MCP config-file
 location — Claude Desktop's per-OS `claude_desktop_config.json`, Cursor's
@@ -478,6 +486,17 @@ templates are optional product-pattern showcases layered on later. RFC §9.1,
 §10.
 
 ## O
+
+**Operator-initiated `tools/call`** — a `tools/call` the inspector
+issues against the attached MCP server in response to a UI action
+(an operator filling the Tools panel's form and pressing Invoke). It
+is the only mutating RPC the inspector emits; an agent or
+off-localhost actor cannot trigger it (the endpoint is gated by the
+same loopback bind as the rest of the inspector). Symmetric to the
+inspector's read-only `resources/read` for App rendering (D-103);
+both stay within P4 because the inspector remains the lone
+client-shaped component, dev-mode-gated and localhost-bound. RFC §12.
+D-131.
 
 **`obs/v1`** — Dockyard's canonical, versioned, public observability event protocol.
 The headless runtime emits it; the inspector and the post-V1 console are pure

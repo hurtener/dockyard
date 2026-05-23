@@ -224,4 +224,59 @@ else
   fail "one or more of the three widget screenshots is missing under docs/screenshots/analytics-widgets/"
 fi
 
+# --- Phase 24 finish (D-131): operator-initiated tools/call surface ---------
+# The inspector backend exposes POST /api/tools/invoke and the inspect CLI
+# wires it through ToolsFromServer when --url is set. The frontend's
+# ToolsPanel renders the operator form and POSTs to the endpoint.
+if grep -q "ToolsFromServer" internal/inspector/invoke.go \
+   && grep -q "/api/tools/invoke" internal/inspector/assets.go \
+   && grep -q "ToolsFromServer" internal/cli/inspect.go \
+   && grep -q "invokeTool" web/inspector/src/lib/api.ts \
+   && grep -q "invoke-form" web/inspector/src/lib/ToolsPanel.svelte; then
+  ok "the inspector ships operator-initiated tools/call (D-131)"
+else
+  fail "the operator-initiated tools/call surface is missing one of its pieces"
+fi
+
+# --- Phase 24 finish: the Dockyard wordmark sits in the inspector header ----
+# The asset is staged in web/inspector/src/assets/, imported by App.svelte,
+# and wired through PageHeader.lead.
+if [ -f web/inspector/src/assets/dockyard-logo.png ] \
+   && grep -q "dockyard-logo" web/inspector/src/App.svelte \
+   && grep -q "header-logo" web/inspector/src/App.svelte; then
+  ok "the Dockyard wordmark is wired into PageHeader.lead"
+else
+  fail "the inspector header logo is missing one of its pieces"
+fi
+
+# --- Phase 24 finish (D-132): analytics-widgets template wires obs/v1 -------
+# The template constructs an SSESink and mounts /obs/v1/stream on the MCP
+# listener so a single --url makes the inspector's Events/Analytics real.
+if grep -q "obs.NewSSESink" templates/analytics-widgets/main.go.tmpl \
+   && grep -q "obsSink.Handler" templates/analytics-widgets/main.go.tmpl \
+   && grep -q "/obs/v1/stream" templates/analytics-widgets/main.go.tmpl; then
+  ok "the analytics-widgets template exposes obs/v1 on the MCP listener (D-132)"
+else
+  fail "the analytics-widgets template does not expose the obs/v1 SSE endpoint"
+fi
+
+# --- Phase 24 finish (D-133): AppFrame.sendToolResult is loop-guarded -------
+if grep -q "lastSentPayload" web/inspector/src/lib/AppFrame.svelte; then
+  ok "the AppFrame push-tool-result effect guards against re-fire loops (D-133)"
+else
+  fail "AppFrame.sendToolResult is not guarded against re-fire loops"
+fi
+
+# --- Phase 24 finish: every rail tab has a captured end-to-end screenshot ---
+finish_dir="docs/screenshots/phase-24-finish"
+missing=""
+for f in events.png rpc.png tools-invoke.png verdicts.png tasks.png analytics.png fixtures-with-logo.png; do
+  [ -f "$finish_dir/$f" ] || missing="$missing $f"
+done
+if [ -z "$missing" ]; then
+  ok "every rail tab is captured working end-to-end under $finish_dir/"
+else
+  fail "missing rail-tab screenshot(s):$missing"
+fi
+
 smoke_summary

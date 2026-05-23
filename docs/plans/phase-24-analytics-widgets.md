@@ -392,3 +392,50 @@ A check against an unbuilt surface skips, never fails (per
       landed in `web/ui/` + `CONVENTIONS.md`; every page has loading /
       empty / error / ready states (the Svelte App routes every widget
       through `PageState`)
+
+## Phase 24 finish — follow-up (operator invoke + every rail tab verified end-to-end)
+
+PR #44 merged the analytics-widgets template and proved three widgets render
+through the inspector's Fixtures switcher. PR #45 closed three real gaps the user
+spotted before V1:
+
+1. **Inspector logo (Gap 1).** `web/inspector/src/App.svelte` now passes the
+   canonical Dockyard wordmark (`docs/design/logo.png` → imported through Vite's
+   asset pipeline as `web/inspector/src/assets/dockyard-logo.png`) to
+   `PageHeader.lead`. Sized 32 px tall through a token-scoped class; no
+   regression in the `data-testid="page-header"` selector. The `@dockyard/ui`
+   `PageHeader.test` already covered the `lead` slot, so no new shared-component
+   test was needed.
+2. **Operator-initiated `tools/call` (Gap 2; D-131).** The inspector backend
+   gained `POST /api/tools/invoke` (`internal/inspector/invoke.go`,
+   `assets.go`). `internal/cli/inspect.go` wires
+   `inspector.ToolsFromServer(cfg.serverURL)` as the `Invoker`. The frontend's
+   `ToolsPanel.svelte` generates a parameter form from each tool's input JSON
+   Schema (`web/inspector/src/lib/schema-form.ts`), POSTs the typed JSON, and
+   threads the structured result through the same `pushToolResult` path the
+   Fixtures switcher uses (D-129) so the App preview re-renders with the
+   operator's parameters. Unit + integration tests live in
+   `internal/inspector/invoke_test.go` (a real `runtime/server` tool exercised
+   end-to-end) and `web/inspector/src/__tests__/{schema-form,invoke}.test.ts`.
+3. **Every rail tab verified end-to-end (Gap 3).** The eight tabs (Events, RPC,
+   Fixtures, Tools, Verdicts, Tasks, Analytics, plus the new-with-logo header)
+   were driven through the real analytics-widgets demo via Playwright; the
+   screenshots live in `docs/screenshots/phase-24-finish/{events, rpc, tools-invoke,
+   verdicts, tasks, analytics, fixtures-with-logo}.png`. Two real defects
+   surfaced and were fixed in the same pass:
+   - **D-132 — the template did not expose obs/v1.** The analytics-widgets
+     template's `serveHTTP` mounted only the MCP handler — the inspector's
+     relay received no events. Fixed by instantiating `obs.NewSSESink("")`,
+     passing it as `server.Options.Obs`, and mounting `/obs/v1/stream` on the
+     same listener as the MCP transport.
+   - **D-133 — `AppFrame.sendToolResult` looped.** After an operator-initiated
+     invoke, the iframe's response cycled `frameStatus` between handshaking and
+     ready, the `pushToolResult` effect re-fired indefinitely, and Svelte hit
+     `effect_update_depth_exceeded` — every interactive control froze. Fixed by
+     guarding the effect with a `lastSentPayload` closure variable that
+     short-circuits a re-send of an identical payload.
+
+The Phase 24 smoke (`scripts/smoke/phase-24.sh`) gains two new assertions: the
+`POST /api/tools/invoke` endpoint exists, and the inspector frontend bundle
+embeds the Dockyard logo asset. `make preflight` is green: OK=243 / FAIL=0.
+
