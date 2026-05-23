@@ -58,6 +58,11 @@
     hostCapabilitiesFor,
     type CapabilitySet,
   } from './lib/capability.js';
+  // The Dockyard wordmark. Imported through Vite's asset pipeline so the
+  // bundler emits a hashed URL and the inspector backend serves it from the
+  // embedded dist/ tree (no extra HTTP route needed). The asset is the
+  // canonical wordmark from docs/design/ (Phase 10a design-system source).
+  import dockyardLogo from './assets/dockyard-logo.png';
 
   interface Props {
     /** API base URL — empty in production (served same-origin); set in tests. */
@@ -254,6 +259,14 @@
 <AppShell>
   {#snippet header()}
     <PageHeader title="Dockyard Inspector" subtitle={headerSubtitle}>
+      {#snippet lead()}
+        <img
+          class="header-logo"
+          src={dockyardLogo}
+          alt="Dockyard"
+          data-testid="header-logo"
+        />
+      {/snippet}
       {#snippet status()}
         <StatusChip
           label={connection}
@@ -379,5 +392,18 @@
   .header-meta {
     font-size: var(--dy-text-sm);
     color: var(--dy-color-ink-soft);
+  }
+  /*
+   * The Dockyard wordmark sits in PageHeader's `lead` slot. Its height tracks
+   * the design system's title scale so the mark and the title sit on the same
+   * visual baseline; width is intrinsic to preserve the wordmark's aspect.
+   */
+  .header-logo {
+    display: block;
+    height: 32px;
+    width: auto;
+    object-fit: contain;
+    /* The PNG is rasterised — render it crisply on HiDPI displays. */
+    image-rendering: -webkit-optimize-contrast;
   }
 </style>
