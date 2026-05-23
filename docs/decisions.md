@@ -3676,3 +3676,54 @@ to the empty auth context — the brief 02 §4.5 problem. The README
 documents the HTTP shape and the integration test asserts the stdio
 default; an HTTP conformance test is Phase 27's concern, not D-135's
 (filed as a risk on phase-25-approval-flows.md).
+
+---
+
+## D-136 — Phase 26 (`inspector` template) deferred post-V1; Wave 9 closes at two templates
+
+**Date:** 2026-05-23
+**Status:** Settled (Wave 9 closure decision)
+**Where it lives:** `docs/plans/README.md` (Phase 26 detail block, Wave 9 row,
+phase index, post-V1 follow-ups paragraph); `docs/design/design-spec.md` §5;
+this file.
+
+**Why:** The original three-template plan (`analytical-card`, `approval-flow`,
+`inspector`) was set early when the product was hand-wavy. After Phases 24 and
+25 shipped end-to-end with Playwright-proven demos, the `inspector` template
+slot was reviewed and judged not to earn its place in V1:
+
+1. **It would not exercise a new framework capability.** Phase 24
+   (`analytics-widgets`, D-124) proved read-side rendering: App + bridge +
+   fixtures + `obs/v1`. Phase 25 (`approval-flows`, D-134/D-135) proved
+   write-side: MCP Tasks + `input_required` + view→host writes + the full
+   lifecycle through `runtime/server`'s tasks-mount seam (the R2 follow-up
+   D-108 named, closed here). A "drill-down / detail-view" template would
+   mostly re-use Phase 24's capabilities — richer data display composable
+   from `MetricCard` / `DataTable` / `JsonInspector` / `web/ui` primitives a
+   developer already has — without exercising a framework surface neither of
+   the two shipped templates already proves.
+2. **The name was structurally confusing.** "`inspector` template" against the
+   framework's debugging `dockyard inspect` tool forced every reader to
+   disambiguate; the concept was never sharp enough to deserve the name.
+3. **Templates are showcases, not products** (RFC §10). They earn their place
+   by demonstrating something the framework does; three is not better than
+   two if the third does not earn it.
+4. **Wave 10 work is higher leverage for V1.** Agent skills + the published
+   docs site (Phase 29) directly drive adoption; hardening + spec-compliance
+   conformance (Phase 27) drives ship readiness; the V1 cut (Phase 30) is
+   the goal. Reallocating Phase 26's capacity to those gets V1 done sooner
+   and with more polish.
+
+**Criteria a future template would need to claim Phase 26's slot post-V1.** Any
+later template that earns it must (a) exercise a framework capability the two
+shipped templates do not already prove (e.g. MCP prompts, dynamic resource
+templates beyond `ui://`, a no-UI backend-only minimal server pattern,
+auth-context binding from D-088's V2 path), (b) ship a real Playwright-proven
+demo end-to-end through `dockyard inspect` against the scaffolded project
+(the bar Phases 24 + 25 established), and (c) come with the same six fixture
+states wired to its generated contracts. Without those it is not a template
+worth its maintenance cost.
+
+This decision **closes Wave 9 at two templates** and clears the way for Wave
+10. Phase 29's dependency line is updated from `21, 26` to `21, 25`
+accordingly.

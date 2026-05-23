@@ -53,18 +53,18 @@ done-definition, dependency declarations, and coverage discipline.
 | 21.5| Test-quality hardening                       | internal/coveragecheck | §9.4             | 04, 06    | 02–21         | §11  | Shipped |
 | 22 | Inspector core — bridge host-half + obs view  | internal/inspector     | §12              | 05, 04, 01| 09, 10a, 11, 16| 80% | Shipped |
 | 23 | Inspector advanced + `dockyard inspect`       | internal/inspector     | §12              | 05, 04    | 22, 14, 21    | 80%  | Shipped |
-| 24 | Template system + `analytics-widgets`         | templates              | §10              | 04, 01    | 19, 20, 10a   | 75%  | Pending |
-| 25 | `approval-flows` template                     | templates              | §10, §8.6        | 02, 01    | 24, 14        | 75%  | Pending |
-| 26 | `inspector` template                          | templates              | §10              | 05, 01    | 24            | 75%  | Pending |
+| 24 | Template system + `analytics-widgets`         | templates              | §10              | 04, 01    | 19, 20, 10a   | 75%  | Shipped |
+| 25 | `approval-flows` template                     | templates              | §10, §8.6        | 02, 01    | 24, 14        | 75%  | Shipped |
+| 26 | `inspector` template                          | templates              | §10              | 05, 01    | 24            | 75%  | Deferred — D-136 |
 | 27 | Security pass + spec-compliance conformance   | runtime/*, test        | §15, §16         | 01,02,03  | 09, 13, 14    | 90%  | Pending |
 | 28 | Examples, godoc, docs hygiene                 | docs / examples        | §2               | —         | 01–27         | n/a  | Pending |
-| 29 | Agent skills & published tech-docs site       | skills / docs          | §1, §2           | 04        | 21, 26        | n/a  | Pending |
+| 29 | Agent skills & published tech-docs site       | skills / docs          | §1, §2           | 04        | 21, 25        | n/a  | Pending |
 | 30 | V1 release engineering + cut                  | release                | §1, §14          | —         | 27, 28, 29    | n/a  | Pending |
 
 **V1 critical path:** phases 01–30 plus 10a and 21.5 (32 phases beyond the skeleton),
 grouped into ten waves. Lettered/dotted phases (`10a`, `21.5`) insert work into a band
 without renumbering. Post-V1 follow-ups (the ChatGPT Apps SDK, the multi-server console, the
-remaining five templates, enterprise auth, `dockyard publish`) are tracked in
+remaining six templates including the deferred `inspector` template, enterprise auth, `dockyard publish`) are tracked in
 RFC §19, not numbered here.
 
 ## Wave structure
@@ -80,7 +80,7 @@ RFC §19, not numbered here.
 | 6 | 15, 16 | The `obs/v1` observability protocol |
 | 7 | 17, 18, 19, 20, 21, 21.5 | The `dockyard` CLI & developer experience |
 | 8 | 22, 23 | The local inspector |
-| 9 | 24, 25, 26 | Templates |
+| 9 | 24, 25 | Templates (Phase 26 deferred — D-136) |
 | 10 | 27, 28, 29, 30 | Hardening, conformance, docs & skills, and the V1 cut |
 
 Each wave's final phase bundles a `test/integration/waveN_test.go` exercising the
@@ -213,7 +213,7 @@ produced here. Template-specific blocks (e.g. an `ApprovalPanel`) are NOT in the
 **Acceptance.** Every component in the `web/ui/` inventory exists and is documented
 in CONVENTIONS.md §3; design tokens are the single source of visual truth; the
 logo + an approved visual mockup of the **inspector** exist (template mockups are
-deferred to their own phases 24–26, since the template set may be reworked before
+deferred to their own phases 24, 25 (the third — `inspector` template — was deferred post-V1; D-136), since the template set may be reworked before
 Wave 9); the `AGENTS.md` §20 hygiene rule is in force and reflected in the §14
 checklist.
 **Briefs.** 04 (DX). **Deps.** 10.
@@ -410,13 +410,20 @@ per tool drive the Fixtures switcher; the inspector layout is 100 vh with
 scrollable regions.
 **Briefs.** 02, 01. **Deps.** 24, 14.
 
-#### 26 — `inspector` template (RFC §10)
+#### 26 — `inspector` template — DEFERRED post-V1 (D-136)
 
-**Goal.** The `inspector` template — object / log / trace / metadata inspection
-panels.
-**Acceptance.** `dockyard new --template inspector` produces a building, validating
-project that renders in the inspector.
-**Briefs.** 05, 01. **Deps.** 24.
+**Status.** Deferred post-V1 (D-136). The original three-template plan was set
+when the product was less defined. After Phases 24 + 25 shipped, the two
+templates (`analytics-widgets`, `approval-flows`) cover the dominant MCP App
+patterns end-to-end (read-side widgets, write-side human-in-the-loop with
+Tasks), and the `inspector` template idea was never sharply defined — it would
+mostly re-use Phase 24's capabilities (richer data display composable from
+`web/ui` primitives a developer already has) without exercising a new
+framework surface. Wave 10's pending work (agent skills + docs, hardening,
+spec conformance, V1 cut) is higher leverage for getting to V1. The slot
+remains open for a sharp future template post-V1 if one earns it — see D-136
+for the deferral rationale and the criteria a future template would need to
+meet to claim Phase 26's slot.
 
 ### Wave 10 — Hardening & release
 

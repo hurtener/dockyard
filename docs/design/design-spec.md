@@ -193,8 +193,15 @@ One `AppShell`:
 
 ---
 
-## 5. Templates — deferred
+## 5. Templates
 
-The three V1 template App layouts are intentionally **out of this spec**. The
-template set may be reworked before Wave 9; each template is specced and mocked up
-with its own phase (24–26), composing the `web/ui` inventory and tokens above.
+The V1 template App layouts are intentionally **out of this spec**. Each
+template is specced (and ships fixtures + a Playwright-captured demo) with its
+own phase, composing the `web/ui` inventory and tokens above. The two V1
+templates shipped are `analytics-widgets` (Phase 24 — read-side widget pack,
+chart + table + metric-card) and `approval-flows` (Phase 25 — write-side
+human-in-the-loop with MCP Tasks `input_required`). The originally-planned
+third template (`inspector`) was **deferred post-V1** (D-136) — the two
+shipped templates cover the dominant MCP App patterns and the `inspector`
+slot was never sharply defined enough to earn its place without exercising a
+framework capability the other two don't already.
