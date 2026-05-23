@@ -117,6 +117,7 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 
 	var relay *inspector.Relay
 	var appSource inspector.AppSource
+	var invoker inspector.ToolInvoker
 	serverInfo := inspector.ServerInfo{Name: "inspector", Transport: "detached"}
 	if cfg.serverURL != "" {
 		obsURL, infErr := obsStreamURLFor(cfg.serverURL)
@@ -128,6 +129,11 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 		// (RFC §12 line 711, D-103) — it takes the bare MCP base URL, not the
 		// derived obs stream URL.
 		appSource = inspector.AppsFromServer(cfg.serverURL)
+		// The operator-initiated tools/call surface (D-131) — issues a real
+		// tools/call to the attached server when the operator presses Invoke
+		// in the inspector UI. Same short-lived-session pattern as appSource;
+		// the listener's loopback gate keeps it dev-only.
+		invoker = inspector.ToolsFromServer(cfg.serverURL)
 		serverInfo = inspector.ServerInfo{
 			Name:      cfg.serverURL,
 			Transport: "http",
@@ -159,6 +165,7 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 		Contracts:  contracts,
 		Apps:       appSource,
 		Fixtures:   fixtures,
+		Invoker:    invoker,
 		Logger:     cfg.logger,
 	})
 	if err != nil {

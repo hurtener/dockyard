@@ -46,6 +46,7 @@
     type ServerInfo,
     type VerdictRow,
     type AppPreview,
+    type ToolInvokeResult,
   } from './lib/api.js';
   import { ObsStream, type ObsEvent } from './lib/obs.js';
   import type { RpcEntry } from './lib/rpc.js';
@@ -58,6 +59,11 @@
     hostCapabilitiesFor,
     type CapabilitySet,
   } from './lib/capability.js';
+  // The Dockyard wordmark. Imported through Vite's asset pipeline so the
+  // bundler emits a hashed URL and the inspector backend serves it from the
+  // embedded dist/ tree (no extra HTTP route needed). The asset is the
+  // canonical wordmark from docs/design/ (Phase 10a design-system source).
+  import dockyardLogo from './assets/dockyard-logo.png';
 
   interface Props {
     /** API base URL — empty in production (served same-origin); set in tests. */
@@ -103,6 +109,13 @@
 
   // -- fixture switcher state --
   let activeFixture = $state<CallToolFixtureResult | undefined>(undefined);
+
+  // -- operator-initiated invoke result (D-131) --
+  // Filled when the ToolsPanel's Invoke succeeds. Threaded into the AppFrame
+  // alongside (and superseding) the active fixture so the App preview
+  // re-renders with the operator's typed parameters — the same pushToolResult
+  // path the fixture switcher uses (D-129).
+  let invokeResult = $state<CallToolFixtureResult | undefined>(undefined);
 
   // -- App preview (the attached server's ui:// Apps) --
   let apps = $state<AppPreview[]>([]);
@@ -224,6 +237,26 @@
       text: fixture.text,
       error: fixture.error,
     };
+    // A new fixture supersedes any prior operator invocation result — the
+    // App preview shows one source of truth at a time.
+    invokeResult = undefined;
+  }
+
+  /**
+   * Forwards an operator-initiated tools/call result (D-131) into the App
+   * preview. Same shape the fixture switcher feeds through `pushToolResult`
+   * (D-129) — so a real invocation re-renders the App with the operator's
+   * parameters. A tool-level error sets the error channel; transport failures
+   * never reach here (they surface in ToolsPanel's own ErrorState region).
+   */
+  function applyInvokeResult(result: ToolInvokeResult, _contract: ToolContract): void {
+    invokeResult = {
+      structuredContent: result.structuredContent,
+      text: undefined,
+      error: result.isError
+        ? { code: -32000, message: 'tool returned isError=true' }
+        : undefined,
+    };
   }
 
   /** Re-runs the App handshake against the new emulated capability set. */
@@ -254,6 +287,14 @@
 <AppShell>
   {#snippet header()}
     <PageHeader title="Dockyard Inspector" subtitle={headerSubtitle}>
+      {#snippet lead()}
+        <img
+          class="header-logo"
+          src={dockyardLogo}
+          alt="Dockyard"
+          data-testid="header-logo"
+        />
+      {/snippet}
       {#snippet status()}
         <StatusChip
           label={connection}
@@ -304,6 +345,8 @@
               {contracts}
               panelState={contractsState}
               onRetry={loadContracts}
+              onInvokeResult={applyInvokeResult}
+              {base}
             />
           </RailCard>
         {:else if index === 4}
@@ -350,8 +393,8 @@
         onRpc={onHostRpc}
         hostContext={emulatedHostContext}
         hostCapabilities={emulatedHostCapabilities}
-        fixtureResult={activeFixture}
-        pushToolResult={activeFixture?.structuredContent}
+        fixtureResult={invokeResult ?? activeFixture}
+        pushToolResult={invokeResult?.structuredContent ?? activeFixture?.structuredContent}
       />
     {:else if appsState === 'loading'}
       <LoadingState message="Reading the attached server's ui:// App resources…" />
@@ -379,5 +422,18 @@
   .header-meta {
     font-size: var(--dy-text-sm);
     color: var(--dy-color-ink-soft);
+  }
+  /*
+   * The Dockyard wordmark sits in PageHeader's `lead` slot. Its height tracks
+   * the design system's title scale so the mark and the title sit on the same
+   * visual baseline; width is intrinsic to preserve the wordmark's aspect.
+   */
+  .header-logo {
+    display: block;
+    height: 32px;
+    width: auto;
+    object-fit: contain;
+    /* The PNG is rasterised — render it crisply on HiDPI displays. */
+    image-rendering: -webkit-optimize-contrast;
   }
 </style>

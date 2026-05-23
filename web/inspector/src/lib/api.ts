@@ -156,6 +156,78 @@ export async function fetchApps(
 }
 
 /**
+ * The result of one operator-initiated tools/call, from
+ * `POST /api/tools/invoke` (D-131). `structuredContent` is the typed payload
+ * the App-frame's `pushToolResult` path consumes — the same path the Fixtures
+ * switcher uses (D-129) — so a real invocation re-renders the App preview
+ * with the operator's parameters. `isError` mirrors the MCP `isError` flag:
+ * a tool that returned a typed error to the host is still a successful RPC,
+ * surfaced here so the inspector can render the error state cleanly.
+ */
+export interface ToolInvokeResult {
+  /** Optional model-facing content[] from the tools/call response. */
+  content?: unknown;
+  /** The tool's typed structured payload, when emitted. */
+  structuredContent?: Record<string, unknown>;
+  /** True when the tool reported a typed error to the host. */
+  isError?: boolean;
+}
+
+/**
+ * Invokes a tool on the attached server through the inspector's
+ * `POST /api/tools/invoke` endpoint (D-131; RFC §12; P4). The operator is the
+ * one driving the write through the UI — the inspector itself remains the
+ * lone client-shaped surface, dev-mode-gated and localhost-bound. A
+ * transport-level failure (the server is unreachable, the tool not found,
+ * schema validation rejected the input) is a thrown error the caller
+ * surfaces in the panel's error state. A tool-level error is returned as a
+ * result with `isError: true`.
+ */
+export async function invokeTool(
+  request: { tool: string; arguments: Record<string, unknown> },
+  base = '',
+  fetchImpl: typeof fetch = fetch,
+): Promise<ToolInvokeResult> {
+  const resp = await fetchImpl(`${base}/api/tools/invoke`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!resp.ok) {
+    let detail = `inspector: /api/tools/invoke returned ${resp.status}`;
+    try {
+      const body: unknown = await resp.json();
+      if (
+        typeof body === 'object' &&
+        body !== null &&
+        typeof (body as { error?: unknown }).error === 'string'
+      ) {
+        detail = (body as { error: string }).error;
+      }
+    } catch {
+      // A non-JSON error body — keep the status-code detail.
+    }
+    throw new Error(detail);
+  }
+  const data: unknown = await resp.json();
+  if (typeof data !== 'object' || data === null) {
+    return {};
+  }
+  const d = data as {
+    content?: unknown;
+    structuredContent?: unknown;
+    isError?: unknown;
+  };
+  const result: ToolInvokeResult = {};
+  if (d.content !== undefined) result.content = d.content;
+  if (typeof d.structuredContent === 'object' && d.structuredContent !== null) {
+    result.structuredContent = d.structuredContent as Record<string, unknown>;
+  }
+  if (typeof d.isError === 'boolean') result.isError = d.isError;
+  return result;
+}
+
+/**
  * Fetches the project's on-disk fixtures from `GET /api/fixtures` (Phase 24,
  * D-126). When the inspector was attached with `--dir <project>`, the
  * backend reads `<project>/fixtures/<tool>/<kind>.json` and serves them

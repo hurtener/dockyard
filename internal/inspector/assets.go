@@ -107,6 +107,60 @@ func newMux(opts Options, log *slog.Logger) http.Handler {
 		_ = json.NewEncoder(w).Encode(fixtures)
 	})
 
+	// /api/tools/invoke — the operator-initiated tools/call surface (RFC §12,
+	// P4; D-131). The inspector frontend POSTs `{tool, arguments}`; this
+	// handler opens a short-lived MCP client session against the attached
+	// server, calls `tools/call`, and returns the result. The endpoint is
+	// localhost-only via the listener's [requireLoopback] gate; the operator
+	// is the one driving the write through the UI. A detached inspector (no
+	// Invoker configured) answers 503 so the frontend surfaces an honest
+	// "no server attached" error. A transport-level failure (connect, RPC)
+	// answers 502 with a typed JSON message. A *tool-level* error (the tool
+	// returned `isError: true`) is a successful RPC: HTTP 200 with the
+	// response carrying IsError=true, so the inspector renders the error
+	// surface without conflating it with a transport failure.
+	mux.HandleFunc("POST /api/tools/invoke", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+
+		if opts.Invoker == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "inspector is detached — no MCP server attached to invoke tools against",
+			})
+			return
+		}
+
+		var req InvokeRequest
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "invalid tools/invoke body: " + err.Error(),
+			})
+			return
+		}
+		if req.Tool == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "tools/invoke: `tool` is required",
+			})
+			return
+		}
+
+		resp, err := opts.Invoker(r.Context(), req)
+		if err != nil {
+			log.WarnContext(r.Context(), "dockyard inspector: tools/invoke failed",
+				slog.String("tool", req.Tool),
+				slog.String("error", err.Error()))
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
 	// /api/apps — the read-only App-preview source. It performs a read-only
 	// resources/list + resources/read of the attached server's ui:// resources
 	// (RFC §12 line 711 — the inspector renders the server's Apps; D-103). When

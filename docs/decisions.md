@@ -3350,3 +3350,150 @@ construct their output by copying input and adding `kind` + `state`.
 Templates that need richer derivation (e.g. a future approval-flow
 template that produces a different shape than its input) ship explicit
 `output_override` blocks.
+
+---
+
+## D-131 — Operator-initiated `tools/call` from the inspector is within P4
+
+**Date:** 2026-05-23
+**Status:** Settled (Phase 24 — finishing pass)
+**Where it lives:** `internal/inspector/invoke.go`,
+`internal/inspector/assets.go` (`POST /api/tools/invoke`),
+`internal/cli/inspect.go` (`Invoker: inspector.ToolsFromServer(cfg.serverURL)`),
+`web/inspector/src/lib/ToolsPanel.svelte` (the operator form + Invoke),
+`web/inspector/src/lib/schema-form.ts` (form fields from input JSON Schema),
+`web/inspector/src/lib/api.ts` (`invokeTool` client).
+
+**Why.** Phase 24 shipped the analytics-widgets template and proved its
+three widgets render through the Fixtures switcher (D-129/D-130). But
+the inspector still answered every Apps `tools/call` from a fixture —
+a developer who wanted to drive a real `tools/call` against the
+attached server with arbitrary parameters had to leave the inspector
+(e.g. `curl` the streamable-HTTP transport directly), which is a
+documentation gap, not a tool. The Phase-24-finish bar made by the
+user is "the framework is exercisable end-to-end through this initial
+example through its inspector"; the absence of operator-driven
+invocation was the load-bearing missing piece.
+
+**Decision.** The inspector additionally issues real `tools/call` to
+the attached server **when an operator initiates it through the UI**.
+The frontend's Tools panel generates a parameter form from the tool's
+generated input JSON Schema (P1 — the schema is the source of truth),
+POSTs `{tool, arguments}` to the backend's `POST /api/tools/invoke`,
+and the backend opens a short-lived MCP client session, calls
+`tools/call`, and returns the result. The structured result flows
+through the same `pushToolResult` path the Fixtures switcher uses
+(D-129) so the App preview re-renders with the operator's parameters.
+
+**Why this stays within P4.** P4 (CLAUDE.md §1, §13) says the
+inspector is "the lone client-shaped component" and is "test-only,
+dev-mode-gated, localhost-bound". D-131 keeps every clause intact:
+
+- The inspector remains the lone client-shaped surface — no new
+  package, no new long-lived client, no production client.
+- The endpoint is localhost-only via the existing `requireLoopback`
+  gate (CVE-2025-49596 lesson; brief 05 §4.2). An off-localhost actor
+  cannot reach it.
+- The operator is the one driving the write through the UI — not an
+  agent and not an off-localhost actor; this is symmetric to D-103's
+  read-only `resources/read` (the operator's UI action drives a
+  read-only RPC; D-131 drives a mutating RPC, but only on the
+  operator's deliberate Invoke click).
+- Each invocation opens a fresh client session, calls one tool, and
+  closes — no long-lived client state and no client SDK leaks into
+  Dockyard's surface (no raw MCP types in handler-facing APIs, P3 —
+  the `InvokeRequest`/`InvokeResponse` types are the inspector's
+  own).
+
+**Supersedes / extends.** D-131 extends D-099 (the inspector
+"attaches a read-only obs relay, not an MCP client") and D-103 (the
+inspector additionally performs read-only `resources/list` and
+`resources/read` to render Apps). Both prior decisions stand for
+their original surfaces; D-131 adds the operator-initiated
+`tools/call` surface to the same lone client-shaped component.
+
+A `tool-level` error (the tool's `CallToolResult.isError` is true) is
+a successful RPC: HTTP 200 with `isError: true` in the response, the
+inspector renders the error surface without conflating it with a
+transport failure. A transport-level failure (server unreachable,
+tool not found, validation error) answers 502 with a typed JSON
+message and the frontend renders an `ErrorState` with a working
+retry (CLAUDE.md §20).
+
+---
+
+## D-132 — The analytics-widgets template mounts the obs/v1 SSE stream on the same HTTP listener as the MCP transport
+
+**Date:** 2026-05-23
+**Status:** Settled (Phase 24 — finishing pass)
+**Where it lives:** `templates/analytics-widgets/main.go.tmpl`
+(constructs `obs.NewSSESink("")`, mounts `obsSink.Handler()` at
+`/obs/v1/stream` of the MCP HTTP mux, passes the sink as
+`server.Options.Obs`).
+
+**Why.** Phase 24 templated an analytics-widgets server that built and
+served the streamable-HTTP MCP transport, but did NOT expose the
+obs/v1 SSE endpoint. The inspector's relay (Phase 22, D-099) subscribes
+to `<server>/obs/v1/stream`; with no SSE listener on the server, the
+Events / Analytics / RPC / Tasks panels stayed empty even after real
+`tools/call` invocations. The Phase-24-finish brief required every
+rail tab to be exercised end-to-end through the demo; the empty
+Events tab was the most visible regression.
+
+**Decision.** The analytics-widgets template instantiates an
+`obs.SSESink` at startup, passes it as `server.Options.Obs` so the
+runtime emits obs/v1 events through it, and mounts its
+`/obs/v1/stream` handler on the MCP HTTP server's mux (a small
+`http.NewServeMux` that delegates `/` to the MCP handler and serves
+`/obs/v1/stream` separately). This keeps the operator UX simple — one
+URL the inspector connects to — without breaking the out-of-band
+property the SSESink exists for: the sink ALSO holds its own
+loopback-bound listener (the one stdio servers use), so a stdio
+deployment stays correct.
+
+**Trade-off acknowledged.** Mounting the SSE handler on the MCP
+listener means the same listener serves both the MCP transport and
+the obs/v1 stream. This is acceptable because:
+
+- The default HTTP bind is loopback (`127.0.0.1:8080`); a developer
+  who binds wider is making an explicit choice.
+- The obs/v1 capture defaults to shape + size only (CLAUDE.md §7); a
+  redaction-aware policy gates full content.
+- Future templates that need a stricter posture can opt out by
+  binding the SSESink's own listener and not mounting the handler.
+
+---
+
+## D-133 — `AppFrame.sendToolResult` is guarded against re-firing for the same payload
+
+**Date:** 2026-05-23
+**Status:** Settled (Phase 24 — finishing pass)
+**Where it lives:** `web/inspector/src/lib/AppFrame.svelte` (the
+`lastSentPayload` closure variable in the `pushToolResult` `$effect`).
+
+**Why.** Phase 24's `pushToolResult` `$effect` (D-127) tracks both
+the pushed payload AND `frameStatus`, so the post-handshake transition
+fires the effect for the initial mount. The Phase-24-finish work
+discovered a real defect: after an operator-initiated `tools/call`
+(D-131) the App preview iframe's response loops back through the
+host-bridge, triggers a re-render in the inspector, and the
+`frameStatus` transitions handshaking → ready → handshaking → ready
+indefinitely. Each "ready" edge re-fired the effect, re-sent the
+same `tool-result` notification, and Svelte eventually hit
+`effect_update_depth_exceeded` — at which point every interactive
+control froze (the bug the Phase-24-finish Playwright walkthrough
+surfaced).
+
+**Decision.** The `pushToolResult` effect compares the serialised
+payload to the last sent one. An unchanged payload is a no-op; an
+actual fixture-or-invoke change goes through once. The comparison
+key is `JSON.stringify(pushToolResult)` — non-reactive,
+deterministic, and identity-safe across Svelte $state Proxy unwrap
+(D-129's lesson).
+
+**Why a closure variable not a `$state`.** The guard is an
+implementation detail of the effect; making it reactive would
+re-introduce the loop the guard is preventing. A plain `let`
+captured by the effect's closure is the lightest fix and matches
+the pattern FixturesPanel already uses for its `lastApplied`
+auto-apply gate.

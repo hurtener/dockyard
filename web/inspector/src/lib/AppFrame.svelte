@@ -155,11 +155,29 @@
   // postMessage uses the structured-clone algorithm and refuses to serialise
   // a Svelte $state Proxy (DataCloneError) — a bug discovered in the Phase 24
   // demo. Cloning HERE keeps that detail out of the BridgeShell.
+  //
+  // `lastSentPayload` is a stable closure variable that guards against an
+  // infinite re-fire loop: an operator-initiated tools/call (D-131) result
+  // would otherwise trigger a re-render → the iframe's response → another
+  // handshake → frameStatus oscillation → this effect re-firing → another
+  // sendToolResult → loop (`effect_update_depth_exceeded`). Comparing the
+  // serialised payload to the last sent one breaks the cycle: an unchanged
+  // value is a no-op, an actual fixture-or-invoke change goes through once.
+  let lastSentPayload = '';
   $effect(() => {
     void pushToolResult;
     void frameStatus;
     if (!handle || pushToolResult === undefined) return;
     if (frameStatus !== 'ready') return; // wait for the handshake to finish
+    const serialised = (() => {
+      try {
+        return JSON.stringify(pushToolResult);
+      } catch {
+        return '__unstringifiable__:' + Math.random();
+      }
+    })();
+    if (serialised === lastSentPayload) return;
+    lastSentPayload = serialised;
     // host-bridge clones every outbound message; we don't need to clone here
     // too, but it does no harm and decouples the AppFrame from that detail.
     handle.bridge.sendToolResult({
