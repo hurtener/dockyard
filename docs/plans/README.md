@@ -53,7 +53,7 @@ done-definition, dependency declarations, and coverage discipline.
 | 21.5| Test-quality hardening                       | internal/coveragecheck | §9.4             | 04, 06    | 02–21         | §11  | Shipped |
 | 22 | Inspector core — bridge host-half + obs view  | internal/inspector     | §12              | 05, 04, 01| 09, 10a, 11, 16| 80% | Shipped |
 | 23 | Inspector advanced + `dockyard inspect`       | internal/inspector     | §12              | 05, 04    | 22, 14, 21    | 80%  | Shipped |
-| 24 | Template system + `analytical-card`           | templates              | §10              | 04, 01    | 19, 20, 10a   | 75%  | Pending |
+| 24 | Template system + `analytics-widgets`         | templates              | §10              | 04, 01    | 19, 20, 10a   | 75%  | Pending |
 | 25 | `approval-flow` template                      | templates              | §10, §8.6        | 02, 01    | 24, 14        | 75%  | Pending |
 | 26 | `inspector` template                          | templates              | §10              | 05, 01    | 24            | 75%  | Pending |
 | 27 | Security pass + spec-compliance conformance   | runtime/*, test        | §15, §16         | 01,02,03  | 09, 13, 14    | 90%  | Pending |
@@ -366,12 +366,25 @@ correctly; `dockyard inspect` attaches to any running server.
 
 ### Wave 9 — Templates
 
-#### 24 — Template system + `analytical-card` (RFC §10)
+#### 24 — Template system + `analytics-widgets` (RFC §10)
 
-**Goal.** The `--template` mechanism; the `analytical-card` template (KPI / chart /
-table / explanation) with fixtures, tests, manifest, and all UI states.
-**Acceptance.** `dockyard new --template analytical-card` produces a project that
-builds, validates, tests, and renders in the inspector.
+**Goal.** The `dockyard new --template <name>` mechanism (template-discovery seam
+in `internal/scaffold` — interface + Registry + builtin-init, decision D-128);
+the `analytics-widgets` template (decision D-124, renamed from
+`analytical-card`) — one MCP App that exposes three contract-first widget
+tools (`create_chart`, `create_table`, `create_metric_card`), rendered inline
+by a single Svelte App that composes `web/ui/` plus the new shared
+`Sparkline`. Apache ECharts is the V1 chart renderer (decision D-125); the
+ChartFrame wrapper is template-local (decision D-127). Manifest declares
+`display_modes: [inline]` only (decision D-126); the four UI-state gates are
+on; host-theme propagation through `hostContext.styles.variables` is
+automatic with an explicit per-call `theme` override. Six fixtures per tool
+(happy/empty/error/permission/slow/large) drive the inspector's switcher.
+The §20 spec→mockup→build rule is replaced for templates by the spec + the
+inspector's live preview (decision D-123).
+**Acceptance.** `dockyard new --template analytics-widgets` produces a
+project that builds CGo-free, passes its contract tests, validates, and
+renders three inline widgets in the inspector with realistic synthetic data.
 **Briefs.** 04, 01. **Deps.** 19, 20, 10a.
 
 #### 25 — `approval-flow` template (RFC §10, §8.6)
