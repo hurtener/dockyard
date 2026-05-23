@@ -47,3 +47,6 @@ export interface TimelineEvent {
 
 /** A row object passed to `DataTable`; values are rendered as text. */
 export type Row = Record<string, unknown>;
+
+/** The field types `FieldDiff` renders natively (Phase 25). */
+export type FieldDiffType = 'string' | 'number' | 'boolean' | 'enum' | 'text';
