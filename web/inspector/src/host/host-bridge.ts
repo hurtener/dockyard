@@ -34,13 +34,16 @@ import {
   HostNotification,
   ViewMethod,
   ViewNotification,
+  isJsonRpcNotification,
   isJsonRpcRequest,
   type DisplayMode,
+  type ElicitationResponseParams,
   type HostCapabilities,
   type HostContext,
   type InitializeParams,
   type InitializeResult,
   type JsonRpcMessage,
+  type JsonRpcNotification,
   type JsonRpcRequest,
   type RequestDisplayModeParams,
   type RequestDisplayModeResult,
@@ -157,6 +160,20 @@ export class HostBridge {
     | ((params: unknown) => CallToolFixtureResult)
     | undefined;
 
+  /**
+   * The elicitation-response delivery sink (Phase 25 / D-134). The App posts
+   * a `ui/notifications/elicitation-response` notification when the user
+   * answers a task's `input_required` prompt; the inspector forwards it
+   * here. The inspector wires this to a backend POST that opens a
+   * short-lived MCP client and calls `tasks/result` against the attached
+   * server. When unset, the notification is logged (so it shows in the RPC
+   * panel) and dropped — no panic, no thrown error, exactly like the
+   * pre-Phase-23 `tools/call` "not wired" posture.
+   */
+  private elicitationResponder:
+    | ((params: ElicitationResponseParams) => void)
+    | undefined;
+
   /** Resolves once the View has sent `ui/notifications/initialized`. */
   private resolveReady!: () => void;
   private readonly readyPromise: Promise<void>;
@@ -253,6 +270,23 @@ export class HostBridge {
     this.callToolResponder = responder;
   }
 
+  /**
+   * Sets the elicitation-response delivery sink (Phase 25 / D-134). The
+   * inspector wires this to a backend POST that forwards the App's reply
+   * to the attached server's `tasks/result` endpoint, resuming the
+   * `input_required` task. The notification is fire-and-forget — the
+   * sink returns no value; the App observes the task's terminal status
+   * through the subsequent `tool-result` push the host (or another
+   * subscriber) delivers, and through the inspector's Tasks panel.
+   * Passing `undefined` reverts to the log-and-drop posture so an App
+   * still runs in a detached inspector.
+   */
+  setElicitationResponder(
+    responder: ((params: ElicitationResponseParams) => void) | undefined,
+  ): void {
+    this.elicitationResponder = responder;
+  }
+
   /** Tears the bridge down: drops the message listener. Idempotent. */
   close(): void {
     if (this.closed) return;
@@ -273,12 +307,51 @@ export class HostBridge {
       this.handleRequest(message);
       return;
     }
-    // A View notification (or a response — unexpected, the host sends no
-    // requests in this revision) is tolerated and dropped: forward-
-    // compatibility, never an assumption (brief 01 §4.4). The host's own
-    // handshake completes when it has *sent* `ui/notifications/initialized`
-    // (see handleInitialize) — there is no inbound View `initialized` to wait
-    // on; that notification is host→View only.
+    if (isJsonRpcNotification(message)) {
+      this.handleNotification(message);
+      return;
+    }
+    // A bare JSON-RPC response from the View is unexpected (the host sends
+    // no requests in this revision); tolerate and drop, forward-compatibility
+    // — never an assumption (brief 01 §4.4).
+  }
+
+  /**
+   * Routes an inbound View notification. The View → host direction carries
+   * a small, fixed set of notifications in this revision; an unknown
+   * method is tolerated and dropped (forward-compatibility, brief 01
+   * §4.4) — never an error.
+   */
+  private handleNotification(notification: JsonRpcNotification): void {
+    switch (notification.method) {
+      case ViewNotification.elicitationResponse: {
+        // Phase 25 / D-134 — the App's reply to a task's input_required
+        // prompt. Forward to the wired responder; the inspector wires
+        // this to its backend POST that calls tasks/result on the
+        // attached server. With no responder, the notification stays
+        // visible in the RPC log so a developer sees an unwired pipe.
+        const params = (notification.params ?? {}) as ElicitationResponseParams;
+        if (!params || typeof params.taskId !== 'string' || params.taskId === '') {
+          // Malformed payload — keep the log entry, drop the dispatch.
+          return;
+        }
+        if (this.elicitationResponder) {
+          // The responder is fire-and-forget; the App observes the task's
+          // terminal status through subsequent host activity, not a
+          // synchronous reply on this channel.
+          try {
+            this.elicitationResponder(params);
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn('[host-bridge] elicitation responder threw', err);
+          }
+        }
+        return;
+      }
+      default:
+        // Unknown View → host notification — forward-compatibility, drop.
+        return;
+    }
   }
 
   private handleRequest(req: JsonRpcRequest): void {

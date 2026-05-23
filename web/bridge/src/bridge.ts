@@ -31,6 +31,7 @@ import {
   type AppCapabilities,
   type CallToolResult,
   type DisplayMode,
+  type ElicitationResponseParams,
   type HostCapabilities,
   type HostContextChangedParams,
   type InitializeParams,
@@ -367,6 +368,34 @@ export class BridgeShell {
       args,
       view,
     );
+  }
+
+  /**
+   * Posts the user's reply to a task's `input_required` prompt
+   * (RFC §8.4, §8.6; Phase 25 / D-134). `taskId` is the id of the task
+   * the App is answering — read from the `tool-result` push that opened
+   * the elicitation, where the runtime stamps it via the related-task
+   * `_meta` key. `data` is the App's opaque reply (the contract is
+   * between the App and its handler); `declined` answers with an
+   * explicit "no input" signal that the handler routes differently
+   * from a real decision.
+   *
+   * The notification is fire-and-forget: the host forwards the reply
+   * to the attached server's `tasks/result` endpoint, which resumes
+   * the suspended task. The App observes the terminal outcome through
+   * a subsequent `tool-result` push or through the inspector's Tasks
+   * panel — there is no synchronous result here by design (single
+   * round-trip, mirroring the existing notification shape).
+   */
+  sendElicitationResponse(
+    taskId: string,
+    data?: unknown,
+    options?: { declined?: boolean },
+  ): void {
+    const params: ElicitationResponseParams = { taskId };
+    if (data !== undefined) params.data = data;
+    if (options?.declined) params.declined = true;
+    this.transport.notify(ViewNotification.elicitationResponse, params);
   }
 
   /* --- framework-managed view-state ---------------------------------- */
