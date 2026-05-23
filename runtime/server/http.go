@@ -187,6 +187,20 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 		h = cop.Handler(h)
 	}
 
+	// W3C TraceContext extractor (R5 — depth-audit remediation; D-122). It
+	// reads the inbound `traceparent` header — purely read-only — and stamps
+	// the parsed parent SpanContext onto the request context via
+	// obs.WithInboundTrace. Handler-edge call sites then mint their unit-of-
+	// work span via obs.NewTraceFromContext, which inherits the caller's
+	// trace when one is present. The middleware sits OUTERMOST so the parent
+	// context reaches every handler downstream — including a CSRF-rejected
+	// request's no-op pass-through, which carries no security risk because
+	// extraction never authorises anything and a rejected request never
+	// emits an obs/v1 event. Unconditional: the propagator runs even with
+	// CrossOriginProtection off; it adds no cost when no traceparent is
+	// present.
+	h = traceparentMiddleware(h)
+
 	return h, nil
 }
 

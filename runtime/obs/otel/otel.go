@@ -24,10 +24,15 @@
 // "tools/call {tool}" with mcp.method.name, gen_ai.tool.name,
 // gen_ai.operation.name=execute_tool, mcp.session.id, network.transport, and —
 // on failure — error.type. The W3C Trace Context IDs obs/v1 already puts on
-// every event (obs.SpanContext) become the OTel span's trace-id and span-id, so
-// a Dockyard span nests natively under a calling Harbor agent's execute_tool
-// span. A log event is exported as a span event on the correlated span
-// (D-076).
+// every event (obs.SpanContext) become the OTel span's trace-id and span-id,
+// and the event's ParentSpanID becomes the exported span's parent — both
+// intra-trace (a handler `log` child of its `tool.call`, D-079/D-114) and
+// cross-process (the streamable-HTTP transport's W3C traceparent extractor
+// inherits the caller's trace id and span id at the handler edge, R5/D-122).
+// A Dockyard span therefore nests natively under a calling Harbor agent's
+// execute_tool span when the agent emits a traceparent header — the OTel
+// adapter just exports what the obs/v1 event already carries. A log event
+// is exported as a span event on the correlated span (D-076).
 package otel
 
 import (
@@ -100,7 +105,9 @@ func init() {
 // The emitter owns an internal TracerProvider built over the caller-supplied
 // span processor(s) and a context-keyed IDGenerator (idGen). The IDGenerator is
 // what makes a Dockyard span carry the obs/v1 event's OWN W3C trace-id and
-// span-id rather than fresh OTel-generated IDs: a Dockyard span therefore nests
+// span-id rather than fresh OTel-generated IDs: combined with the
+// ParentSpanID-driven parent linkage (startContext, D-114) and the HTTP
+// transport's W3C traceparent extractor (R5/D-122), a Dockyard span nests
 // natively under a calling Harbor agent's execute_tool span (RFC §11.2).
 //
 // When an obs/v1 event carries a ParentSpanID — e.g. a handler `log` event that

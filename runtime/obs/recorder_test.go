@@ -299,6 +299,50 @@ func TestWithSpan(t *testing.T) {
 	}
 }
 
+// TestRecorder_EmitStampsSessionID proves the R5/S2 fix: when a caller threads
+// an MCP session id onto ctx via [WithSession], every event Recorder.emit
+// produces from inside that ctx carries Event.SessionID equal to it (D-120).
+// Without the fix the public obs/v1 SessionID wire field was always "".
+func TestRecorder_EmitStampsSessionID(t *testing.T) {
+	t.Parallel()
+	c := &collector{}
+	r := NewRecorder(c, "srv")
+
+	ctx := WithSession(context.Background(), "sess-abc123")
+	end := r.ToolCall(ctx, NewTrace(), "search", "http")
+	end(json.RawMessage(`{}`), json.RawMessage(`{}`), nil)
+	r.ResourceRead(ctx, NewTrace(), "ui://app")("text/html", 10, nil)
+	r.AppLoad(ctx, NewTrace(), AppLoadPayload{ResourceURI: "ui://app"})
+	r.Log(ctx, NewTrace(), LogPayload{Level: "info", Message: "hi"})
+
+	got := c.all()
+	if len(got) == 0 {
+		t.Fatal("no events emitted")
+	}
+	for _, e := range got {
+		if e.SessionID != "sess-abc123" {
+			t.Errorf("event %s/%s SessionID = %q, want sess-abc123 (R5/S2 regression)",
+				e.Kind, e.Phase, e.SessionID)
+		}
+	}
+}
+
+// TestRecorder_EmitWithoutSessionIDStaysEmpty proves the other half: an event
+// emitted from a ctx that never had WithSession applied carries SessionID ""
+// — the wire field is correctly omitted.
+func TestRecorder_EmitWithoutSessionIDStaysEmpty(t *testing.T) {
+	t.Parallel()
+	c := &collector{}
+	r := NewRecorder(c, "srv")
+
+	r.ServerLifecycle(context.Background(), NewTrace(), ServerLifecyclePayload{State: "starting"})
+	for _, e := range c.all() {
+		if e.SessionID != "" {
+			t.Errorf("event %s SessionID = %q, want empty (no session on ctx)", e.Kind, e.SessionID)
+		}
+	}
+}
+
 func TestChildOrNewTrace(t *testing.T) {
 	t.Parallel()
 	// With an enclosing span: a child — same trace id, parent set.

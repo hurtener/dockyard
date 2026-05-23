@@ -128,7 +128,11 @@ func AddTool[In, Out any](s *Server, def ToolDef, fn ToolFunc[In, Out]) error {
 		// obs/v1 event emitted from inside the handler — a handler-emitted log
 		// event via the MCP-logging bridge — correlates to this span as a child
 		// rather than minting an unrelated trace (Wave 6 checkpoint S1; D-079).
-		span := obs.NewTrace()
+		// NewTraceFromContext inherits an inbound W3C traceparent if one was
+		// extracted by the HTTP transport's traceparentMiddleware (R5; D-122),
+		// so a Dockyard tool.call span nests under the calling agent's span;
+		// with no inbound parent it cleanly falls back to a fresh root.
+		span := obs.NewTraceFromContext(ctx)
 		ctx = obs.WithSpan(ctx, span)
 		// Emit the obs/v1 tool.call lifecycle (RFC §11.2, P2). The end event
 		// carries the shape+size capture of input/output — full content only
@@ -217,7 +221,9 @@ func AddToolWithSchemas[In, Out any](
 		// Open the tool.call span and thread it onto the handler context so a
 		// handler-emitted obs/v1 log event correlates to this span as a child
 		// rather than minting an unrelated trace (Wave 6 checkpoint S1; D-079).
-		span := obs.NewTrace()
+		// NewTraceFromContext inherits an inbound W3C traceparent if one was
+		// extracted by the HTTP transport's traceparentMiddleware (R5; D-122).
+		span := obs.NewTraceFromContext(ctx)
 		ctx = obs.WithSpan(ctx, span)
 		// Emit the obs/v1 tool.call lifecycle (RFC §11.2, P2).
 		endObs := s.rec.ToolCall(ctx, span, def.Name, toolTransport(req))

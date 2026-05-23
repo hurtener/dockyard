@@ -13,6 +13,33 @@ while a Dockyard server still speaks standard MCP `notifications/message` to any
 client. None of this is an MCP client (P4); the SSE sink is dev-mode-oriented
 and localhost-bound (CLAUDE.md §7).
 
+> **Remediation note (R5, depth audit 2).** The OTel adapter's package doc
+> (`runtime/obs/otel/otel.go`) and the `OTelEmitter` comment claimed a
+> Dockyard span "nests natively under a calling Harbor agent's `execute_tool`
+> span". D-114 fixed the *intra-trace* parent linkage on export (a handler
+> `log` child-of-its-`tool.call` survives the lowering), but the cross-
+> process inheritance — a Harbor agent's outbound span becoming the parent of
+> a Dockyard span — was never wired: every handler-edge call site minted a
+> fresh `obs.NewTrace()`, with no path for an inbound W3C `traceparent` to
+> seed the trace identity.
+>
+> Remediation **R5** wires the missing piece on the streamable-HTTP transport
+> (the only production-grade transport where a remote agent calls in):
+> `obs.WithInboundTrace` + `obs.NewTraceFromContext` are the new context
+> seams, `runtime/server.traceparentMiddleware` is the small W3C
+> TraceContext extractor (version `00`, no OTel dependency in
+> `runtime/server`), and the tool / resource handler edges call
+> `obs.NewTraceFromContext` in place of `obs.NewTrace` so the propagator's
+> parent is honoured when present. Exported OTel spans then nest under the
+> caller automatically via D-114's `startContext`. The OTel doc claims are
+> rewritten to describe what is actually wired now. R5 also closes the
+> resource-handler span-correlation gap (D-121, mirroring D-079 for the
+> tool edge) and lands the `obs/v1 SessionID` field on the wire (D-120) —
+> both groundwork for an even tighter call-chain story across SSE + OTel
+> consumers. See **D-119**, **D-120**, **D-121**, **D-122**,
+> `runtime/server/traceparent_test.go`, and
+> `runtime/server/r5_obs_wiring_test.go` (`TestR5_N2_…`).
+
 ## RFC anchor
 
 - RFC §11.3 — transport and OTel: the out-of-band `SSESink`, the `OTelEmitter`

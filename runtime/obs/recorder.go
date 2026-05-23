@@ -71,6 +71,15 @@ func (r *Recorder) timestamp() time.Time {
 
 // emit assembles the common Event envelope and forwards it. A nil Recorder
 // discards the event. Phase=end events carry a duration.
+//
+// SessionID is stamped from the in-flight MCP session id when [WithSession]
+// threaded one onto ctx (R5 — depth-audit remediation; D-120). A transport
+// (or a handler edge) that knows the session calls obs.WithSession on its
+// handler context and every event the unit of work emits then carries
+// SessionID — the same correlation seam [WithSpan] uses for parent-span
+// linkage. The field stays optional: ctx without a session emits an event
+// with SessionID == "" and the obs/v1 contract's `session_id,omitempty`
+// drops it from the wire.
 func (r *Recorder) emit(ctx context.Context, sc SpanContext, kind EventKind, phase Phase, payload any, dur *int64, errInfo *ErrorInfo) {
 	if r == nil {
 		return
@@ -80,6 +89,7 @@ func (r *Recorder) emit(ctx context.Context, sc SpanContext, kind EventKind, pha
 		ID:            newEventID(),
 		Timestamp:     r.timestamp(),
 		ServerID:      r.serverID,
+		SessionID:     sessionFromContext(ctx),
 		TraceID:       sc.TraceID,
 		SpanID:        sc.SpanID,
 		ParentSpanID:  sc.ParentID,
@@ -92,14 +102,21 @@ func (r *Recorder) emit(ctx context.Context, sc SpanContext, kind EventKind, pha
 	r.emitter.Emit(ctx, e)
 }
 
-// SessionFromContext is the seam by which a transport-layer session identity is
-// threaded onto events. Phase 15 leaves it unset (the engine/server do not yet
-// carry a per-call session id into the emit sites); Phase 16's transports
-// populate it. Kept here so the wire field is part of the obs/v1 contract now.
+// sessionKey is the context key under which an MCP session identity is
+// threaded so [Recorder.emit] can stamp it onto every event emitted from
+// inside the unit of work.
 type sessionKey struct{}
 
-// WithSession returns a copy of ctx carrying an MCP session identity that a
-// later phase's emit sites can stamp onto events.
+// WithSession returns a copy of ctx carrying an MCP session identity. Every
+// obs/v1 event emitted from a Recorder on ctx then carries SessionID equal
+// to sessionID — the correlation seam by which a transport-layer session
+// identity reaches the emit sites (R5 — depth-audit remediation; D-120).
+//
+// runtime/server stamps this on the tool-handler context (alongside [WithSpan])
+// from req.Session.ID(); the same threading lands on the resource-handler edge.
+// A nil/empty sessionID is a no-op and leaves ctx unchanged — an
+// out-of-request emit site (a server.lifecycle event, an out-of-request
+// log record) is correctly emitted with no session.
 func WithSession(ctx context.Context, sessionID string) context.Context {
 	if sessionID == "" {
 		return ctx
@@ -107,7 +124,9 @@ func WithSession(ctx context.Context, sessionID string) context.Context {
 	return context.WithValue(ctx, sessionKey{}, sessionID)
 }
 
-// sessionFromContext extracts a session id stamped by [WithSession], or "".
+// sessionFromContext extracts a session id stamped by [WithSession], or ""
+// when none is present. Recorder.emit calls this on every event to populate
+// the public obs/v1 SessionID wire field.
 func sessionFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(sessionKey{}).(string)
 	return v
@@ -116,6 +135,53 @@ func sessionFromContext(ctx context.Context) string {
 // spanKey is the context key under which an in-flight unit of work threads its
 // [SpanContext] so a nested emit site can correlate to the enclosing span.
 type spanKey struct{}
+
+// inboundTraceKey is the context key under which a transport-layer propagator
+// (e.g. the W3C TraceContext extractor on the HTTP transport) threads the
+// inbound trace identity it parsed from the request — `traceparent` /
+// `tracestate`. NewTraceFromContext consults it so a handler-edge span
+// inherits the calling agent's trace rather than minting an unrelated root
+// (R5 — depth-audit remediation; D-122). The carrier is a SpanContext whose
+// SpanID is the inbound span id — a Dockyard handler's span then nests under
+// it as a child of the caller, satisfying the RFC §11.2 claim that a
+// Dockyard server's spans nest under a calling Harbor agent's `execute_tool`
+// span.
+type inboundTraceKey struct{}
+
+// WithInboundTrace returns a copy of ctx carrying parent as the trace identity
+// extracted by a transport-layer propagator from an inbound request. A
+// handler-edge call site that begins a new unit of work calls
+// [NewTraceFromContext] (not [NewTrace]) so the unit of work inherits this
+// parent when one is present. A zero-value parent is a no-op — leaves ctx
+// unchanged — so a transport that finds no traceparent simply skips the call.
+func WithInboundTrace(ctx context.Context, parent SpanContext) context.Context {
+	if parent.IsZero() {
+		return ctx
+	}
+	return context.WithValue(ctx, inboundTraceKey{}, parent)
+}
+
+// InboundTraceFromContext returns the inbound parent trace stamped by
+// [WithInboundTrace], and ok=false when ctx carries none.
+func InboundTraceFromContext(ctx context.Context) (sc SpanContext, ok bool) {
+	v, ok := ctx.Value(inboundTraceKey{}).(SpanContext)
+	return v, ok
+}
+
+// NewTraceFromContext is the handler-edge counterpart of [NewTrace]: when ctx
+// carries an inbound trace stamped by [WithInboundTrace], the returned span
+// inherits the parent's TraceID (preserving the call-chain identity) and is
+// a child of the parent's span; otherwise it falls back to [NewTrace] — a
+// fresh root trace. Use it at any handler-edge call site that opens a new
+// obs/v1 unit of work, so a cross-process call from a Harbor agent (or any
+// other W3C-compliant propagator) naturally nests Dockyard's spans under
+// the caller's (R5; D-122).
+func NewTraceFromContext(ctx context.Context) SpanContext {
+	if parent, ok := InboundTraceFromContext(ctx); ok {
+		return parent.Child()
+	}
+	return NewTrace()
+}
 
 // WithSpan returns a copy of ctx carrying sc as the in-flight span. A
 // subsystem that opens a span (a tools/call, a resources/read) stamps it here
@@ -181,7 +247,6 @@ func (r *Recorder) ToolCall(ctx context.Context, sc SpanContext, tool, transport
 		inShape, inFull := captureValue(input, r.policy, r.redactor)
 		outShape, outFull := captureValue(output, r.policy, r.redactor)
 		dur := durMS(start, r.timestamp())
-		_ = sessionFromContext(ctx)
 		r.emit(ctx, sc, KindToolCall, PhaseEnd, ToolCallPayload{
 			Tool:        tool,
 			Transport:   transport,

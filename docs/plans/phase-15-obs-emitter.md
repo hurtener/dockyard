@@ -12,6 +12,24 @@ internals to observe (P2). It also folds in the Wave 5 checkpoint **S1** fix:
 the Store migration registry is made `t.Parallel()`-safe by replacing the
 mutable process-global with a caller-owned `MigrationSet`.
 
+> **Remediation note (R5, depth audit 2).** Phase 15 introduced
+> `obs.WithSession`/`sessionFromContext` and made `obs.Event.SessionID` part
+> of the versioned `obs/v1` wire contract, but `Recorder.emit` never read the
+> ctx-stamped session id and no transport ever called `obs.WithSession` — the
+> wire field was always empty, and the doc comment's claim that "Phase 16's
+> transports populate it" was untrue. Remediation **R5** wires it end to end:
+> `Recorder.emit` stamps `e.SessionID = sessionFromContext(ctx)`, and the
+> tool-handler edge (`runtime/server.withRequestSession`) and the resource-
+> handler edge (`withResourceRequestSession`) call
+> `obs.WithSession(ctx, req.Session.ID())`. The handler-edge wiring is the
+> single choke point every tool and resource handler passes through; a
+> future per-transport propagation pass can layer in front of it without
+> changing the emit sites. See **D-120**, `runtime/obs/recorder_test.go`
+> (`TestRecorder_EmitStampsSessionID`), and
+> `runtime/server/r5_obs_wiring_test.go` (the streamable-HTTP transport
+> exercises `req.Session.ID()` — in-memory / IO / SSE transports return ""
+> per the SDK contract, so the test uses HTTP).
+
 ## RFC anchor
 
 - RFC §11.1 — observability is a protocol (settled).

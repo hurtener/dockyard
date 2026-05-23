@@ -185,7 +185,13 @@ func Register(s *server.Server, app App) error {
 	appURI := app.URI
 	appName := app.Name
 	read := func(ctx context.Context, _ string) (server.ResourceContent, error) {
-		rec.AppLoad(ctx, obs.NewTrace(), obs.AppLoadPayload{
+		// The app.load event is minted inside a resources/read invocation,
+		// which runtime/server now opens with obs.WithSpan (R5; D-121). Use
+		// ChildOrNewTrace so app.load is a CHILD of the enclosing resource.read
+		// — same trace id, parent span set — rather than an unrelated fresh
+		// trace. With no enclosing span (e.g. an in-process call site that
+		// bypassed AddResource) it cleanly falls back to a fresh root trace.
+		rec.AppLoad(ctx, obs.ChildOrNewTrace(ctx), obs.AppLoadPayload{
 			AppID:       appName,
 			ResourceURI: appURI,
 			MIME:        MIMETypeApp,

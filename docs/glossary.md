@@ -706,6 +706,16 @@ contract structs, then `Describe`/`UI`/`Handler` set the rest and `Register`
 installs the tool on a server with its generated schema. The contract-first
 app-facing surface (RFC §6, brief 04 §3). D-029.
 
+**Traceparent extractor** — the W3C TraceContext middleware on the streamable-
+HTTP transport (`runtime/server.traceparentMiddleware`) that parses the
+inbound `Traceparent` header and stamps the parsed parent `SpanContext` onto
+the request context via `obs.WithInboundTrace`. Combined with
+`obs.NewTraceFromContext` at the tool/resource handler edges, a Dockyard
+handler's span inherits the calling agent's trace — a Dockyard span nests
+natively under a Harbor agent's `execute_tool` span, satisfying the OTel
+adapter's longstanding RFC §11.2 claim. Version `00` only; the W3C
+`tracestate` vendor field is a versioned future addition. R5; D-122.
+
 **Task support** — a tool's declared relationship to the MCP Tasks extension:
 `forbidden`, `optional`, or `required` (manifest `task_support`, → `execution.taskSupport`
 in `tools/list`). RFC §8.4.
