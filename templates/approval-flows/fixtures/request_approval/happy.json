@@ -1,0 +1,27 @@
+{
+  "name": "happy",
+  "description": "Send the weekly digest \u2014 the canonical approval prompt.",
+  "state": "ready",
+  "input": {
+    "title": "Send the weekly digest to 1,247 subscribers?",
+    "description": "The digest covers the week of May 19\u201323 and was generated from the analytics roll-up. Reply approve to send now, reject to skip this week.",
+    "category": "publishing",
+    "metadata": {
+      "subscribers": 1247,
+      "scheduled_for": "Mon 09:00 UTC",
+      "preview_url": "https://news.example.com/preview/2026-05-23"
+    }
+  },
+  "output_override": {
+    "kind": "approval",
+    "state": "awaiting",
+    "title": "Send the weekly digest to 1,247 subscribers?",
+    "description": "The digest covers the week of May 19\u201323 and was generated from the analytics roll-up. Reply approve to send now, reject to skip this week.",
+    "category": "publishing",
+    "metadata": {
+      "subscribers": 1247,
+      "scheduled_for": "Mon 09:00 UTC",
+      "preview_url": "https://news.example.com/preview/2026-05-23"
+    }
+  }
+}

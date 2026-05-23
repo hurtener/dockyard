@@ -1,0 +1,70 @@
+# Dockyard manifest — the control plane for this MCP server (RFC §4.2).
+# Scaffolded from the approval-flows template (Phase 25).
+#
+# Two task-augmented tools that drive a human-in-the-loop round-trip in
+# the host's chat surface:
+#   - request_approval     — a generic approve / reject card.
+#   - propose_with_edits   — a structured form whose proposed values are
+#                            user-editable; the user approves with the
+#                            edited values, or rejects.
+# Both tools always run as tasks (task_support: required); the
+# `input_required` round-trip is the product, not an optional capability.
+# Both are wired to one App (id: approvals) declared inline-only.
+name: __PROJECT_NAME__
+title: __PROJECT_TITLE__
+version: 0.1.0
+
+runtime:
+  transports: [stdio, http]
+  ui:
+    framework: svelte
+    # Single-file bundle: the App ships zero external origins, so the
+    # deny-by-default CSP just works (RFC §7.4, brief 01 §2.5).
+    bundle: single-file
+
+tools:
+  - name: request_approval
+    description: |
+      Pause for human approval of a single decision. Returns approved/rejected
+      plus an optional reason. Renders an approval card inline in the host.
+    input: internal/contracts.RequestApprovalInput
+    output: internal/contracts.RequestApprovalOutput
+    ui: approvals
+    # The tool ALWAYS runs as a task — the input_required round-trip is the
+    # product. A capability-emulating host that did not negotiate Tasks
+    # degrades gracefully (the handler returns a synchronous "requires
+    # interactive host" stub).
+    task_support: required
+  - name: propose_with_edits
+    description: |
+      Propose a structured change (a set of fields with current and proposed
+      values) and pause for human review. The user edits any proposed value
+      and approves, or rejects. Returns the final edited values when
+      approved.
+    input: internal/contracts.ProposeWithEditsInput
+    output: internal/contracts.ProposeWithEditsOutput
+    ui: approvals
+    task_support: required
+
+apps:
+  - id: approvals
+    uri: ui://__PROJECT_NAME__/approvals
+    entry: web/src/App.svelte
+    # Inline only — the same posture as analytics-widgets (D-126); the
+    # bridge will only ever grant inline.
+    display_modes: [inline]
+    csp:
+      connect: []
+      resource: []
+    visibility: [model, app]
+
+quality:
+  # All four UI-state gates on — every page routes through PageState
+  # (CLAUDE.md §20, the four-state page rule).
+  require_loading_state: true
+  require_empty_state: true
+  require_error_state: true
+  require_permission_state: true
+  require_fixtures: true
+  require_contract_tests: true
+  require_spec_compliance: true

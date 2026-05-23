@@ -1,0 +1,16 @@
+{
+  "name": "empty",
+  "description": "An empty prompt \u2014 drives the App's four-state empty state.",
+  "state": "empty",
+  "input": {
+    "title": "",
+    "description": ""
+  },
+  "output_override": {
+    "kind": "approval",
+    "state": "empty",
+    "title": "",
+    "description": "",
+    "message": "The approval request was empty."
+  }
+}

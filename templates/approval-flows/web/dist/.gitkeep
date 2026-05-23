@@ -1,0 +1,4 @@
+This is the Vite build output target. Run `dockyard build` (which invokes
+`npm run build` here first) to populate this directory with the App's single-
+file HTML bundle. The .gitkeep ensures the `//go:embed all:web/dist` directive
+in main.go has a target before the first build.
