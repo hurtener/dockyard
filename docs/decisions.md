@@ -2841,3 +2841,177 @@ passed to `tracer.Start`, so the exported span nests under its parent. An absent
 or malformed `ParentSpanID` is tolerated as "no parent" — the span is exported
 as a trace root rather than the event being dropped. The IDGenerator continues
 to assign the span's own IDs unchanged; only the parent linkage is added.
+
+---
+
+## D-119 — the stdio Tasks mount serialises all writes to real stdout through one shared lock
+
+**Status:** Settled (depth-audit remediation R5).
+
+D-109 wired the stdio Tasks mount as a forwarded-pipe-pair design: the SDK
+server runs on an `mcp.IOTransport` over an in-process pipe pair, the mount
+pump owns real `os.Stdin`/`os.Stdout`, and a copy goroutine relays the SDK's
+output pipe straight to real `os.Stdout`. The mount pump serialises its own
+writes through an internal `sync.Mutex` (`writeMu` in
+`runtime/tasks.Mount.ServeStdioFrames`) — but the SDK-output copy goroutine
+ran `io.Copy(os.Stdout, sdkOutR)` on the SAME `os.Stdout` with no shared
+mutex against the pump. The depth audit's read of the previous code's header
+comment ("the two writers never interleave a single frame because each writes
+whole lines") overstated the guarantee: a single `os.File.Write` to a pipe is
+atomic only up to `PIPE_BUF` (4096 on macOS/Linux), and `io.Copy` uses a 32
+KB buffer, so a large SDK frame can be split by the kernel and a mount-
+written frame can intersperse mid-emission. JSON-RPC frames are typically
+small so the practical-today risk was low — but the property the stdio
+JSON-RPC pipe contract requires (every emitted frame is whole) was not
+actually guaranteed.
+
+R5 introduces a `sync.Mutex`-backed `io.Writer` adapter (`lockedWriter` in
+`runtime/server/stdio.go`) that wraps real `os.Stdout` once and is passed
+to BOTH writers: the SDK-output copy goroutine's `io.Copy` destination AND
+the Tasks mount pump's `out` argument. Every write to real stdout now
+serialises through one shared lock, regardless of frame size or the kernel's
+per-Write atomicity bound. The mount's internal `writeMu` is preserved (it
+keeps `ServeStdioFrames` standalone-safe when a caller does not provide a
+serialising writer — its public contract is still "writes to out are
+serialised"). The stdio entrypoint is refactored to `serveStdioWithTasksOn`
+parameterised over stdin/stdout so the property is testable on in-memory
+sinks; `serveStdioWithTasks` is the thin caller that binds the parameters
+to the real OS streams. The new internal-package test
+`TestLockedWriter_SerialisesConcurrentWrites` proves `lockedWriter` admits no
+interleave under -race even with 64 KB frames, and
+`TestServeStdioWithTasks_SharedStdoutSerialised` exercises the full wiring
+end to end — concurrent tasks/list + initialize frames produce only well-
+formed JSON-RPC frames on the shared stdout.
+
+---
+
+## D-120 — `obs/v1` `Event.SessionID` is populated from the in-flight MCP session
+
+**Status:** Settled (depth-audit remediation R5).
+
+Phase 15 introduced `obs.WithSession(ctx, sessionID)` and a private
+`sessionFromContext` extractor, and made `obs.Event.SessionID` part of the
+versioned public `obs/v1` wire contract — but `Recorder.emit` never read
+`sessionFromContext(ctx)` to populate the field, and no transport ever
+called `obs.WithSession`. The depth audit flagged the orphan: the wire field
+was always empty, the doc comment claimed "Phase 16's transports populate it"
+(they did not), and the only `_ = sessionFromContext(ctx)` reference in
+`Recorder.ToolCall` was dead code.
+
+R5 wires the orphan end to end:
+
+1. `Recorder.emit` reads `sessionFromContext(ctx)` and stamps it onto
+   `e.SessionID`. The wire field is `omitempty`, so a ctx without a session
+   continues to emit an event with no `session_id` on the wire — the contract
+   is unchanged for the no-session case.
+
+2. The tool-handler edge (`runtime/server.withRequestSession`) and the new
+   resource-handler edge (`withResourceRequestSession`) call
+   `obs.WithSession(ctx, req.Session.ID())`. `req.Session.ID()` is the SDK's
+   own session-id seam — it returns the streamable-HTTP transport's
+   `Mcp-Session-Id`, and `""` on transports that do not mint one (in-memory,
+   IO, SSE). The handler-edge wiring is the right place for the V1 because
+   it is the single choke point every tool and resource handler passes
+   through; a future per-transport propagation pass can layer in front of
+   it without changing the emit sites.
+
+The doc comments on `WithSession`/`sessionFromContext` are rewritten so the
+seam's description matches reality. `TestRecorder_EmitStampsSessionID` (an
+internal recorder unit test) along with `TestR5_S2_ToolCallEventCarriesSessionID`
+and `TestR5_N1_ResourceReadEventCarriesSessionID` (real tools/call and
+resources/read over the streamable-HTTP transport) prove the field lands on
+the emitted events.
+
+---
+
+## D-121 — the resource handler span is threaded onto ctx so a nested obs/v1 event correlates as a child
+
+**Status:** Settled (depth-audit remediation R5).
+
+D-079 closed the obs/v1 handler-span correlation seam for the tool-handler
+edge: `runtime/server/tool.go` opens the `tool.call` span and threads it onto
+ctx via `obs.WithSpan` so a handler-emitted `log` event correlates as a
+child of the enclosing `tool.call` rather than minting an unrelated trace.
+The depth audit flagged the same gap class on the resource edge:
+`runtime/server/resource.go` opened the `resource.read` lifecycle with
+`obs.NewTrace()` and never threaded the span onto ctx; `runtime/apps.go`
+emitted `app.load` with `obs.NewTrace()` unconditionally. A handler-emitted
+log during a resources/read — or an `app.load` event minted inside a
+resources/read — would NOT trace-correlate. Today's handlers do not emit
+either, so the gap was latent; but it was the same consistency defect
+D-079 closed, and the cost to close it was small.
+
+R5 threads the resource handler's `obs.SpanContext` onto its handler context
+via `obs.WithSpan` (both the non-template `AddResource` and the
+`AddResourceTemplate` paths, mirroring the `tool.go` pattern), and
+`runtime/apps.Register`'s read handler emits `app.load` via
+`obs.ChildOrNewTrace(ctx)` so an `app.load` minted inside a resources/read
+is a child of the read's span — same trace id, parent span id set to the
+read's span id. The R5/N1 fix combines with R5/N2 (D-122): the resource
+handler's span itself comes from `obs.NewTraceFromContext`, so the chain is
+`inbound caller → resource.read → app.load` when an HTTP traceparent is
+present. `TestR5_N1_ResourceReadSpanCorrelatesToChildEmits` proves the
+correlation end to end via a real resources/read over the streamable-HTTP
+transport.
+
+---
+
+## D-122 — the streamable-HTTP transport extracts inbound W3C TraceContext so handler spans inherit the caller's trace
+
+**Status:** Settled (depth-audit remediation R5).
+
+The OTel adapter's package doc (RFC §11.3, D-076) claimed a Dockyard span
+"nests natively under a calling Harbor agent's `execute_tool` span". D-114
+fixed the *intra-trace* parent linkage on OTel export (a handler `log`
+child-of-its-`tool.call` survives the lowering). But the cross-process
+inheritance — a Harbor agent's outbound `tool.call` span becoming the
+parent of a Dockyard server's `tool.call` span — was never wired: every
+handler-edge call site minted a fresh `obs.NewTrace()`, with no path for an
+inbound W3C `traceparent` to seed the trace identity. The claim was
+aspirational; R5 makes it real for the streamable-HTTP transport (the only
+production-grade transport where a remote agent calls in).
+
+R5 adds three pieces, all server-side, with no OTel dependency in
+`runtime/server`:
+
+1. `obs.WithInboundTrace(ctx, parent)` / `InboundTraceFromContext` — the
+   context seam a transport-layer propagator uses to thread the inbound
+   parent SpanContext onto a request context.
+2. `obs.NewTraceFromContext(ctx)` — the handler-edge counterpart of
+   `NewTrace`; when ctx carries an inbound parent, it returns
+   `parent.Child()` (preserving the caller's TraceID, ParentID = inbound
+   span id, fresh own SpanID); otherwise it falls back to `NewTrace()`.
+3. `runtime/server.traceparentMiddleware` — a small W3C TraceContext
+   extractor on the streamable-HTTP transport boundary. It parses the
+   `traceparent` request header (version `00` only, the only well-defined
+   format today; `tracestate` is not yet carried by `obs.SpanContext` and
+   is a versioned future addition) and stamps the parsed SpanContext via
+   `obs.WithInboundTrace`. The middleware sits OUTERMOST in
+   `HTTPHandler`'s chain so the parent context reaches every downstream
+   handler (the Tasks mount, the Content-Type check, the SDK handler).
+   Extraction is purely read-only — it never authorises, never fails a
+   request, and observability never fails a request (P2). Parsing is by
+   hand: the W3C format is small, and a `go.opentelemetry.io/otel`
+   dependency at the always-on transport boundary would leak the optional
+   adapter into the server core (P3 / CLAUDE.md §10 — only
+   `internal/protocolcodec` and the optional `runtime/obs/otel` carry MCP
+   extension or OTel dependencies).
+
+The tool and resource handler edges (`runtime/server/tool.go`,
+`runtime/server/resource.go`) call `obs.NewTraceFromContext(ctx)` in place
+of `obs.NewTrace()` so the propagator's parent is honoured when present;
+with no inbound traceparent the behaviour is unchanged — a fresh root span.
+On OTel export the result automatically nests: the exported span carries the
+event's TraceID and ParentSpanID, and D-114's `startContext` seats a remote
+parent context for OTel, so the Dockyard span lands as a child of the
+caller's `execute_tool` span without any extra OTel wiring. The OTel
+adapter doc claims (otel.go package doc + the `OTelEmitter` comment) are
+rewritten so they describe what is actually wired now, not the prior
+aspiration. `TestParseTraceparent_Valid` / `_Invalid`,
+`TestTraceparentMiddleware_*`, and the end-to-end
+`TestR5_N2_ToolCallInheritsInboundTraceparent` (a real tools/call over
+streamable-HTTP with a `Traceparent` header) prove the inheritance lands.
+
+The stdio transport is deliberately out of scope: stdio is the single-user
+local-deployment mode (RFC §5.2), there is no cross-process agent to
+inherit from, and the JSON-RPC frame layer carries no header analogue.

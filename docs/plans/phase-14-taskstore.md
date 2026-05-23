@@ -34,6 +34,27 @@ client drives `tasks/*` end to end over the wire.
 > generated entrypoint, and a per-transport identifiability decision, and is a
 > later CLI/scaffold phase's work (D-108). An app author reaches the wiring
 > today through `server.Options.Tasks` / `Server.WithTasks`.
+>
+> **Remediation note (R5, depth audit 2).** The R2 stdio wiring
+> (`runtime/server/stdio.go`) ran the SDK output relay (`io.Copy(os.Stdout,
+> sdkOutR)`) and the Tasks mount pump (`Mount.ServeStdioFrames`) concurrently
+> against the SAME real `os.Stdout` with NO shared mutex. The original header
+> comment claimed "the two writers never interleave a single frame because
+> each writes whole lines", but a pipe write is atomic only up to `PIPE_BUF`
+> (4096 on macOS/Linux) and `io.Copy` uses a 32 KB buffer — so a large SDK
+> frame can be split by the kernel and a mount-written frame can intersperse
+> mid-emission. Today's JSON-RPC frames are typically small so the practical
+> risk was low, but the "every emitted frame is whole" property was not
+> actually guaranteed.
+>
+> Remediation **R5** introduces a `sync.Mutex`-backed `lockedWriter` wrapper
+> around real `os.Stdout`, shared between the SDK-output relay and the mount
+> pump (the mount's existing internal `writeMu` is preserved so
+> `ServeStdioFrames` is still standalone-safe). The stdio entrypoint is
+> refactored to `serveStdioWithTasksOn(ctx, stdin, stdout)` so the property is
+> testable on in-memory sinks. See **D-119** and
+> `runtime/server/stdio_race_test.go` /
+> `runtime/server/stdio_concurrent_test.go` — both run under `-race`.
 
 ## RFC anchor
 
