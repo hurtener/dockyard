@@ -54,7 +54,7 @@ done-definition, dependency declarations, and coverage discipline.
 | 22 | Inspector core — bridge host-half + obs view  | internal/inspector     | §12              | 05, 04, 01| 09, 10a, 11, 16| 80% | Shipped |
 | 23 | Inspector advanced + `dockyard inspect`       | internal/inspector     | §12              | 05, 04    | 22, 14, 21    | 80%  | Shipped |
 | 24 | Template system + `analytics-widgets`         | templates              | §10              | 04, 01    | 19, 20, 10a   | 75%  | Pending |
-| 25 | `approval-flow` template                      | templates              | §10, §8.6        | 02, 01    | 24, 14        | 75%  | Pending |
+| 25 | `approval-flows` template                     | templates              | §10, §8.6        | 02, 01    | 24, 14        | 75%  | Pending |
 | 26 | `inspector` template                          | templates              | §10              | 05, 01    | 24            | 75%  | Pending |
 | 27 | Security pass + spec-compliance conformance   | runtime/*, test        | §15, §16         | 01,02,03  | 09, 13, 14    | 90%  | Pending |
 | 28 | Examples, godoc, docs hygiene                 | docs / examples        | §2               | —         | 01–27         | n/a  | Pending |
@@ -387,12 +387,27 @@ project that builds CGo-free, passes its contract tests, validates, and
 renders three inline widgets in the inspector with realistic synthetic data.
 **Briefs.** 04, 01. **Deps.** 19, 20, 10a.
 
-#### 25 — `approval-flow` template (RFC §10, §8.6)
+#### 25 — `approval-flows` template (RFC §10, §8.6)
 
-**Goal.** The `approval-flow` template — a human-in-the-loop App bound to a
-task-returning tool (Tasks × Apps).
-**Acceptance.** The generated app drives a task to `input_required`, takes an
-approve/reject, and resumes; renders correctly in the inspector.
+**Goal.** The `approval-flows` template — the V1 Tasks × Apps showcase. Two
+contract-first task-augmented tools (`request_approval` — generic approve/reject;
+`propose_with_edits` — structured change with user-editable fields) and one
+inline App that renders the human-in-the-loop card / form, drives the
+`input_required` round-trip from inside the iframe, and completes the task with
+the user's decision. Bundles three pieces of supporting framework wiring the
+template is the first real product driver of: the bridge's elicitation-response
+notification (D-134), the scaffold's `tasks.Engine` attachment when a template
+declares task-supporting tools (D-135 — the R2 follow-up D-108 named), and a
+new shared `FieldDiff` web/ui component. The inspector's full-viewport layout
+fix lands in the same PR.
+**Acceptance.** `dockyard new --template approval-flows` produces a building,
+validating project that boots a real `tasks.Engine` from its scaffolded
+`main.go`; both tools drive a real `tools/call → input_required → tasks/result`
+round-trip end to end against a real `runtime/server`; the App renders the
+approval card / edits form and posts the user's decision through the bridge;
+the inspector's Tasks panel renders the lifecycle as a Timeline; six fixtures
+per tool drive the Fixtures switcher; the inspector layout is 100 vh with
+scrollable regions.
 **Briefs.** 02, 01. **Deps.** 24, 14.
 
 #### 26 — `inspector` template (RFC §10)

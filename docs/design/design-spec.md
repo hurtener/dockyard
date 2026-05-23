@@ -5,7 +5,7 @@
 *concrete* spec — design tokens, the `web/ui` component inventory, and the inspector
 page layout — that Phase 10a builds, and that the inspector mockup is drawn against.
 
-> Template App layouts (`analytics-widgets`, `approval-flow`, `inspector`) are
+> Template App layouts (`analytics-widgets`, `approval-flows`, `inspector`) are
 > **deliberately not specced here** — each template is specced in its own
 > phase plan (24–26). Phase 24 (analytics-widgets) takes the spec → live-
 > preview route documented in decision D-123 instead of a static mockup;

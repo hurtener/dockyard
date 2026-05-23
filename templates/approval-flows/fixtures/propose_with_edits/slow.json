@@ -1,0 +1,93 @@
+{
+  "name": "slow",
+  "description": "A heavy form preparation \u2014 the task is in working while assembling the proposal.",
+  "state": "ready",
+  "input": {
+    "title": "Bulk update plan parameters",
+    "description": "Update the billing parameters for 248 accounts. The system has finished assembling the diff (a few seconds) and now pauses for your approval.",
+    "category": "billing",
+    "fields": [
+      {
+        "key": "trial_length_days",
+        "label": "Trial length (days)",
+        "type": "number",
+        "current": 14,
+        "proposed": 30,
+        "helper_text": "Applies to new signups starting next billing cycle."
+      },
+      {
+        "key": "auto_renew",
+        "label": "Auto-renew on expiry",
+        "type": "boolean",
+        "current": false,
+        "proposed": true
+      },
+      {
+        "key": "currency",
+        "label": "Default currency",
+        "type": "enum",
+        "current": "USD",
+        "proposed": "EUR",
+        "options": [
+          {
+            "value": "USD",
+            "label": "USD"
+          },
+          {
+            "value": "EUR",
+            "label": "EUR"
+          },
+          {
+            "value": "GBP",
+            "label": "GBP"
+          }
+        ]
+      }
+    ]
+  },
+  "output_override": {
+    "kind": "proposal",
+    "state": "awaiting",
+    "title": "Bulk update plan parameters",
+    "description": "Update the billing parameters for 248 accounts. The system has finished assembling the diff (a few seconds) and now pauses for your approval.",
+    "category": "billing",
+    "fields": [
+      {
+        "key": "trial_length_days",
+        "label": "Trial length (days)",
+        "type": "number",
+        "current": 14,
+        "proposed": 30,
+        "helper_text": "Applies to new signups starting next billing cycle."
+      },
+      {
+        "key": "auto_renew",
+        "label": "Auto-renew on expiry",
+        "type": "boolean",
+        "current": false,
+        "proposed": true
+      },
+      {
+        "key": "currency",
+        "label": "Default currency",
+        "type": "enum",
+        "current": "USD",
+        "proposed": "EUR",
+        "options": [
+          {
+            "value": "USD",
+            "label": "USD"
+          },
+          {
+            "value": "EUR",
+            "label": "EUR"
+          },
+          {
+            "value": "GBP",
+            "label": "GBP"
+          }
+        ]
+      }
+    ]
+  }
+}

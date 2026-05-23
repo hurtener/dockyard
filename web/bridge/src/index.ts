@@ -60,6 +60,7 @@ export type {
   ContainerDimensions,
   ContentBlock,
   DisplayMode,
+  ElicitationResponseParams,
   HostCapabilities,
   HostContext,
   HostContextChangedParams,

@@ -1,0 +1,21 @@
+{
+  "name": "slow",
+  "description": "A long-running approval \u2014 the task is in working before input_required.",
+  "state": "ready",
+  "input": {
+    "title": "Approve a full database export?",
+    "description": "Exports every table in the production database to a signed S3 bucket. The export typically takes 4\u20136 minutes; the task will pause here for your approval before starting."
+  },
+  "output_override": {
+    "kind": "approval",
+    "state": "awaiting",
+    "title": "Approve a full database export?",
+    "description": "Exports every table in the production database to a signed S3 bucket. The export typically takes 4\u20136 minutes; the task will pause here for your approval before starting.",
+    "category": "data-export",
+    "metadata": {
+      "tables": 142,
+      "estimated_size": "8.4 GB",
+      "destination": "s3://acme-exports/2026-05-23/"
+    }
+  }
+}

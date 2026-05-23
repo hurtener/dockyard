@@ -1,0 +1,16 @@
+{
+  "name": "error",
+  "description": "The handler hit a backend error mid-execution.",
+  "state": "error",
+  "input": {
+    "title": "Charge customer card ending 4242?",
+    "description": "Charge $128.40 for invoice INV-91204."
+  },
+  "output_override": {
+    "kind": "approval",
+    "state": "error",
+    "title": "Charge customer card ending 4242?",
+    "description": "Charge $128.40 for invoice INV-91204.",
+    "message": "The payment processor returned a 503 \u2014 try again in a moment."
+  }
+}

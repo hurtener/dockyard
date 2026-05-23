@@ -1,0 +1,36 @@
+{
+  "name": "error",
+  "description": "The handler hit a validation error while preparing the proposal.",
+  "state": "error",
+  "input": {
+    "title": "Update plan",
+    "description": "Move ACME from Pro to Enterprise.",
+    "fields": [
+      {
+        "key": "tier",
+        "label": "Tier",
+        "type": "enum",
+        "current": "pro",
+        "proposed": "enterprise",
+        "options": [
+          {
+            "value": "pro",
+            "label": "Pro"
+          },
+          {
+            "value": "enterprise",
+            "label": "Enterprise"
+          }
+        ]
+      }
+    ]
+  },
+  "output_override": {
+    "kind": "proposal",
+    "state": "error",
+    "title": "Update plan",
+    "description": "Move ACME from Pro to Enterprise.",
+    "fields": [],
+    "message": "The billing service is unavailable \u2014 could not stage the change."
+  }
+}

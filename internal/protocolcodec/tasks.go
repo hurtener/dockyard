@@ -1,6 +1,9 @@
 package protocolcodec
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // This file holds the Dockyard domain types for the MCP Tasks extension
 // (io.modelcontextprotocol/tasks, experimental) and the JSON shapes used to
@@ -255,4 +258,31 @@ type listTasksParamsWire struct {
 type listTasksResultWire struct {
 	Tasks      []taskWire `json:"tasks"`
 	NextCursor string     `json:"nextCursor,omitempty"`
+}
+
+// SupplyInputParams is the Dockyard-internal `dockyard/tasks/supplyInput`
+// params object (Phase 25 / D-134). It is the wire half of
+// [tasks.Engine.SupplyInput] — the inspector posts it to deliver an App's
+// elicitation-response to a suspended `input_required` task. Distinct
+// from the vendored experimental Tasks spec (which defines no standard
+// shape for resuming an input_required task); the `dockyard/` method
+// prefix and this struct keep it from being confused with a future
+// standard wire shape.
+type SupplyInputParams struct {
+	// TaskID is the suspended task to resume. Required.
+	TaskID string
+	// Data is the opaque payload the requestor supplied — the handler
+	// receives it as `tasks.InputResponse.Data` raw JSON. Absent when
+	// Declined is true.
+	Data json.RawMessage
+	// Declined signals the requestor explicitly declined to provide
+	// input. The handler receives it as `tasks.InputResponse.Declined`.
+	Declined bool
+}
+
+// supplyInputParamsWire is the on-wire shape of SupplyInputParams.
+type supplyInputParamsWire struct {
+	TaskID   string          `json:"taskId"`
+	Data     json.RawMessage `json:"data,omitempty"`
+	Declined bool            `json:"declined,omitempty"`
 }

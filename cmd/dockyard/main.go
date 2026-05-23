@@ -22,6 +22,7 @@ import (
 	// new template is one new blank import here plus one new
 	// templates/<name>/ directory.
 	_ "github.com/hurtener/dockyard/templates/analytics-widgets"
+	_ "github.com/hurtener/dockyard/templates/approval-flows"
 )
 
 func main() {

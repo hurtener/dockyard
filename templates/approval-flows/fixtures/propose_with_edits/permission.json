@@ -1,0 +1,36 @@
+{
+  "name": "permission",
+  "description": "The current requestor is not authorized to edit this record.",
+  "state": "permission",
+  "input": {
+    "title": "Edit role of alice@acme.com",
+    "description": "Promote to admin.",
+    "fields": [
+      {
+        "key": "role",
+        "label": "Role",
+        "type": "enum",
+        "current": "member",
+        "proposed": "admin",
+        "options": [
+          {
+            "value": "member",
+            "label": "Member"
+          },
+          {
+            "value": "admin",
+            "label": "Admin"
+          }
+        ]
+      }
+    ]
+  },
+  "output_override": {
+    "kind": "proposal",
+    "state": "permission",
+    "title": "Edit role of alice@acme.com",
+    "description": "Promote to admin.",
+    "fields": [],
+    "message": "You are not authorized to edit user roles."
+  }
+}

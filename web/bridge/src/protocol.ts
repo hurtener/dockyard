@@ -36,6 +36,29 @@ export const ViewMethod = {
 /** View → host notification methods (no response expected). */
 export const ViewNotification = {
   initialized: 'ui/notifications/initialized',
+  /**
+   * `ui/notifications/elicitation-response` — the View answers a task's
+   * `input_required` prompt with the user's reply (RFC §8.4, §8.6;
+   * Phase 25 / D-134). The host forwards the reply to the attached server's
+   * `tasks/result` endpoint, which resumes the suspended task.
+   *
+   * This is the App-initiated counterpart of `tasks/result`: a Tasks×Apps
+   * tool that calls `TaskHandle.RequireInput` from a handler pauses the
+   * task in `input_required`; the App reads the prompt (from the
+   * `tool-result` body the host pushes when the elicitation begins),
+   * renders a form, and posts the user's reply through this notification.
+   * The bridge ships `BridgeShell.sendElicitationResponse(taskId, payload)`
+   * as the typed View helper; an App author never hand-builds the wire.
+   *
+   * Notification, not a request: the View does not wait for the host to
+   * acknowledge — the task's terminal status is the truth, and the App
+   * sees it through the host's subsequent `tool-result` push or through
+   * the inspector's Tasks panel. Keeping it fire-and-forget mirrors the
+   * existing JSON-RPC notifications shape (`ui/notifications/initialized`,
+   * `ui/notifications/tool-result`) and avoids a second round-trip on the
+   * happy path.
+   */
+  elicitationResponse: 'ui/notifications/elicitation-response',
 } as const;
 
 /** Host → View notification methods. */
@@ -248,3 +271,47 @@ export interface SizeChangedParams {
 
 /** `host-context-changed` delivers a partial patch of `HostContext`. */
 export type HostContextChangedParams = Partial<HostContext>;
+
+/* --- view → host elicitation-response (D-134) ------------------------ */
+
+/**
+ * `ui/notifications/elicitation-response` params — the App's reply to a
+ * task's `input_required` prompt. The host forwards `data` to the attached
+ * server's `tasks/result` endpoint (the elicited-input payload the MCP
+ * Tasks experimental spec specifies; RFC §8.4).
+ *
+ * `data` is opaque to the bridge — it is the App's contract with its
+ * server-side handler. A `request_approval` App posts
+ * `{ approved: boolean, reason?: string, decided_at: string }`; a
+ * `propose_with_edits` App posts
+ * `{ approved: boolean, edits: object | null, decided_at: string }`.
+ * The Dockyard runtime's `TaskHandle.RequireInput` returns this verbatim
+ * as the `InputResponse.Data` raw JSON for the handler to decode against
+ * its own contract.
+ *
+ * `declined` is the explicit "the user declined to provide input rather
+ * than supplying it" signal (the runtime's `InputResponse.Declined`).
+ * A declined response is not the same as `approved=false` on a
+ * request_approval — declining is the user closing the prompt without
+ * deciding; rejecting is a real decision. Handlers route them
+ * differently.
+ */
+export interface ElicitationResponseParams {
+  /**
+   * The task id whose `input_required` prompt this response answers.
+   * Read by the App from the `tool-result` push that opened the
+   * elicitation (the runtime stamps it via the related-task `_meta` key).
+   */
+  taskId: string;
+  /**
+   * The user's reply, an opaque JSON value the handler decodes. Absent
+   * when `declined` is true.
+   */
+  data?: unknown;
+  /**
+   * True when the user explicitly declined to answer. The Dockyard runtime
+   * receives this as `InputResponse.Declined=true`; the handler decides
+   * how to proceed.
+   */
+  declined?: boolean;
+}

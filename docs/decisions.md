@@ -3497,3 +3497,182 @@ re-introduce the loop the guard is preventing. A plain `let`
 captured by the effect's closure is the lightest fix and matches
 the pattern FixturesPanel already uses for its `lastApplied`
 auto-apply gate.
+
+---
+
+## D-134 — The bridge ships a typed View→host `elicitation-response` notification; the inspector forwards it to `tasks/result`
+
+**Date:** 2026-05-23
+**Status:** Settled (Phase 25)
+**Where it lives:** `web/bridge/src/protocol.ts`
+(`ViewNotification.elicitationResponse` + `ElicitationResponseParams`),
+`web/bridge/src/bridge.ts` (`BridgeShell.sendElicitationResponse`),
+`web/inspector/src/host/host-bridge.ts` (the host-half dispatcher +
+`setElicitationResponder`), `internal/inspector/elicitation.go` (the
+`Elicitor` seam + `ElicitationFromServer` adapter),
+`internal/inspector/assets.go`
+(`POST /api/tasks/elicitation`), `internal/cli/inspect.go`
+(`Elicitor: inspector.ElicitationFromServer(cfg.serverURL)`),
+`web/inspector/src/lib/api.ts` (`postElicitationResponse`).
+
+**Why.** Phase 25's `approval-flows` template is the first product
+driver of MCP Tasks × Apps (RFC §8.6). A handler calls
+`TaskHandle.RequireInput`, the task pauses at `input_required`, the App
+renders the prompt — and then needed a way to *answer* it from inside
+the iframe. The View → host postMessage dialect did not carry the
+elicitation reply; the bridge had no helper for it; the inspector's
+host-half had no path to deliver it to the attached server's
+`tasks/result` endpoint. Without this seam the App's "Approve" /
+"Reject" click had nowhere to go and the suspended task could not
+resume — the Tasks × Apps composition was a dead loop.
+
+**Decision.** Three pieces, one named decision:
+
+1. **The protocol.** A new View → host notification —
+   `ViewNotification.elicitationResponse` (`ui/notifications/
+   elicitation-response`) — with a typed `ElicitationResponseParams =
+   { taskId: string, data?: unknown, declined?: boolean }`. Fire-and-
+   forget: the App observes the task's terminal status through a
+   subsequent `tool-result` push or through the inspector's Tasks panel,
+   not a synchronous reply on this channel. Mirrors the existing
+   notification shape (`ui/notifications/initialized`,
+   `ui/notifications/tool-result`) and avoids a second round-trip on
+   the happy path.
+
+2. **The View helper.** The bridge exposes
+   `BridgeShell.sendElicitationResponse(taskId, data?, options?)`. An
+   App author never hand-builds the wire — same posture as
+   `bridge.callTool`, `bridge.openLink`, etc.
+
+3. **The inspector's host-half + backend.** The inspector's host-bridge
+   gains an `elicitationResponder` setter; the inspector backend gains a
+   new `Elicitor` seam, an `ElicitationFromServer(baseURL)` adapter
+   that posts a raw `tasks/result` JSON-RPC frame to the attached
+   server, and `POST /api/tasks/elicitation` as the operator-facing
+   surface. The inspector frontend posts to it from
+   `postElicitationResponse`. Localhost-only via the existing
+   `requireLoopback` gate (CVE-2025-49596 lesson; brief 05 §4.2).
+
+**Why this stays within P4.** P4 says the inspector is "the lone
+client-shaped component, dev-mode-gated, localhost-bound" (CLAUDE.md
+§1, §13). D-134 keeps every clause intact, by direct analogy with
+D-131's operator-initiated `tools/call`:
+
+- The inspector remains the lone client-shaped surface — no new
+  package, no new long-lived client, no production client.
+- The endpoint is localhost-only via the same `requireLoopback` gate
+  that gates D-131. An off-localhost actor cannot reach it.
+- The operator is the one driving the write — the App's "Approve" /
+  "Reject" click in the inspector's preview frame. An agent or an
+  off-localhost actor cannot trigger an elicitation delivery
+  unilaterally; the App's iframe is the only producer.
+- Each delivery posts one JSON-RPC frame and reads one response — no
+  long-lived client state and no client SDK leaks into Dockyard's
+  surface. The wire shape is plain JSON-RPC (Tasks methods sit
+  outside the go-sdk's typed dispatch table — RFC §8.2; D-108), so
+  the inspector does not import the SDK for this path.
+
+**Supersedes / extends.** D-134 extends D-131 (operator-initiated
+`tools/call`). Both decisions add a single operator-driven mutating
+RPC surface to the inspector — different RPC, same posture.
+
+**Failure modes.** A server-side refusal (the JSON-RPC envelope
+carries an `error` block) is a successful RPC: HTTP 200 with
+`delivered=false` + the server's error message, mirroring D-131's
+`IsError`-as-200 pattern. A transport-level failure (unreachable,
+malformed body) answers 502 with a typed JSON message and the
+frontend logs the failure for the developer (a fire-and-forget
+notification cannot surface in the App's UI without another protocol
+round-trip).
+
+**An alternate shape considered.** A *request* / *response* dialect
+(the App calls a `ui/tasks/result` request and awaits a result block)
+would let the App show "delivering…" / "delivered" / "rejected"
+chrome synchronously. Rejected for V1: it doubles the round-trips on
+the happy path, complicates the host-half's idempotency story, and
+delivers no information the inspector's Tasks panel + a subsequent
+`tool-result` push do not already surface. The cost of moving to a
+request shape later is a one-line method add + a host-half handler
+swap; the cost of pulling it back if it proves unnecessary is the
+same — symmetric and reversible.
+
+---
+
+## D-135 — A template that declares task-supporting tools attaches a `tasks.Engine` in the scaffolded `main.go`
+
+**Date:** 2026-05-23
+**Status:** Settled (Phase 25)
+**Where it lives:** `templates/approval-flows/main.go.tmpl`
+(the scaffolded entrypoint constructs `tasks.NewInMemoryStore` +
+`tasks.NewEngine` and passes the engine via
+`server.Options{Tasks: engine, TasksAuthContext: …}`; starts the
+purge sweep on context, stops it on shutdown).
+
+**Why.** R2 (D-108) shipped the `runtime/server.Options.Tasks` seam
+that connects a Tasks engine to the server transports, but explicitly
+deferred wiring `dockyard run` and the scaffolded `main.go` to
+construct one. The deferred follow-up read:
+
+> A later CLI/scaffold phase wires `dockyard run` and the scaffolded
+> `main.go` to attach a `tasks.Engine` when the project declares
+> task-supporting tools.
+
+Phase 25 is that phase for templates that need it. The
+`approval-flows` template's two tools declare `task_support:
+required` — neither tool works without a real engine — so a template
+that omitted the wiring would scaffold a project that builds but
+returns a clean error on every tool call ("Tasks engine not
+attached"). Asking the developer to copy a multi-line construction
+into their own `main.go` is exactly the friction the framework
+exists to remove. The scaffolded `main.go` *is* the integration
+surface.
+
+**Decision.** A template that declares any tool with `task_support`
+∈ {`optional`, `required`} ships a `main.go.tmpl` that:
+
+1. Constructs a real `TaskStore` (the in-memory driver for the
+   single-user stdio default; the README documents the swap to
+   `sqlitestore.Open` for HTTP).
+2. Constructs a `tasks.NewEngine` over that store, with a sensible
+   default `Options` (poll interval, obs emitter wired). For stdio
+   single-user, `RequestorIdentifiable=false` and `AdvertiseList=false`
+   — `tasks/list` is withheld per brief 02 §4.5. For HTTP with real
+   auth, the comment block points at the `WithTasks(engine,
+   AuthContextFunc)` form.
+3. Attaches the engine via `server.Options.Tasks` (matching the
+   `Options.Obs` idiom).
+4. Starts the engine's `StartSweep(ctx)` and defers `StopSweep` for a
+   clean shutdown.
+
+**Scope.** D-135 is binding for *templates* that declare
+task-supporting tools — Phase 25's `approval-flows`, and any future
+template that wants Tasks. The no-template `dockyard new` scaffold
+(Phase 17) declares its example tool `task_support: forbidden`, so
+the wiring stays inert there: a server with no task-supporting tool
+gets no Tasks engine, no overhead, byte-for-byte the same shape as
+before. A future no-template scaffold that opts in to Tasks would
+land its own wiring under the same idiom.
+
+**Why a template author writes the wiring, not a code generator.**
+A scaffold helper (e.g. `runtime/tasks.Standard()`) would shorten
+the boilerplate, but the boilerplate IS the integration surface the
+developer needs to *see* — the engine, the store, the auth context,
+the sweep. Hiding it behind a one-liner would scaffold a project
+that "just works" until the moment the developer needs to add an
+auth context (HTTP) or swap the store (durable) or tune the cap
+(`MaxConcurrentPerRequestor`), and then they would have nowhere to
+edit. The boilerplate is teaching surface. The template's README
+explains every line in plain English; the developer who reads the
+file owns the engine's behaviour without grepping the framework.
+
+**Failure modes / risks.** A template author can forget to
+`StopSweep` — a goroutine leak under repeated restarts. The
+template's `defer engine.StopSweep()` next to the construction is
+the visible reminder; the integration test covers a clean shutdown
+implicitly through `-race`. A template that scaffolds an HTTP-only
+posture with `RequestorIdentifiable=true` but no real
+`AuthContextFunc` would advertise `tasks/list` but bind every task
+to the empty auth context — the brief 02 §4.5 problem. The README
+documents the HTTP shape and the integration test asserts the stdio
+default; an HTTP conformance test is Phase 27's concern, not D-135's
+(filed as a risk on phase-25-approval-flows.md).

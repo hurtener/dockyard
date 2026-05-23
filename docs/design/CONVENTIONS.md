@@ -23,7 +23,7 @@ coherent and keeps the cost of a new page low.
 
 | Surface | What | Phase |
 |---------|------|-------|
-| Template App UIs | The Svelte UIs of the `analytics-widgets`, `approval-flow`, `inspector` templates | 24–26 |
+| Template App UIs | The Svelte UIs of the `analytics-widgets`, `approval-flows`, `inspector` templates | 24–26 |
 | The inspector | Dockyard's local test/debug surface | 22–23 |
 | The bridge shell library | `web/bridge/` — the `ui/` postMessage layer (non-visual, but consumes tokens) | 11 |
 | The docs site | The published GitHub Pages technical docs | 29 |
@@ -53,6 +53,15 @@ spec.
   - `Sparkline` — a small, token-driven, pure-SVG inline chart (composable
     inside `MetricCard`, the inspector, the docs site, and templates).
     Phase 24, decision D-127.
+  - `FieldDiff` — a labelled, accessible input that pairs an original
+    (current) value with an editable proposed value, with a "differs"
+    badge and a screen-reader-announced cue when the two diverge.
+    Renders five native types — `string` / `number` / `boolean` / `enum`
+    / `text` — and falls back to a plain text input for an unknown type
+    (forward-compatibility). The `approval-flows` template's
+    `propose_with_edits` App composes one per field; the primitive is
+    reusable in any future review / commit / human-in-the-loop UX.
+    Phase 25.
   - `StatusChip` — a small semantic state pill (ok / warn / error / info /
     neutral).
   - `Timeline` — an ordered sequence of timestamped events.

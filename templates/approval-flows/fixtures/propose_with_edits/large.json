@@ -1,0 +1,265 @@
+{
+  "name": "large",
+  "description": "Many fields \u2014 exercises the App's vertical scroll behaviour.",
+  "state": "ready",
+  "input": {
+    "title": "Migrate user record (12 fields)",
+    "description": "Migrate alice@acme.com to the new schema. Review every field; some are pre-edited proposals.",
+    "category": "user-migration",
+    "fields": [
+      {
+        "key": "email",
+        "label": "Email",
+        "type": "string",
+        "current": "alice@old.example",
+        "proposed": "alice@acme.com"
+      },
+      {
+        "key": "given_name",
+        "label": "Given name",
+        "type": "string",
+        "current": "Alice",
+        "proposed": "Alice"
+      },
+      {
+        "key": "family_name",
+        "label": "Family name",
+        "type": "string",
+        "current": "Smith",
+        "proposed": "Smith-Jones"
+      },
+      {
+        "key": "display_name",
+        "label": "Display name",
+        "type": "string",
+        "current": "alice",
+        "proposed": "Alice Smith-Jones"
+      },
+      {
+        "key": "timezone",
+        "label": "Time zone",
+        "type": "enum",
+        "current": "UTC",
+        "proposed": "America/New_York",
+        "options": [
+          {
+            "value": "UTC",
+            "label": "UTC"
+          },
+          {
+            "value": "America/New_York",
+            "label": "America/New_York"
+          },
+          {
+            "value": "Europe/Berlin",
+            "label": "Europe/Berlin"
+          }
+        ]
+      },
+      {
+        "key": "locale",
+        "label": "Locale",
+        "type": "enum",
+        "current": "en",
+        "proposed": "en-US",
+        "options": [
+          {
+            "value": "en",
+            "label": "en"
+          },
+          {
+            "value": "en-US",
+            "label": "en-US"
+          },
+          {
+            "value": "en-GB",
+            "label": "en-GB"
+          }
+        ]
+      },
+      {
+        "key": "seats",
+        "label": "Allocated seats",
+        "type": "number",
+        "current": 1,
+        "proposed": 5
+      },
+      {
+        "key": "is_admin",
+        "label": "Admin",
+        "type": "boolean",
+        "current": false,
+        "proposed": true
+      },
+      {
+        "key": "is_billing_contact",
+        "label": "Billing contact",
+        "type": "boolean",
+        "current": false,
+        "proposed": true
+      },
+      {
+        "key": "marketing_opt_in",
+        "label": "Marketing opt-in",
+        "type": "boolean",
+        "current": true,
+        "proposed": false
+      },
+      {
+        "key": "tier",
+        "label": "Subscription tier",
+        "type": "enum",
+        "current": "pro",
+        "proposed": "enterprise",
+        "options": [
+          {
+            "value": "pro",
+            "label": "Pro"
+          },
+          {
+            "value": "enterprise",
+            "label": "Enterprise"
+          }
+        ]
+      },
+      {
+        "key": "notes",
+        "label": "Migration notes",
+        "type": "text",
+        "current": "\u2014",
+        "proposed": "Migrated from legacy /v1/users; legal sign-off in ticket OPS-3401."
+      }
+    ]
+  },
+  "output_override": {
+    "kind": "proposal",
+    "state": "awaiting",
+    "title": "Migrate user record (12 fields)",
+    "description": "Migrate alice@acme.com to the new schema. Review every field; some are pre-edited proposals.",
+    "category": "user-migration",
+    "fields": [
+      {
+        "key": "email",
+        "label": "Email",
+        "type": "string",
+        "current": "alice@old.example",
+        "proposed": "alice@acme.com"
+      },
+      {
+        "key": "given_name",
+        "label": "Given name",
+        "type": "string",
+        "current": "Alice",
+        "proposed": "Alice"
+      },
+      {
+        "key": "family_name",
+        "label": "Family name",
+        "type": "string",
+        "current": "Smith",
+        "proposed": "Smith-Jones"
+      },
+      {
+        "key": "display_name",
+        "label": "Display name",
+        "type": "string",
+        "current": "alice",
+        "proposed": "Alice Smith-Jones"
+      },
+      {
+        "key": "timezone",
+        "label": "Time zone",
+        "type": "enum",
+        "current": "UTC",
+        "proposed": "America/New_York",
+        "options": [
+          {
+            "value": "UTC",
+            "label": "UTC"
+          },
+          {
+            "value": "America/New_York",
+            "label": "America/New_York"
+          },
+          {
+            "value": "Europe/Berlin",
+            "label": "Europe/Berlin"
+          }
+        ]
+      },
+      {
+        "key": "locale",
+        "label": "Locale",
+        "type": "enum",
+        "current": "en",
+        "proposed": "en-US",
+        "options": [
+          {
+            "value": "en",
+            "label": "en"
+          },
+          {
+            "value": "en-US",
+            "label": "en-US"
+          },
+          {
+            "value": "en-GB",
+            "label": "en-GB"
+          }
+        ]
+      },
+      {
+        "key": "seats",
+        "label": "Allocated seats",
+        "type": "number",
+        "current": 1,
+        "proposed": 5
+      },
+      {
+        "key": "is_admin",
+        "label": "Admin",
+        "type": "boolean",
+        "current": false,
+        "proposed": true
+      },
+      {
+        "key": "is_billing_contact",
+        "label": "Billing contact",
+        "type": "boolean",
+        "current": false,
+        "proposed": true
+      },
+      {
+        "key": "marketing_opt_in",
+        "label": "Marketing opt-in",
+        "type": "boolean",
+        "current": true,
+        "proposed": false
+      },
+      {
+        "key": "tier",
+        "label": "Subscription tier",
+        "type": "enum",
+        "current": "pro",
+        "proposed": "enterprise",
+        "options": [
+          {
+            "value": "pro",
+            "label": "Pro"
+          },
+          {
+            "value": "enterprise",
+            "label": "Enterprise"
+          }
+        ]
+      },
+      {
+        "key": "notes",
+        "label": "Migration notes",
+        "type": "text",
+        "current": "\u2014",
+        "proposed": "Migrated from legacy /v1/users; legal sign-off in ticket OPS-3401."
+      }
+    ]
+  }
+}

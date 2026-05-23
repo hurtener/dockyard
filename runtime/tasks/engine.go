@@ -22,6 +22,16 @@ const (
 	MethodResult = "tasks/result"
 	MethodCancel = "tasks/cancel"
 	MethodList   = "tasks/list"
+	// MethodSupplyInput is a Dockyard-internal extension method (Phase 25 /
+	// D-134) that delivers an `input_required` elicitation response to a
+	// suspended task — the wire half of [Engine.SupplyInput]. The vendored
+	// experimental Tasks spec does not define a standard wire shape for
+	// resuming an input_required task (the SDK-typed surface is engine-
+	// internal); the inspector needs one to forward an App's
+	// elicitation-response over HTTP. The method name is namespaced under
+	// `dockyard/` so it cannot be confused with a future standard spec
+	// method — a deliberate vendor prefix per RFC §16.
+	MethodSupplyInput = "dockyard/tasks/supplyInput"
 )
 
 // defaultPollInterval is the pollInterval (ms) the engine suggests to a

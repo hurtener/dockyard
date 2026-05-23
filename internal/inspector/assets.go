@@ -161,6 +161,61 @@ func newMux(opts Options, log *slog.Logger) http.Handler {
 		_ = json.NewEncoder(w).Encode(resp)
 	})
 
+	// /api/tasks/elicitation — the operator-initiated elicitation-response
+	// surface (Phase 25 / D-134). The inspector frontend POSTs the App's
+	// elicitation-response (the user's "Approve" / "Reject" reply); this
+	// handler dispatches to the configured Elicitor, which opens a
+	// short-lived MCP-client-style POST and calls `tasks/result` against the
+	// attached server. The endpoint is localhost-only via the listener's
+	// [requireLoopback] gate; the operator is the one driving the write
+	// through the App's button. A detached inspector (no Elicitor
+	// configured) answers 503. A transport-level failure answers 502 with a
+	// typed JSON message. A server-side refusal (the JSON-RPC envelope
+	// carries an `error` block) is a successful RPC: HTTP 200 with
+	// Delivered=false + the server's error message, mirroring the
+	// `IsError`-as-200 pattern D-131 set for tools/invoke.
+	mux.HandleFunc("POST /api/tasks/elicitation", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+
+		if opts.Elicitor == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "inspector is detached — no MCP server attached to deliver elicitations to",
+			})
+			return
+		}
+
+		var req ElicitationRequest
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "invalid tasks/elicitation body: " + err.Error(),
+			})
+			return
+		}
+		if req.TaskID == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "tasks/elicitation: `taskId` is required",
+			})
+			return
+		}
+
+		resp, err := opts.Elicitor(r.Context(), req)
+		if err != nil {
+			log.WarnContext(r.Context(), "dockyard inspector: tasks/elicitation failed",
+				slog.String("taskId", req.TaskID),
+				slog.String("error", err.Error()))
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
 	// /api/apps — the read-only App-preview source. It performs a read-only
 	// resources/list + resources/read of the attached server's ui:// resources
 	// (RFC §12 line 711 — the inspector renders the server's Apps; D-103). When

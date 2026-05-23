@@ -24,7 +24,11 @@
     CallToolFixtureResult,
     HostRpcLogEntry,
   } from '../host/host-bridge.js';
-  import type { HostCapabilities, HostContext } from '@dockyard/bridge';
+  import type {
+    ElicitationResponseParams,
+    HostCapabilities,
+    HostContext,
+  } from '@dockyard/bridge';
 
   interface Props {
     /** The App's HTML document — set as the iframe `srcdoc`. */
@@ -56,6 +60,25 @@
      * template's pattern) would stay on its loading state forever.
      */
     pushToolResult?: unknown;
+    /**
+     * Called when the App posts a `ui/notifications/elicitation-response`
+     * (Phase 25 / D-134). The inspector wires this to its backend's
+     * `POST /api/tasks/elicitation` endpoint, which forwards the reply
+     * to the attached server's `tasks/result`. The App-frame itself
+     * does not call the network — it stays a pure host-half shell.
+     */
+    onElicitationResponse?: (params: ElicitationResponseParams) => void;
+    /**
+     * Optional `_meta.taskId` stamped on the pushed tool-result. The
+     * runtime's related-task association stamps this on a real
+     * `tasks/result` payload (RFC §8.6) so the App can correlate the
+     * push with the task it is answering. The fixture switcher does
+     * not have a real task id, but operator-initiated invokes and
+     * future real task results carry one — when present, it is
+     * forwarded so the App's elicitation-response carries the right
+     * task id.
+     */
+    taskIdMeta?: string;
   }
 
   let {
@@ -66,6 +89,8 @@
     hostCapabilities,
     fixtureResult,
     pushToolResult,
+    onElicitationResponse,
+    taskIdMeta,
   }: Props = $props();
 
   let iframe = $state<HTMLIFrameElement | undefined>(undefined);
@@ -85,6 +110,14 @@
   function wire(): void {
     if (!iframe) return;
     handle?.close();
+    // Reset the loop-guard for the freshly mounted iframe — a new App
+    // instance starts blank and needs the current pushToolResult
+    // re-delivered (Phase 25 — `lastSentPayload` retains its value
+    // across iframe re-mounts because it sits outside the effect's
+    // closure; without this reset, the App that was just remounted
+    // never sees the active fixture). The same value will only flow
+    // once into the new instance.
+    lastSentPayload = '';
     handle = mountAppFrame({
       iframe,
       hostWindow: window,
@@ -97,6 +130,12 @@
     handle.bridge.setCallToolResponder(
       fixtureResult ? () => fixtureResult : undefined,
     );
+    // Wire the elicitation-response sink (Phase 25 / D-134). The
+    // host-half logs the notification to the RPC panel either way; with
+    // a sink wired, it additionally forwards the typed params to the
+    // caller — the inspector wires this to the backend POST that
+    // delivers the elicitation to the attached server's tasks/result.
+    handle.bridge.setElicitationResponder(onElicitationResponse);
   }
 
   function retry(): void {
@@ -145,6 +184,12 @@
     );
   });
 
+  // Re-wire the elicitation responder when the caller-supplied handler
+  // changes — same shape as the fixture responder.
+  $effect(() => {
+    handle?.bridge.setElicitationResponder(onElicitationResponse);
+  });
+
   // Push the active fixture's structuredContent to the App as a `tool-result`
   // notification, but only AFTER the bridge handshake is complete. The
   // effect tracks both pushToolResult AND frameStatus, so it re-runs when
@@ -180,9 +225,16 @@
     lastSentPayload = serialised;
     // host-bridge clones every outbound message; we don't need to clone here
     // too, but it does no harm and decouples the AppFrame from that detail.
+    // Stamp the related-task id in _meta when the caller supplied one
+    // (Phase 25 — the App's elicitation-response needs to know which
+    // task it is answering; the runtime's related-task association
+    // does this on a real tasks/result, but the fixture path needs us
+    // to forward it explicitly).
+    const meta = taskIdMeta ? { taskId: taskIdMeta } : undefined;
     handle.bridge.sendToolResult({
       content: [],
       structuredContent: pushToolResult,
+      ...(meta ? { _meta: meta } : {}),
     });
   });
 

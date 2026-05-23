@@ -1,0 +1,16 @@
+{
+  "name": "permission",
+  "description": "The current requestor is not authorized to approve.",
+  "state": "permission",
+  "input": {
+    "title": "Grant admin role to alice@acme.com?",
+    "description": "Adds full administrative permissions to the user."
+  },
+  "output_override": {
+    "kind": "approval",
+    "state": "permission",
+    "title": "Grant admin role to alice@acme.com?",
+    "description": "Adds full administrative permissions to the user.",
+    "message": "You are not authorized to grant admin roles. Ask an org owner to approve."
+  }
+}

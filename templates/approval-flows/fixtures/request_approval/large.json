@@ -1,0 +1,45 @@
+{
+  "name": "large",
+  "description": "A dense prompt with a long description and 12 metadata rows.",
+  "state": "ready",
+  "input": {
+    "title": "Approve the 2026-Q2 contract renewal for ACME Corp?",
+    "description": "ACME Corp's 2026-Q2 renewal moves them from the Pro tier to Enterprise. New seat count is 248 (was 120). Net ARR uplift is $186,400. Term is 24 months, with a 12-month opt-out at month 13. Custom MSA accepted with two amendments: (a) AWS data residency in eu-central-1 only; (b) SOC 2 Type II audit report supplied annually. Procurement signed the amendments on 2026-05-21. Legal review complete. Finance approval pending \u2014 your sign-off triggers the contract send via DocuSign.",
+    "category": "contracts",
+    "metadata": {
+      "account": "ACME Corp",
+      "previous_tier": "Pro",
+      "new_tier": "Enterprise",
+      "previous_seats": 120,
+      "new_seats": 248,
+      "net_arr_uplift_usd": 186400,
+      "term_months": 24,
+      "opt_out_month": 13,
+      "data_residency": "eu-central-1",
+      "msa_amendments": 2,
+      "procurement_signed_at": "2026-05-21",
+      "legal_review_status": "complete"
+    }
+  },
+  "output_override": {
+    "kind": "approval",
+    "state": "awaiting",
+    "title": "Approve the 2026-Q2 contract renewal for ACME Corp?",
+    "description": "ACME Corp's 2026-Q2 renewal moves them from the Pro tier to Enterprise. New seat count is 248 (was 120). Net ARR uplift is $186,400. Term is 24 months, with a 12-month opt-out at month 13. Custom MSA accepted with two amendments: (a) AWS data residency in eu-central-1 only; (b) SOC 2 Type II audit report supplied annually. Procurement signed the amendments on 2026-05-21. Legal review complete. Finance approval pending \u2014 your sign-off triggers the contract send via DocuSign.",
+    "category": "contracts",
+    "metadata": {
+      "account": "ACME Corp",
+      "previous_tier": "Pro",
+      "new_tier": "Enterprise",
+      "previous_seats": 120,
+      "new_seats": 248,
+      "net_arr_uplift_usd": 186400,
+      "term_months": 24,
+      "opt_out_month": 13,
+      "data_residency": "eu-central-1",
+      "msa_amendments": 2,
+      "procurement_signed_at": "2026-05-21",
+      "legal_review_status": "complete"
+    }
+  }
+}

@@ -110,6 +110,17 @@ type Options struct {
 	// execution).
 	Invoker ToolInvoker
 
+	// Elicitor delivers one operator-initiated elicitation-response to the
+	// attached MCP server (Phase 25 / D-134). When nil,
+	// `POST /api/tasks/elicitation` answers 503 — the inspector is detached or
+	// the operator has not wired an elicitor. Use [ElicitationFromServer] to
+	// source it from a running MCP server. D-134 extends D-131: the inspector
+	// additionally forwards an App's elicitation-response notification to the
+	// attached server's `tasks/result` endpoint, on the operator's
+	// deliberate "Approve" / "Reject" click in the App preview. Still within
+	// P4 (localhost-bound, operator-driven, no long-lived client).
+	Elicitor Elicitor
+
 	// Logger is the structured logger. When nil, a no-op logger is used.
 	Logger *slog.Logger
 }

@@ -60,7 +60,7 @@ workflow (D-080).
 - `dockyard generate` / `validate` (Phase 18), `dev` (Phase 19), `build` /
   `run` / `install` (Phase 20), `test` (Phase 21). Phase 17 does not pre-stub
   them; each later phase adds its own command.
-- Templates (`analytics-widgets`, `approval-flow`, `inspector`) — Wave 9.
+- Templates (`analytics-widgets`, `approval-flows`, `inspector`) — Wave 9.
   Phase 17 builds only the no-template path; the `--template` flag itself
   lands in Phase 24 (decision D-128 — the template-discovery seam).
 - A scaffolded UI. The no-template server ships no UI, so it composes no

@@ -1,0 +1,22 @@
+{
+  "name": "__PROJECT_NAME__-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@dockyard/bridge": "__DOCKYARD_BRIDGE_SPEC__",
+    "@dockyard/ui": "__DOCKYARD_UI_SPEC__"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "svelte": "^5.19.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11",
+    "vite-plugin-singlefile": "^2.1.0"
+  }
+}

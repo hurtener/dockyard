@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dockyard Inspector</title>
+    <style>
+      /*
+       * Phase 25 — full-viewport layout. The AppShell mounts with
+       * `fullViewport=true`, but the shell can only fill the viewport when
+       * its ancestors do too. html / body / #app must be 100vh + reset
+       * margins; the page-level scroll lives inside each rail region.
+       */
+      html, body { height: 100vh; margin: 0; padding: 0; overflow: hidden; }
+      #app { height: 100vh; }
+    </style>
   </head>
   <body>
     <div id="app"></div>

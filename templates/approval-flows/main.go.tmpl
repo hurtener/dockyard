@@ -1,0 +1,243 @@
+// Command __PROJECT_NAME__ is the approval-flows MCP server scaffolded by
+// `dockyard new --template approval-flows` (RFC §10, Phase 25).
+//
+// It registers two task-augmented tools — request_approval,
+// propose_with_edits — wired to one inline-only App. The transport is
+// chosen by the DOCKYARD_TRANSPORT environment variable ("stdio" by
+// default, or "http" for the streamable-HTTP service mode). Wire it into
+// an MCP host (Claude, Cursor, …) with `dockyard install`.
+//
+// This template is the first product driver of the Tasks×Apps pattern
+// (RFC §8.6). The scaffolded main constructs a real `tasks.Engine` over
+// an in-memory `TaskStore` and attaches it via `server.Options.Tasks`
+// (RFC §8.4, remediation R2 / D-108). Phase 25 / D-135 makes this
+// wiring the scaffold's default for any template that declares a
+// task-supporting tool in its manifest.
+package main
+
+import (
+	"context"
+	"embed"
+	"errors"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+
+	"github.com/hurtener/dockyard/runtime/apps"
+	"github.com/hurtener/dockyard/runtime/obs"
+	"github.com/hurtener/dockyard/runtime/server"
+	"github.com/hurtener/dockyard/runtime/tasks"
+	"github.com/hurtener/dockyard/runtime/tool"
+
+	"__MODULE_PATH__/internal/contracts"
+	"__MODULE_PATH__/internal/handlers"
+)
+
+// uiBundle holds the Vite-built single-file App bundle. `dockyard build`
+// runs `npm run build` in web/ before `go build`, so web/dist/index.html
+// exists at embed time. The `all:` prefix preserves hashed asset names
+// (RFC §14, brief 06 §2.2); empty `_` and `.` files would otherwise be
+// skipped.
+//
+//go:embed all:web/dist
+var uiBundle embed.FS
+
+// httpAddr is the address the HTTP transport listens on when
+// DOCKYARD_TRANSPORT=http. DOCKYARD_HTTP_ADDR overrides it.
+const httpAddr = "127.0.0.1:8080"
+
+// appURI is the ui:// URI under which the approvals App is served as an
+// MCP resource. The host segment is the manifest name (RFC §7.1 + brief
+// 01 §2.2).
+const (
+	appURI  = "ui://__PROJECT_NAME__/approvals"
+	appName = "approvals"
+)
+
+func main() {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	// The obs/v1 SSE sink is the out-of-band, localhost-bound event stream
+	// the inspector subscribes to (RFC §11.3, §12). Mounting it lets
+	// `dockyard inspect --url <server>` relay the live obs/v1 events into
+	// its Events / Analytics / Tasks panels — including this template's
+	// task.progress lifecycle events, which the Tasks panel renders as a
+	// Timeline.
+	obsSink, err := obs.NewSSESink("")
+	if err != nil {
+		logger.Error("create obs sink", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	defer func() { _ = obsSink.Close() }()
+
+	// --- the Tasks engine (D-135) -----------------------------------------
+	//
+	// The approval-flows template declares both its tools `task_support:
+	// required` — every tool call runs as an MCP Task with an
+	// `input_required` round-trip (RFC §8.4). The scaffolded main is
+	// therefore responsible for constructing a real `tasks.Engine` over a
+	// real `TaskStore` and attaching it to the server via
+	// `server.Options.Tasks` (the R2 follow-up D-108 named). Phase 25 /
+	// D-135 generalises this wiring: any template that declares a
+	// task-supporting tool in its manifest gets the same generated code.
+	//
+	// In-memory store. For a single-user stdio deployment the in-memory
+	// store is correct: tasks live as long as the process. For a
+	// production HTTP deployment, replace with sqlitestore.Open + the
+	// engine's migration step (see test/integration/r2_tasks_mount_test.go
+	// for the pattern). The contract is the `tasks.TaskStore` seam — the
+	// engine works against either driver.
+	taskStore := tasks.NewInMemoryStore()
+	engine, err := tasks.NewEngine(taskStore, &tasks.Options{
+		Logger: logger,
+		Obs:    obsSink,
+		// Stdio is single-user and unauthenticated: tasks/list is not
+		// advertised (brief 02 §4.5). An HTTP deployment with real
+		// authentication should set RequestorIdentifiable=true and pass
+		// an AuthContextFunc through WithTasks (see below).
+		RequestorIdentifiable: false,
+		AdvertiseList:         false,
+		// A short poll interval keeps the inspector's Tasks panel
+		// responsive; production deployments may want to raise this.
+		PollInterval: 250,
+	})
+	if err != nil {
+		logger.Error("create tasks engine", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	// Start the TTL purge sweep (no-op when no purge interval is
+	// configured). Stop it on shutdown.
+	engine.StartSweep(ctx)
+	defer engine.StopSweep()
+
+	srv, err := server.New(server.Info{
+		Name:    "__PROJECT_NAME__",
+		Title:   "__PROJECT_TITLE__",
+		Version: "0.1.0",
+	}, &server.Options{
+		Logger: logger,
+		Obs:    obsSink,
+		// Attach the Tasks engine — the server's stdio + HTTP transports
+		// will now intercept tasks/* JSON-RPC frames and route them into
+		// the engine (RFC §8.2, D-108).
+		Tasks: engine,
+		// For HTTP with real auth, supply a TasksAuthContext function
+		// here that derives the requestor's identity from the bearer
+		// token; the engine then binds tasks to that context (RFC §8.5).
+		// Stdio is unauthenticated; leave it nil for the default.
+		TasksAuthContext: nil,
+	})
+	if err != nil {
+		logger.Error("create server", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	logger.Info("obs/v1 SSE stream",
+		slog.String("addr", "http://"+obsSink.Addr()+"/obs/v1/stream"))
+
+	if err := registerApp(srv); err != nil {
+		logger.Error("register app", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	if err := registerTools(srv, engine); err != nil {
+		logger.Error("register tools", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	if err := serve(ctx, srv, obsSink, logger); err != nil {
+		logger.Error("serve", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+}
+
+// registerApp installs the embedded single-file Svelte bundle as the
+// `ui://<name>/approvals` MCP App resource (RFC §7.1, §7.4 — inline,
+// deny-by-default CSP). Every approval tool declares `.UI(appName)` so its
+// result renders inside this App in the host's chat surface.
+func registerApp(srv *server.Server) error {
+	html, err := fs.ReadFile(uiBundle, "web/dist/index.html")
+	if err != nil {
+		return err
+	}
+	return apps.Register(srv, apps.App{
+		URI:   appURI,
+		Name:  appName,
+		Title: "__PROJECT_TITLE__ — approvals",
+		HTML:  html,
+	})
+}
+
+// registerTools wires the two approval tools onto the server. Each tool
+// is declared with the runtime/tool fluent builder over its typed
+// contract pair (P1 — the generated schema is what the host sees; the
+// Go struct is the source of truth). The handler reaches the Tasks
+// engine through the closure, so a tool call creates a real task that
+// pauses at `input_required` until the user replies through the
+// bridge's elicitation-response notification (Phase 25 / D-134).
+func registerTools(srv *server.Server, engine *tasks.Engine) error {
+	reqApproval := handlers.CreateRequestApproval{Engine: engine}
+	if err := tool.New[contracts.RequestApprovalInput, contracts.RequestApprovalOutput]("request_approval").
+		Describe("Pause for human approval of a single decision. Renders an approval card inline; resumes on the user's verdict.").
+		UI(appName).
+		Handler(reqApproval.Handler).
+		Register(srv); err != nil {
+		return err
+	}
+	proposeEdits := handlers.CreateProposeWithEdits{Engine: engine}
+	if err := tool.New[contracts.ProposeWithEditsInput, contracts.ProposeWithEditsOutput]("propose_with_edits").
+		Describe("Propose a structured change with user-editable fields; pause for review; resume with the final edits.").
+		UI(appName).
+		Handler(proposeEdits.Handler).
+		Register(srv); err != nil {
+		return err
+	}
+	return nil
+}
+
+// serve brings up the transport named by DOCKYARD_TRANSPORT.
+func serve(ctx context.Context, srv *server.Server, obsSink *obs.SSESink, logger *slog.Logger) error {
+	switch transport := os.Getenv("DOCKYARD_TRANSPORT"); transport {
+	case "", "stdio":
+		// Stdio keeps the SSE sink strictly out-of-band — the inspector
+		// reaches it via the sink's own loopback listener (printed on
+		// startup).
+		return srv.ServeStdio(ctx)
+	case "http":
+		return serveHTTP(ctx, srv, obsSink, logger)
+	default:
+		return errors.New("unsupported DOCKYARD_TRANSPORT " + transport + " (want \"stdio\" or \"http\")")
+	}
+}
+
+// serveHTTP serves the streamable-HTTP transport with the runtime's
+// secure defaults (RFC §5.2). It additionally mounts the obs/v1 SSE
+// stream on `/obs/v1/stream` of the SAME listener so the inspector can
+// subscribe with just `--url <server>` (D-132).
+func serveHTTP(ctx context.Context, srv *server.Server, obsSink *obs.SSESink, logger *slog.Logger) error {
+	handler, err := srv.HTTPHandler(nil)
+	if err != nil {
+		return err
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/obs/v1/stream", obsSink.Handler())
+	mux.Handle("/", handler)
+	addr := httpAddr
+	if override := os.Getenv("DOCKYARD_HTTP_ADDR"); override != "" {
+		addr = override
+	}
+	httpSrv := &http.Server{Addr: addr, Handler: mux}
+	go func() {
+		<-ctx.Done()
+		_ = httpSrv.Close()
+	}()
+	logger.Info("serving streamable-HTTP transport", slog.String("addr", addr))
+	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
