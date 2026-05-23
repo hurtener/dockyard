@@ -43,11 +43,13 @@
     fetchApps,
     fetchProjectFixtures,
     obsStreamURL,
+    postElicitationResponse,
     type ServerInfo,
     type VerdictRow,
     type AppPreview,
     type ToolInvokeResult,
   } from './lib/api.js';
+  import type { ElicitationResponseParams } from '@dockyard/bridge';
   import { ObsStream, type ObsEvent } from './lib/obs.js';
   import type { RpcEntry } from './lib/rpc.js';
   import type { HostRpcLogEntry, CallToolFixtureResult } from './host/host-bridge.js';
@@ -264,6 +266,41 @@
     capabilities = next;
   }
 
+  /**
+   * Extracts the related task id from a tool result's structured
+   * payload. Approval-flows-style templates stamp `task_id` directly
+   * onto their output (Phase 25), so the App can answer the right
+   * task without depending on the runtime's related-task `_meta`
+   * stamping (which only happens on `tasks/result`, not on the
+   * synchronous push the inspector emits).
+   */
+  function extractTaskId(structured: unknown): string {
+    if (typeof structured !== 'object' || structured === null) return '';
+    const s = structured as Record<string, unknown>;
+    const id = s.task_id ?? s.taskId;
+    return typeof id === 'string' ? id : '';
+  }
+
+  /**
+   * Forwards an App's elicitation-response notification (Phase 25 /
+   * D-134) to the inspector backend's `POST /api/tasks/elicitation`
+   * endpoint, which in turn delivers it to the attached server's
+   * `tasks/result`. Fire-and-forget at the View layer; a delivery
+   * failure is logged through the console for the developer (the App
+   * observes the task's terminal status through subsequent
+   * `tool-result` pushes and the Tasks panel — there is no synchronous
+   * round-trip on this channel).
+   */
+  function onElicitationResponse(params: ElicitationResponseParams): void {
+    postElicitationResponse(
+      { taskId: params.taskId, data: params.data, declined: params.declined },
+      base,
+    ).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[inspector] elicitation-response delivery failed', err);
+    });
+  }
+
   onMount(async () => {
     try {
       serverInfo = await fetchServerInfo(base);
@@ -284,7 +321,7 @@
   const emulatedHostCapabilities = $derived(hostCapabilitiesFor(capabilities));
 </script>
 
-<AppShell>
+<AppShell fullViewport>
   {#snippet header()}
     <PageHeader title="Dockyard Inspector" subtitle={headerSubtitle}>
       {#snippet lead()}
@@ -395,6 +432,8 @@
         hostCapabilities={emulatedHostCapabilities}
         fixtureResult={invokeResult ?? activeFixture}
         pushToolResult={invokeResult?.structuredContent ?? activeFixture?.structuredContent}
+        onElicitationResponse={onElicitationResponse}
+        taskIdMeta={extractTaskId(invokeResult?.structuredContent ?? activeFixture?.structuredContent)}
       />
     {:else if appsState === 'loading'}
       <LoadingState message="Reading the attached server's ui:// App resources…" />

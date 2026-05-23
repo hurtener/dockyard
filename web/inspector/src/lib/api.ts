@@ -228,6 +228,79 @@ export async function invokeTool(
 }
 
 /**
+ * The shape the bridge posts as an elicitation-response notification —
+ * mirrors `@dockyard/bridge`'s `ElicitationResponseParams`. The inspector
+ * frontend forwards this verbatim to its backend; the backend translates
+ * it into a raw `tasks/result` JSON-RPC frame against the attached
+ * server.
+ */
+export interface ElicitationRequest {
+  taskId: string;
+  data?: unknown;
+  declined?: boolean;
+}
+
+/**
+ * The inspector backend's reply to a successful elicitation delivery
+ * (Phase 25 / D-134). `delivered` is true when the attached server
+ * accepted the elicitation; false (with a non-empty `error`) when it
+ * refused. A transport-level failure (the server is unreachable, the
+ * task does not exist) is a thrown error the caller surfaces in the
+ * App preview's error state.
+ */
+export interface ElicitationResponse {
+  taskId: string;
+  delivered: boolean;
+  error?: string;
+}
+
+/**
+ * Posts an App's elicitation-response to the inspector backend, which
+ * forwards it to the attached server's `tasks/result` endpoint
+ * (Phase 25 / D-134). The operator is the one driving the write — the
+ * App's "Approve" / "Reject" click. A 503 (the inspector is detached)
+ * surfaces as a thrown error so the App preview's error state shows an
+ * honest message rather than a silent drop.
+ */
+export async function postElicitationResponse(
+  request: ElicitationRequest,
+  base = '',
+  fetchImpl: typeof fetch = fetch,
+): Promise<ElicitationResponse> {
+  const resp = await fetchImpl(`${base}/api/tasks/elicitation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!resp.ok) {
+    let detail = `inspector: /api/tasks/elicitation returned ${resp.status}`;
+    try {
+      const body: unknown = await resp.json();
+      if (
+        typeof body === 'object' &&
+        body !== null &&
+        typeof (body as { error?: unknown }).error === 'string'
+      ) {
+        detail = (body as { error: string }).error;
+      }
+    } catch {
+      // A non-JSON error body — keep the status-code detail.
+    }
+    throw new Error(detail);
+  }
+  const data: unknown = await resp.json();
+  if (typeof data !== 'object' || data === null) {
+    return { taskId: request.taskId, delivered: false };
+  }
+  const d = data as Partial<ElicitationResponse>;
+  return {
+    taskId: typeof d.taskId === 'string' ? d.taskId : request.taskId,
+    delivered: d.delivered === true,
+    error: typeof d.error === 'string' ? d.error : undefined,
+  };
+}
+
+/**
  * Fetches the project's on-disk fixtures from `GET /api/fixtures` (Phase 24,
  * D-126). When the inspector was attached with `--dir <project>`, the
  * backend reads `<project>/fixtures/<tool>/<kind>.json` and serves them

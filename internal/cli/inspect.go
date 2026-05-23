@@ -118,6 +118,7 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 	var relay *inspector.Relay
 	var appSource inspector.AppSource
 	var invoker inspector.ToolInvoker
+	var elicitor inspector.Elicitor
 	serverInfo := inspector.ServerInfo{Name: "inspector", Transport: "detached"}
 	if cfg.serverURL != "" {
 		obsURL, infErr := obsStreamURLFor(cfg.serverURL)
@@ -134,6 +135,12 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 		// in the inspector UI. Same short-lived-session pattern as appSource;
 		// the listener's loopback gate keeps it dev-only.
 		invoker = inspector.ToolsFromServer(cfg.serverURL)
+		// The operator-initiated elicitation-response surface (Phase 25 /
+		// D-134) — delivers an App's reply to an `input_required` task to
+		// the attached server's `tasks/result` endpoint. Same short-lived,
+		// localhost-only posture as the invoker; the operator is the one
+		// driving the write through the App's Approve / Reject button.
+		elicitor = inspector.ElicitationFromServer(cfg.serverURL)
 		serverInfo = inspector.ServerInfo{
 			Name:      cfg.serverURL,
 			Transport: "http",
@@ -166,6 +173,7 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 		Apps:       appSource,
 		Fixtures:   fixtures,
 		Invoker:    invoker,
+		Elicitor:   elicitor,
 		Logger:     cfg.logger,
 	})
 	if err != nil {
