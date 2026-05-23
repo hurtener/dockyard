@@ -116,6 +116,16 @@
       "min": 75,
       "band": "cli-tooling",
       "reason": "Demonstration handlers shipped by the analytics-widgets template (Phase 24, decision D-124). Synthetic data; a developer who scaffolds the project swaps each handler body for a real source. Held above the 70% CLI-tooling floor (the Phase 24 plan target) — the surface is exemplary, not production-critical for the framework itself."
+    },
+    "github.com/hurtener/dockyard/templates/approval-flows": {
+      "min": 80,
+      "band": "new-package",
+      "reason": "The approval-flows builtin: //go:embed + the substitution table that materialises it (Phase 25, decision D-128). Held to the new-package band — builtin_test.go drives Materialise + substitutionsFor + titleCase; the Phase 25 integration test drives the full real scaffold-and-build cycle end to end."
+    },
+    "github.com/hurtener/dockyard/templates/approval-flows/pkg/handlers": {
+      "min": 55,
+      "band": "subprocess-override",
+      "reason": "Demonstration handlers shipped by the approval-flows template (Phase 25, decision D-134). Unlike the synchronous analytics-widgets handlers, these are inherently tasks.Engine-driven — the Handler happy paths kick off run* goroutines that the engine pumps via SupplyInput. Their happy-path coverage lives in test/integration/phase25_approval_flows_test.go, which drives the full input_required lifecycle through a real engine; in-package unit tests cover the edge cases (no-engine fallback, terminal builders for approved/rejected/declined, summarisers, decoders, marshallers, finalise helper). The Phase 21.5 coverage-gate override mechanism (D-092) exists precisely for packages whose happy paths require integration coverage rather than mocked-engine duplication."
     }
   },
   "exempt": [
