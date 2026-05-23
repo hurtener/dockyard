@@ -142,6 +142,12 @@ type Codec interface {
 
 	// DecodeListTasksResult parses a `ListTasksResult`.
 	DecodeListTasksResult(raw json.RawMessage) (ListTasksResult, error)
+
+	// DecodeSupplyInputParams parses the Dockyard-internal
+	// `dockyard/tasks/supplyInput` params (Phase 25 / D-134) — the wire
+	// half of `tasks.Engine.SupplyInput`. An empty `taskId` is a
+	// malformed-meta error.
+	DecodeSupplyInputParams(raw json.RawMessage) (SupplyInputParams, error)
 }
 
 // v1Codec is the codec for every protocol version Dockyard V1 supports. The
@@ -585,4 +591,18 @@ func (v1Codec) DecodeListTasksResult(raw json.RawMessage) (ListTasksResult, erro
 		out.Tasks = append(out.Tasks, t)
 	}
 	return out, nil
+}
+
+// DecodeSupplyInputParams parses the Dockyard-internal
+// `dockyard/tasks/supplyInput` params (Phase 25 / D-134). An empty
+// `taskId` is a malformed-meta error — the field is required.
+func (v1Codec) DecodeSupplyInputParams(raw json.RawMessage) (SupplyInputParams, error) {
+	var w supplyInputParamsWire
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return SupplyInputParams{}, fmt.Errorf("%w: SupplyInputParams: %w", ErrMalformedMeta, err)
+	}
+	if w.TaskID == "" {
+		return SupplyInputParams{}, fmt.Errorf("%w: SupplyInputParams: taskId is required", ErrMalformedMeta)
+	}
+	return SupplyInputParams(w), nil
 }

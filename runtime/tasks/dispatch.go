@@ -34,9 +34,32 @@ func (e *Engine) Dispatch(ctx context.Context, method string, params json.RawMes
 			return nil, fmt.Errorf("%w: %q (tasks/list not advertised)", ErrUnknownMethod, method)
 		}
 		return e.handleList(ctx, params)
+	case MethodSupplyInput:
+		return e.handleSupplyInput(ctx, params)
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownMethod, method)
 	}
+}
+
+// handleSupplyInput serves the Dockyard-internal `dockyard/tasks/supplyInput`
+// method (Phase 25 / D-134) — the wire half of [Engine.SupplyInput]. The
+// wire shape lives in internal/protocolcodec; the engine consumes the
+// codec's typed SupplyInputParams (P3 — no raw envelope keys leave the
+// codec). ErrNoPendingInput / ErrTaskNotFound surface as JSON-RPC errors
+// so the inspector renders an honest message.
+func (e *Engine) handleSupplyInput(ctx context.Context, params json.RawMessage) (json.RawMessage, error) {
+	p, err := e.codec.DecodeSupplyInputParams(params)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidParams, err)
+	}
+	resp := InputResponse{Declined: p.Declined}
+	if len(p.Data) > 0 && string(p.Data) != "null" {
+		resp.Data = p.Data
+	}
+	if err := e.SupplyInput(ctx, p.TaskID, resp); err != nil {
+		return nil, err
+	}
+	return json.RawMessage(`{}`), nil
 }
 
 // handleGet serves tasks/get — a non-blocking poll returning the current task

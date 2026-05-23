@@ -81,11 +81,13 @@ func (m *Mount) WithAuthContext(fn AuthContextFunc) *Mount {
 	return m
 }
 
-// IsTasksMethod reports whether method is one of the four tasks/* methods the
-// mount intercepts.
+// IsTasksMethod reports whether method is one of the tasks/* methods the
+// mount intercepts. Includes the Dockyard-internal MethodSupplyInput
+// (Phase 25 / D-134) so the inspector's elicitation-response delivery
+// reaches the engine.
 func IsTasksMethod(method string) bool {
 	switch method {
-	case MethodGet, MethodResult, MethodCancel, MethodList:
+	case MethodGet, MethodResult, MethodCancel, MethodList, MethodSupplyInput:
 		return true
 	default:
 		return false
