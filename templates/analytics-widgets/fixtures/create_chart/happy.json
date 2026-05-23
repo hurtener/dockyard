@@ -1,0 +1,16 @@
+{
+  "name": "happy",
+  "description": "Revenue by month — six series, twelve months.",
+  "state": "ready",
+  "input": {
+    "type": "bar",
+    "title": "Revenue by month",
+    "data": {
+      "categories": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+      "series": [
+        { "name": "Revenue", "values": [42000, 51000, 49500, 56200, 60000, 64500, 70200, 68000, 71000, 73500, 78000, 82000] },
+        { "name": "Forecast", "values": [44000, 50500, 52000, 55000, 59500, 65000, 71000, 70500, 72000, 74000, 79000, 83500] }
+      ]
+    }
+  }
+}

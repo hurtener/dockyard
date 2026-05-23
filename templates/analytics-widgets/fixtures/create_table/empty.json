@@ -1,0 +1,12 @@
+{
+  "name": "empty",
+  "description": "Same columns, no rows match.",
+  "state": "empty",
+  "input": {
+    "columns": [
+      { "key": "name", "label": "Account", "type": "string" },
+      { "key": "arr", "label": "ARR", "type": "currency" }
+    ],
+    "rows": []
+  }
+}

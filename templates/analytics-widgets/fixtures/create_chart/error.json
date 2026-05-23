@@ -1,0 +1,19 @@
+{
+  "name": "error",
+  "description": "The chart payload's source is unreachable — render the error state with a retry.",
+  "state": "error",
+  "input": {
+    "type": "line",
+    "title": "Backend offline",
+    "data": { "series": [] }
+  },
+  "output_override": {
+    "kind": "chart",
+    "type": "line",
+    "title": "Backend offline",
+    "data": { "series": [] },
+    "theme": "auto",
+    "state": "error",
+    "message": "The analytics service is unreachable. Try again in a moment."
+  }
+}

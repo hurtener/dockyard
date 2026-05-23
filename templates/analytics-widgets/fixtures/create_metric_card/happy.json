@@ -1,0 +1,17 @@
+{
+  "name": "happy",
+  "description": "Customer health KPI with a sparkline and top-contributor breakdown.",
+  "state": "ready",
+  "input": {
+    "label": "Customer health",
+    "value": 87,
+    "unit": "/100",
+    "delta": { "value": "+3", "tone": "ok" },
+    "series": [82, 83, 85, 84, 86, 85, 87, 86, 88, 87, 86, 87],
+    "breakdowns": [
+      { "label": "Product engagement", "value": 92, "share": 0.42 },
+      { "label": "Support sentiment", "value": 88, "share": 0.31 },
+      { "label": "Renewal signal", "value": 80, "share": 0.27 }
+    ]
+  }
+}

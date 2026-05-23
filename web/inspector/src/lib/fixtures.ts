@@ -83,30 +83,61 @@ export const SLOW_FIXTURE_DELAY_MS = 1500;
 export const LARGE_FIXTURE_ROWS = 250;
 
 /**
- * Builds the six fixtures for a tool contract. Every fixture's
- * `structuredContent` is generated from `contract.outputSchema` so it is a
+ * A project-on-disk fixture loaded from `fixtures/<tool>/<kind>.json` (Phase
+ * 24, decision D-126). The inspector backend's `/api/fixtures` endpoint
+ * serves these; when present, [buildFixtures] uses them in preference to the
+ * schema-derived synthetic payloads so the App renders realistic data
+ * (real chart values, real table rows, a real metric card) rather than the
+ * `"sample-value"` placeholders the schema instantiator can produce.
+ */
+export interface ProjectFixture {
+  tool: string;
+  kind: FixtureKind;
+  description?: string;
+  state: string;
+  input?: Record<string, unknown>;
+  structuredContent?: Record<string, unknown>;
+}
+
+/**
+ * Builds the six fixtures for a tool contract. When a project on-disk fixture
+ * is provided in `overrides`, its `structuredContent` (and description) take
+ * precedence over the schema-derived synthetic payload — the inspector's
+ * /api/fixtures loader (Phase 24) wires this. With no override, every fixture
+ * is generated from `contract.outputSchema` so it remains a structurally
  * valid instance of the tool's generated output contract (P1).
  */
-export function buildFixtures(contract: ToolContract): Record<FixtureKind, Fixture> {
+export function buildFixtures(
+  contract: ToolContract,
+  overrides?: Partial<Record<FixtureKind, ProjectFixture>>,
+): Record<FixtureKind, Fixture> {
   const schema = contract.outputSchema;
+  const pick = (kind: FixtureKind, fallback: unknown): unknown => {
+    const o = overrides?.[kind];
+    if (o?.structuredContent && Object.keys(o.structuredContent).length > 0) {
+      return o.structuredContent;
+    }
+    return fallback;
+  };
   return {
     happy: {
       kind: 'happy',
       isError: false,
-      structuredContent: instantiate(schema, 'happy'),
+      structuredContent: pick('happy', instantiate(schema, 'happy')),
       text: `${contract.name}: result ready`,
       delayMs: 0,
     },
     empty: {
       kind: 'empty',
       isError: false,
-      structuredContent: instantiate(schema, 'empty'),
+      structuredContent: pick('empty', instantiate(schema, 'empty')),
       text: `${contract.name}: no results`,
       delayMs: 0,
     },
     error: {
       kind: 'error',
       isError: true,
+      structuredContent: overrides?.error?.structuredContent,
       text: `${contract.name}: tool error`,
       error: { code: -32000, message: 'the tool handler returned an error' },
       delayMs: 0,
@@ -114,6 +145,7 @@ export function buildFixtures(contract: ToolContract): Record<FixtureKind, Fixtu
     permission: {
       kind: 'permission',
       isError: true,
+      structuredContent: overrides?.permission?.structuredContent,
       text: `${contract.name}: permission denied`,
       error: { code: -32003, message: 'permission denied for this tool' },
       delayMs: 0,
@@ -121,14 +153,14 @@ export function buildFixtures(contract: ToolContract): Record<FixtureKind, Fixtu
     slow: {
       kind: 'slow',
       isError: false,
-      structuredContent: instantiate(schema, 'happy'),
+      structuredContent: pick('slow', instantiate(schema, 'happy')),
       text: `${contract.name}: result ready (delayed)`,
       delayMs: SLOW_FIXTURE_DELAY_MS,
     },
     large: {
       kind: 'large',
       isError: false,
-      structuredContent: instantiate(schema, 'large'),
+      structuredContent: pick('large', instantiate(schema, 'large')),
       text: `${contract.name}: ${LARGE_FIXTURE_ROWS} results`,
       delayMs: 0,
     },

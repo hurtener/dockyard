@@ -1,0 +1,19 @@
+{
+  "name": "slow",
+  "description": "The chart is still loading — exercise the loading state.",
+  "state": "loading",
+  "input": {
+    "type": "pie",
+    "title": "Pipeline by stage",
+    "data": { "series": [] }
+  },
+  "output_override": {
+    "kind": "chart",
+    "type": "pie",
+    "title": "Pipeline by stage",
+    "data": { "series": [] },
+    "theme": "auto",
+    "state": "loading",
+    "message": "Aggregating pipeline data…"
+  }
+}

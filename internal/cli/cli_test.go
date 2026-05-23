@@ -117,3 +117,30 @@ func TestNew_DockyardPathAddsReplace(t *testing.T) {
 		t.Errorf("replace directive is not absolute (want %s):\n%s", abs, gomod)
 	}
 }
+
+// TestNew_TemplateFlagListedInHelp proves the --template flag is wired into
+// the cobra `new` command's help (Phase 24 acceptance).
+func TestNew_TemplateFlagListedInHelp(t *testing.T) {
+	t.Parallel()
+	out, _, err := run(t, "new", "--help")
+	if err != nil {
+		t.Fatalf("new --help: %v", err)
+	}
+	if !strings.Contains(out, "--template") {
+		t.Errorf("new --help does not list --template:\n%s", out)
+	}
+}
+
+// TestNew_TemplateUnknown_TypedError proves an unregistered --template
+// surfaces ErrUnknownTemplate's CLI mapping rather than a generic error.
+func TestNew_TemplateUnknown_TypedError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	_, _, err := run(t, "new", "unknown-tpl", "--dir", dir, "--template", "no-such-template")
+	if err == nil {
+		t.Fatal("new --template no-such-template: want an error")
+	}
+	if !strings.Contains(err.Error(), "unknown template") {
+		t.Errorf("error message does not name the unknown-template case: %v", err)
+	}
+}

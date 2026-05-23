@@ -1,0 +1,60 @@
+# Dockyard manifest — the control plane for this MCP server (RFC §4.2).
+# Scaffolded from the analytics-widgets template (Phase 24, decision D-124).
+#
+# Three tools that each render an inline widget in the host's chat surface:
+# create_chart, create_table, create_metric_card. All three are wired to one
+# App (id: widgets) declared inline-only (decision D-126).
+name: __PROJECT_NAME__
+title: __PROJECT_TITLE__
+version: 0.1.0
+
+runtime:
+  transports: [stdio, http]
+  ui:
+    framework: svelte
+    # Single-file bundle: the App ships zero external origins, so the
+    # deny-by-default CSP just works (RFC §7.4, brief 01 §2.5).
+    bundle: single-file
+
+tools:
+  - name: create_chart
+    description: Render a chart (bar | line | area | pie | scatter | radar) inline in the host.
+    input: internal/contracts.CreateChartInput
+    output: internal/contracts.CreateChartOutput
+    ui: widgets
+    task_support: forbidden
+  - name: create_table
+    description: Render a sortable, paged data table inline in the host.
+    input: internal/contracts.CreateTableInput
+    output: internal/contracts.CreateTableOutput
+    ui: widgets
+    task_support: forbidden
+  - name: create_metric_card
+    description: Render a KPI metric card with an optional sparkline and breakdown.
+    input: internal/contracts.CreateMetricCardInput
+    output: internal/contracts.CreateMetricCardOutput
+    ui: widgets
+    task_support: forbidden
+
+apps:
+  - id: widgets
+    uri: ui://__PROJECT_NAME__/widgets
+    entry: web/src/App.svelte
+    # Inline only (decision D-126). The bridge will only ever grant inline;
+    # the App's dispatcher chooses the right widget for each tool's result.
+    display_modes: [inline]
+    csp:
+      connect: []
+      resource: []
+    visibility: [model, app]
+
+quality:
+  # All four UI-state gates on — every widget routes through PageState
+  # (CLAUDE.md §20, the four-state page rule).
+  require_loading_state: true
+  require_empty_state: true
+  require_error_state: true
+  require_permission_state: true
+  require_fixtures: true
+  require_contract_tests: true
+  require_spec_compliance: true

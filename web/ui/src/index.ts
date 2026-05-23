@@ -34,6 +34,7 @@ export { default as DataTable } from './DataTable.svelte';
 export { default as Pagination } from './Pagination.svelte';
 export { default as FilterBar } from './FilterBar.svelte';
 export { default as MetricCard } from './MetricCard.svelte';
+export { default as Sparkline } from './Sparkline.svelte';
 export { default as StatusChip } from './StatusChip.svelte';
 export { default as Timeline } from './Timeline.svelte';
 export { default as JsonInspector } from './JsonInspector.svelte';

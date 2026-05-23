@@ -41,6 +41,7 @@
     fetchVerdicts,
     fetchContracts,
     fetchApps,
+    fetchProjectFixtures,
     obsStreamURL,
     type ServerInfo,
     type VerdictRow,
@@ -50,7 +51,7 @@
   import type { RpcEntry } from './lib/rpc.js';
   import type { HostRpcLogEntry, CallToolFixtureResult } from './host/host-bridge.js';
   import type { ToolContract } from './lib/contracts.js';
-  import type { Fixture } from './lib/fixtures.js';
+  import type { Fixture, ProjectFixture } from './lib/fixtures.js';
   import {
     fullCapabilitySet,
     hostContextFor,
@@ -93,6 +94,9 @@
   // -- generated contracts (drive the fixture switcher) --
   let contracts = $state<ToolContract[]>([]);
   let contractsState = $state<PageStateValue>('loading');
+
+  // -- on-disk project fixtures (Phase 24, D-126) --
+  let projectFixtures = $state<ProjectFixture[]>([]);
 
   // -- capability-set emulation (the Host control) --
   let capabilities = $state<CapabilitySet>(fullCapabilitySet());
@@ -179,6 +183,17 @@
     }
   }
 
+  async function loadProjectFixtures(): Promise<void> {
+    try {
+      projectFixtures = await fetchProjectFixtures(base);
+    } catch {
+      // The on-disk fixtures are an *enhancement* — a fetch failure is a
+      // silent fallback to the schema-derived synthetic fixtures the
+      // FixturesPanel ships, not a user-facing error.
+      projectFixtures = [];
+    }
+  }
+
   /**
    * Loads the attached server's renderable Apps from the backend's
    * `/api/apps` endpoint. A test `appHtml` override skips the fetch. The
@@ -223,7 +238,7 @@
       serverInfo = { name: 'disconnected', version: '', transport: '' };
     }
     startStream();
-    await Promise.all([loadRpcLog(), loadVerdicts(), loadContracts(), loadApps()]);
+    await Promise.all([loadRpcLog(), loadVerdicts(), loadContracts(), loadApps(), loadProjectFixtures()]);
   });
 
   onDestroy(() => stream?.close());
@@ -277,6 +292,7 @@
           <RailCard title="Fixtures">
             <FixturesPanel
               {contracts}
+              {projectFixtures}
               panelState={contractsState}
               onRetry={loadContracts}
               onApply={applyFixture}
@@ -335,6 +351,7 @@
         hostContext={emulatedHostContext}
         hostCapabilities={emulatedHostCapabilities}
         fixtureResult={activeFixture}
+        pushToolResult={activeFixture?.structuredContent}
       />
     {:else if appsState === 'loading'}
       <LoadingState message="Reading the attached server's ui:// App resources…" />

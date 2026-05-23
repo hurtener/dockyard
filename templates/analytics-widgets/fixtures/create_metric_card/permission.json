@@ -1,0 +1,14 @@
+{
+  "name": "permission",
+  "description": "Requestor cannot see this metric for this account.",
+  "state": "permission",
+  "input": { "label": "ARR per account", "value": null },
+  "output_override": {
+    "kind": "metric_card",
+    "label": "ARR per account",
+    "value": null,
+    "theme": "auto",
+    "state": "permission",
+    "message": "You do not have permission to see revenue at the account level."
+  }
+}

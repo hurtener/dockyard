@@ -23,7 +23,7 @@ coherent and keeps the cost of a new page low.
 
 | Surface | What | Phase |
 |---------|------|-------|
-| Template App UIs | The Svelte UIs of the `analytical-card`, `approval-flow`, `inspector` templates | 24–26 |
+| Template App UIs | The Svelte UIs of the `analytics-widgets`, `approval-flow`, `inspector` templates | 24–26 |
 | The inspector | Dockyard's local test/debug surface | 22–23 |
 | The bridge shell library | `web/bridge/` — the `ui/` postMessage layer (non-visual, but consumes tokens) | 11 |
 | The docs site | The published GitHub Pages technical docs | 29 |
@@ -50,6 +50,9 @@ spec.
   - `Pagination` — page controls for a `DataTable` (or standalone).
   - `FilterBar` — the search input + filter chips; the one place a search lives.
   - `MetricCard` — one KPI: label, value, optional delta/trend.
+  - `Sparkline` — a small, token-driven, pure-SVG inline chart (composable
+    inside `MetricCard`, the inspector, the docs site, and templates).
+    Phase 24, decision D-127.
   - `StatusChip` — a small semantic state pill (ok / warn / error / info /
     neutral).
   - `Timeline` — an ordered sequence of timestamped events.

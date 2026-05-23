@@ -45,6 +45,17 @@
      * `tools/call` is answered from it (RFC §12 — the fixture switcher).
      */
     fixtureResult?: CallToolFixtureResult;
+    /**
+     * The active fixture's structuredContent, pushed to the App as a
+     * `tool-result` notification whenever it changes. This is the
+     * inspector's emulation of a real host: in production, the model
+     * invokes the tool and the host pushes the result. The inspector's
+     * fixture switcher pushes the fixture's structuredContent the same
+     * way so the App's `onToolResult` handlers fire — without it, an App
+     * that only subscribes to `tool-result` (the analytics-widgets
+     * template's pattern) would stay on its loading state forever.
+     */
+    pushToolResult?: unknown;
   }
 
   let {
@@ -54,6 +65,7 @@
     hostContext,
     hostCapabilities,
     fixtureResult,
+    pushToolResult,
   }: Props = $props();
 
   let iframe = $state<HTMLIFrameElement | undefined>(undefined);
@@ -96,11 +108,33 @@
   // emulated host capabilities change — a capability change re-runs the App's
   // `ui/initialize` handshake against the new host (RFC §12 capability-set
   // emulation).
+  //
+  // IMPORTANT — set the `srcdoc` from the effect rather than at attribute
+  // declaration time. Chromium has a long-standing race where an iframe
+  // whose srcdoc is set during the same parser tick as the element's
+  // insertion sometimes loads the HTML but never runs its scripts. Setting
+  // srcdoc here, AFTER `bind:this` has resolved and the iframe is attached
+  // to the DOM, makes the navigation deterministic — scripts always run.
   $effect(() => {
     void mountKey;
     void hostContext;
     void hostCapabilities;
-    if (iframe) wire();
+    void html;
+    if (!iframe) return;
+    const localIframe = iframe;
+    // Deferred srcdoc assignment via queueMicrotask + a no-op load wait.
+    // Chromium has a long-standing race where an iframe whose srcdoc is set
+    // during the same parser tick as the element's insertion sometimes
+    // loads the HTML but never runs its scripts (the navigation
+    // "completes" before the scripts execute). Setting srcdoc in a
+    // microtask, AFTER `bind:this` resolves and the iframe is in the DOM,
+    // makes the navigation deterministic — scripts always run.
+    queueMicrotask(() => {
+      if (localIframe.isConnected) {
+        localIframe.srcdoc = html;
+      }
+    });
+    wire();
   });
 
   // Feed the active fixture to the live bridge without re-mounting — selecting
@@ -109,6 +143,29 @@
     handle?.bridge.setCallToolResponder(
       fixtureResult ? () => fixtureResult : undefined,
     );
+  });
+
+  // Push the active fixture's structuredContent to the App as a `tool-result`
+  // notification, but only AFTER the bridge handshake is complete. The
+  // effect tracks both pushToolResult AND frameStatus, so it re-runs when
+  // either changes — including the transition handshaking→ready that the
+  // initial mount produces. Phase 24 — D-127.
+  //
+  // `structuredClone` over the raw prop yields a plain object: cross-frame
+  // postMessage uses the structured-clone algorithm and refuses to serialise
+  // a Svelte $state Proxy (DataCloneError) — a bug discovered in the Phase 24
+  // demo. Cloning HERE keeps that detail out of the BridgeShell.
+  $effect(() => {
+    void pushToolResult;
+    void frameStatus;
+    if (!handle || pushToolResult === undefined) return;
+    if (frameStatus !== 'ready') return; // wait for the handshake to finish
+    // host-bridge clones every outbound message; we don't need to clone here
+    // too, but it does no harm and decouples the AppFrame from that detail.
+    handle.bridge.sendToolResult({
+      content: [],
+      structuredContent: pushToolResult,
+    });
   });
 
   onDestroy(() => handle?.close());
@@ -134,12 +191,17 @@
   -->
   <div class="frame-region" data-state={pageState} data-testid="page-state">
     {#key mountKey}
+      <!--
+        `srcdoc` is set by the $effect above, not as a Svelte attribute, to
+        work around the Chromium iframe-srcdoc / mount-race that drops script
+        execution when the attribute and the DOM insertion land in the same
+        parser tick.
+      -->
       <iframe
         bind:this={iframe}
         title={appName}
         class="preview"
         sandbox={APP_SANDBOX}
-        srcdoc={html}
       ></iframe>
     {/key}
     {#if pageState === 'loading'}

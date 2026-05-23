@@ -1,0 +1,19 @@
+{
+  "name": "permission",
+  "description": "The requestor is not authorized to see this chart.",
+  "state": "permission",
+  "input": {
+    "type": "bar",
+    "title": "Revenue by region",
+    "data": { "series": [] }
+  },
+  "output_override": {
+    "kind": "chart",
+    "type": "bar",
+    "title": "Revenue by region",
+    "data": { "series": [] },
+    "theme": "auto",
+    "state": "permission",
+    "message": "You do not have permission to view this chart."
+  }
+}

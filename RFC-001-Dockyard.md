@@ -631,7 +631,8 @@ scaffold paths:
   building plain MCP servers.
 - **`dockyard new <name> --template <t>`** — a product-pattern showcase. **V1 ships
   three:**
-  - **`analytical-card`** — KPI / chart / table / explanation dashboards.
+  - **`analytics-widgets`** — chart / table / metric-card widgets, rendered
+    inline (one App, three contract-first widget tools; see decision D-124).
   - **`approval-flow`** — human-in-the-loop review (pairs with Tasks, §8.6).
   - **`inspector`** — object / log / trace / metadata inspection panels.
 

@@ -3104,3 +3104,249 @@ streamable-HTTP with a `Traceparent` header) prove the inheritance lands.
 The stdio transport is deliberately out of scope: stdio is the single-user
 local-deployment mode (RFC §5.2), there is no cross-process agent to
 inherit from, and the JSON-RPC frame layer carries no header analogue.
+
+## D-123 — Templates use the spec + the inspector's live preview as the §20 verification (no static mockup)
+
+**Date:** 2026-05-23
+**Status:** Settled (Phase 24)
+**Where it lives:** docs/plans/phase-24-analytics-widgets.md "Findings I'm
+departing from"; CLAUDE.md §20 governs the general rule.
+
+**Why.** CLAUDE.md §20's spec → mockup → build rule mandates an approved
+static visual mockup before any UI work. For a *template phase* the
+verification surface is materially different from the inspector or the docs
+site: a template is a generated showcase whose visual quality is verified by
+(a) the page spec carried in the phase plan and (b) the *live* preview a
+developer sees when they run the materialised project under the inspector
+(`dockyard inspect`) or against any MCP host. A static `.png` adds overhead
+without buying review confidence — the inspector's fixture switcher already
+walks every UI state.
+
+**Scope (explicit).** This carve-out applies **only to `templates/<name>/`
+phases** — Phase 24 (`analytics-widgets`), Phase 25 (`approval-flow`), Phase
+26 (`inspector`), and any post-V1 templates from RFC §19. The inspector
+(Phases 22, 23), the docs site (Phase 29), the bridge shell, and the post-V1
+multi-server console all keep the full §20 spec → mockup → build process.
+
+**Substitute verification (what a template phase must do instead of the
+mockup):**
+
+1. The phase plan carries a page spec (purpose, regions, data, the four
+   states). This is unchanged.
+2. The phase plan enumerates the fixture set every rendered widget walks
+   under the inspector's switcher (`happy`, `empty`, `error`, `permission`,
+   `slow`, `large`).
+3. The Phase 24 integration test asserts each fixture drives a distinct UI
+   state in the dispatcher, and the `web/inspector` vitest harness asserts
+   the rendered DOM picks the right renderer per `kind` and that a dark
+   host-theme propagates through `hostContext.styles.variables`.
+
+**Approval.** The user approved the carve-out explicitly when scoping
+Phase 24 (the prompt's §1 / §4 record the approval). The §14 checklist's
+"every page has loading/empty/error/ready states" gate is unchanged — the
+mandatory four-state `PageState` discipline still applies to every widget the
+template renders.
+
+**Implication for §20.** §20 is unchanged in wording; D-123 is the
+documented per-phase deviation. A future PR may roll D-123 forward into the
+§20 text if the template-phase pattern proves out across Phases 25 and 26;
+until then, every template phase that wants the carve-out cites D-123
+explicitly in its "Findings I'm departing from" section.
+
+---
+
+## D-124 — V1 template name: `analytics-widgets` (replaces `analytical-card`)
+
+**Date:** 2026-05-23
+**Status:** Settled (Phase 24)
+**Where it lives:** RFC §10, master plan `docs/plans/README.md` Phase 24 row
+and detail block, this phase plan.
+**Supersedes:** the master-plan stub `analytical-card` (un-numbered — never
+shipped as code).
+
+**Why.** The master plan's original name `analytical-card` framed the
+template as one *card* (a single rendered surface). The shipped template is
+*three widget tools* in one App — a chart, a table, and a metric card — each
+inline-rendered through a dispatcher. `analytics-widgets` describes what the
+template actually showcases (a widget set), reads naturally in the
+`dockyard new --template <name>` invocation, and remains a *workflow*-named
+template per brief 04 §2.3 (not a transport-named one). The rename is part
+of Phase 24; the only historical mention preserved is in
+`docs/research/04-mcp-use-dx-teardown.md`, with an editor's note pointing at
+this entry.
+
+---
+
+## D-125 — Apache ECharts is the V1 chart renderer; the tool contract stays renderer-agnostic
+
+**Date:** 2026-05-23
+**Status:** Settled (Phase 24)
+**Where it lives:** templates/analytics-widgets/web/src/widgets/ChartFrame.svelte;
+templates/analytics-widgets/internal/contracts/contracts.go.
+
+**Why.** The `create_chart` contract takes a friendly shorthand (`type` +
+`data` + optional `title`/`options`/`theme`) and emits a `structuredContent`
+that an App-side renderer turns into a chart. V1 uses Apache ECharts because
+it covers the V1 type set (`bar | line | area | pie | scatter | radar`) out
+of the box, ships an Apache-2.0 licence aligned with Dockyard's, has a
+stable API, and handles theme propagation cleanly. The wrapper
+(`ChartFrame.svelte`) lives in the template — not `web/ui/` — because
+CLAUDE.md §20 reserves the shared inventory for primitives, and a wrapper
+around a third-party fat library is by nature template-local (a future
+template that does not chart should not pull ECharts into its bundle).
+
+**Scope.** The contract surface (`CreateChartInput.options` is an
+`EChartsOptions` passthrough today) is the only place ECharts leaks into the
+generated artifact. The dispatcher consumes the structured payload through
+the typed contract; a future template (or a developer fork) could swap the
+renderer without changing the tool contract — provided they keep the same
+`structuredContent.kind = "chart"` shape. That keeps the *contract*
+renderer-agnostic while making the *V1 default* concrete.
+
+---
+
+## D-126 — `analytics-widgets` declares `display_modes: [inline]` only
+
+**Date:** 2026-05-23
+**Status:** Settled (Phase 24)
+**Where it lives:** templates/analytics-widgets/dockyard.app.yaml.
+
+**Why.** RFC §7.2 specifies three display modes (`inline`, `fullscreen`,
+`pip`) and the App declares the subset it supports. The widget set the
+template renders is small, dense, and meaningful in the host's chat surface
+— a metric card, an inline chart, a paged table — so `inline` is the right
+and only mode for V1. Declaring `[inline]` means the bridge only ever grants
+inline, which is the lightest CSP and the most-supported host surface, and
+keeps the template's purpose unambiguous (it is a *widget* showcase, not a
+fullscreen-dashboard showcase). Future templates exercise fullscreen and pip
+(`approval-flow`, `inspector` likely candidates).
+
+---
+
+## D-127 — `Sparkline` lands in `web/ui/`; `ChartFrame` stays template-local
+
+**Date:** 2026-05-23
+**Status:** Settled (Phase 24)
+**Where it lives:** web/ui/src/Sparkline.svelte; docs/design/CONVENTIONS.md §3;
+templates/analytics-widgets/web/src/widgets/ChartFrame.svelte.
+
+**Why.** Sparkline is a small, generally-useful primitive — pure SVG,
+token-driven, no third-party dependency, reusable by the inspector, the
+docs site, and any future template. By CLAUDE.md §20 it belongs in the
+shared inventory; landing it in `web/ui/` (and listing it in
+`CONVENTIONS.md` §3) makes it composable for everyone. ChartFrame, in
+contrast, is a wrapper around Apache ECharts — a heavy third-party library
+whose dependency footprint should not leak into surfaces that do not chart.
+The split keeps the shared inventory cheap to depend on while letting the
+template render anything ECharts can.
+
+---
+
+## D-128 — The template-discovery seam is interface + Registry + builtin init
+
+**Date:** 2026-05-23
+**Status:** Settled (Phase 24)
+**Where it lives:** internal/scaffold/template.go.
+
+**Why.** Adding a future template (Phases 25, 26, the post-V1 set) must be
+one new `templates/<name>/` directory plus one registration; nothing about a
+specific template's name belongs in the CLI or in the materialiser. The
+implementation follows CLAUDE.md §4.4's extensibility-seam pattern: a
+`Template` interface, a process-wide `Registry` keyed on template name, and
+`init()` registration in a builtin file that lives next to each template's
+source. The seam exposes `LookupTemplate(name) (Template, bool)` and
+`GenerateFromTemplate(opts, name)`; an unknown name returns the typed
+sentinel `ErrUnknownTemplate`. The integration test for Phase 24 exercises
+the seam through the registered `analytics-widgets` template; a separate
+unit test registers a stub template to prove the seam itself is not coupled
+to `analytics-widgets`.
+
+---
+
+## D-129 — Bridge default peer posts with a wildcard targetOrigin; host bridge clones every outbound message
+
+**Date:** 2026-05-23
+**Status:** Settled (Phase 24 — post-mortem from the inspector demo)
+**Where it lives:** `web/bridge/src/bridge.ts` (`defaultParentSink`),
+`web/inspector/src/host/host-bridge.ts` (`postSafe`).
+
+**Why.** Phase 24's end-to-end demo surfaced two postMessage-shaped
+defects nothing else exercised:
+
+1. The bridge's default peer was `window.parent` — and the bridge's
+   `Transport.request(...)` called `peer.postMessage(message)` with one
+   argument. `Window.postMessage`'s one-arg form defaults `targetOrigin`
+   to `'/'` (same-origin only); an MCP App runs inside a sandboxed
+   `allow-scripts`-only iframe whose origin is opaque (`null`) while the
+   parent has its own origin, so every outbound `ui/initialize` was
+   silently dropped at the boundary and the handshake hung forever.
+2. The inspector's host bridge passes payloads that originate from
+   Svelte 5 `$state` (capabilities, hostContext, fixture content). The
+   structured-clone algorithm `Window.postMessage` runs refuses Proxies
+   with a `DataCloneError`, so the host's `ui/initialize` response (and
+   every subsequent `tool-result` notification) failed to serialise.
+
+**Decision.**
+
+- The bridge's default peer is now a sink that posts to `window.parent`
+  with `targetOrigin: '*'` explicitly. `'*'` is the correct value here:
+  the View half can't usefully narrow the origin because the host frame
+  is cross-origin (or opaque) from its perspective — the trust boundary
+  is the host's inbound handler, which is what already validates JSON-RPC
+  envelopes and the fixture-backed responder. A regression test in
+  `web/bridge/src/__tests__/bridge.test.ts` asserts the default path
+  posts with `'*'`.
+- The inspector's host bridge applies a `JSON.parse(JSON.stringify(...))`
+  round-trip to every outbound message in `postSafe()`. The protocol's
+  payloads are plain JSON-shaped objects (no functions, Maps, or Dates),
+  so the round-trip is safe; it unwraps any `$state` Proxy into a plain
+  object before `postMessage`. A `structuredClone` walk would also unwrap
+  but would re-enter Svelte's reactivity graph and trigger
+  `effect_update_depth_exceeded`; JSON-stringify is non-reactive and
+  deterministic.
+
+The two fixes together let `dockyard inspect` complete the
+`ui/initialize` handshake and render the analytics-widgets chart, table,
+and metric-card widgets end-to-end (the Phase 24 acceptance bar). The
+`docs/screenshots/analytics-widgets/{chart,metric-card,table}.png`
+artifacts are the captured proof.
+
+---
+
+## D-130 — The inspector loads on-disk project fixtures from `<dir>/fixtures/<tool>/<kind>.json` and prefers them over the schema-derived synthetic fixtures
+
+**Date:** 2026-05-23
+**Status:** Settled (Phase 24 — closing the demo bar)
+**Where it lives:** `internal/inspector/fixtures.go`,
+`internal/inspector/assets.go` (`/api/fixtures`),
+`web/inspector/src/lib/fixtures.ts` (`buildFixtures` overrides),
+`web/inspector/src/lib/api.ts` (`fetchProjectFixtures`).
+
+**Why.** The Phase 23 fixture switcher synthesises `structuredContent`
+from the tool's generated output schema. That is structurally correct
+(P1 — the synthesised value is a valid instance of the schema) but the
+field values are placeholders — `"sample-value"` strings, `42` numbers
+— so an App's dispatcher does not see a `kind` it knows
+(`"chart"`/`"table"`/`"metric_card"`) and the rendered widget can never
+be the realistic data the template ships. The Phase 24 demo bar is
+"the inspector visibly renders all three widgets"; placeholders cannot
+satisfy it.
+
+**Decision.** The inspector loads project on-disk fixtures from the
+attached project's `fixtures/<tool>/<kind>.json` tree and serves them
+at `GET /api/fixtures`. The frontend's `FixturesPanel` prefers a
+project fixture over the schema-derived synthetic when one exists for
+the `(tool, kind)` tuple, and falls back to the synthetic otherwise.
+The loader is read-only (no `tools/call`); it only reads files the
+developer's own project carries, so P4 (the inspector is a dev surface,
+never a production MCP client) is preserved.
+
+A fixture's `output_override` is used verbatim when present; otherwise
+the loader derives `structuredContent` from `input` by adding the
+well-known dispatcher discriminators (`kind`, `state`, default
+`theme: "auto"`). This mirrors the analytics-widgets handlers, which
+construct their output by copying input and adding `kind` + `state`.
+
+Templates that need richer derivation (e.g. a future approval-flow
+template that produces a different shape than its input) ship explicit
+`output_override` blocks.

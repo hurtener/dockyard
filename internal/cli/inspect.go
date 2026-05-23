@@ -134,16 +134,20 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 		}
 	}
 
-	// The Verdicts panel re-runs `dockyard validate` against the project, and
-	// the Fixtures switcher derives its fixtures from the project's generated
-	// tool contracts (P1). Both are sourced from the project at --dir; when
-	// --dir names no Dockyard project the sources degrade to an honest empty
-	// state rather than crashing (see VerdictsFromValidate / ContractsFromProject).
+	// The Verdicts panel re-runs `dockyard validate` against the project, the
+	// Fixtures switcher derives synthetic fixtures from the project's generated
+	// tool contracts (P1), and the on-disk fixture loader surfaces the realistic
+	// `fixtures/<tool>/<kind>.json` payloads the template ships (Phase 24,
+	// D-126). All three are sourced from the project at --dir; when --dir
+	// names no Dockyard project the sources degrade to an honest empty state
+	// rather than crashing.
 	var verdicts inspector.VerdictSource
 	var contracts inspector.ContractsSource
+	var fixtures inspector.FixtureSource
 	if cfg.projectDir != "" {
 		verdicts = inspector.VerdictsFromValidate(cfg.projectDir)
 		contracts = inspector.ContractsFromProject(cfg.projectDir)
+		fixtures = inspector.FixturesFromDir(cfg.projectDir)
 	}
 
 	insp, err := inspector.New(inspector.Options{
@@ -154,6 +158,7 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 		Verdicts:   verdicts,
 		Contracts:  contracts,
 		Apps:       appSource,
+		Fixtures:   fixtures,
 		Logger:     cfg.logger,
 	})
 	if err != nil {

@@ -4,9 +4,11 @@
 // The no-template path is the first-class one (RFC §10): `dockyard new <name>`
 // with no --template produces a blank but working MCP server — a manifest, one
 // example contract-first tool, the generated contract artifacts, a runnable
-// main, and a test. Templates (analytical-card, approval-flow, inspector) are
-// optional product-pattern showcases layered on later (Wave 9); this package
-// owns only the blank scaffold.
+// main, and a test. Templates (analytics-widgets, approval-flow, inspector)
+// are optional product-pattern showcases layered on by Wave 9: the template-
+// discovery seam (Phase 24) is implemented in this package alongside the
+// no-template scaffold, and a named template is materialised via
+// GenerateFromTemplate.
 //
 // Contract-first by construction (P1, RFC §6.1). The example tool's input and
 // output are typed Go structs in the scaffolded project's internal/contracts

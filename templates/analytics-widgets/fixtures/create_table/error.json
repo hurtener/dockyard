@@ -1,0 +1,17 @@
+{
+  "name": "error",
+  "description": "Backend rejected the table query.",
+  "state": "error",
+  "input": {
+    "columns": [{ "key": "name", "label": "Account", "type": "string" }],
+    "rows": []
+  },
+  "output_override": {
+    "kind": "table",
+    "columns": [{ "key": "name", "label": "Account", "type": "string" }],
+    "rows": [],
+    "theme": "auto",
+    "state": "error",
+    "message": "Query failed: timed out after 30s."
+  }
+}

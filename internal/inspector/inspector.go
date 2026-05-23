@@ -92,6 +92,13 @@ type Options struct {
 	// a running MCP server's ui:// resources.
 	Apps AppSource
 
+	// Fixtures is the read-only source for the inspector's on-disk fixture
+	// loader (RFC §12, Phase 24 / D-126). When nil, `GET /api/fixtures` answers
+	// with an empty array and the Fixtures switcher falls back to its
+	// schema-derived synthetic fixtures (the Phase 23 default). Use
+	// [FixturesFromDir] to source it from the developer's project directory.
+	Fixtures FixtureSource
+
 	// Logger is the structured logger. When nil, a no-op logger is used.
 	Logger *slog.Logger
 }

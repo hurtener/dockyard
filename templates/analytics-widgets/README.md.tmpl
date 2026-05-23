@@ -1,0 +1,85 @@
+# __PROJECT_TITLE__
+
+An MCP server scaffolded from the **`analytics-widgets`** template — Dockyard's
+V1 template that demonstrates inline UI widgets backed by contract-first tools
+(RFC §10, Phase 24).
+
+## What this template ships
+
+One MCP App that exposes three widget tools, each rendered inline in the host's
+chat surface:
+
+- **`create_chart`** — bar / line / area / pie / scatter / radar, rendered with
+  Apache ECharts (decision D-125).
+- **`create_table`** — a sortable, paged data table.
+- **`create_metric_card`** — a KPI card with an optional `Sparkline` and
+  breakdown rows.
+
+The App declares `display_modes: [inline]` only (decision D-126) and routes
+every widget through the four-state `PageState` (CLAUDE.md §20 —
+loading / empty / error / ready). Each tool's input accepts a `theme?`
+override (`light` / `dark` / `auto`); the default `auto` honours the host's
+theme via `hostContext.styles.variables`.
+
+## Layout
+
+- `dockyard.app.yaml` — the manifest (server identity, the 3 tools, the 1 app,
+  the quality gates).
+- `main.go` — the entrypoint: constructs the server, registers the 3 tools,
+  serves stdio (or HTTP under `DOCKYARD_TRANSPORT=http`). Lives at the project
+  root — `dockyard build` cross-compiles `go build .` here.
+- `internal/contracts/` — the typed Go contract structs (the source of
+  truth, P1) plus their **generated** JSON Schema and TypeScript. Never
+  hand-edit a generated file; change the Go struct and regenerate.
+- `internal/handlers/` — the three handlers. They return synthetic but
+  realistic data (a customer-health metric, a revenue-by-month chart, a
+  top-accounts table) so the App immediately renders something meaningful.
+  Swap the body of a handler for a call to your real data source; the
+  typed contract is the integration surface.
+- `web/` — the Svelte App (one file `App.svelte` dispatches on
+  `structuredContent.kind`), the per-widget renderers, and the template-local
+  `ChartFrame` that wraps Apache ECharts (decision D-127 — wrappers around
+  third-party fat libs stay template-local, the shared `web/ui` inventory
+  carries only primitives).
+- `fixtures/` — six fixtures per tool (`happy`, `empty`, `error`,
+  `permission`, `slow`, `large`) the inspector's switcher (Phase 23) uses
+  to walk every UI state.
+
+## Run
+
+```sh
+# Local stdio:
+go run .
+
+# Streamable-HTTP (defaults to 127.0.0.1:8080):
+DOCKYARD_TRANSPORT=http go run .
+
+# Run the contract tests:
+go test ./...
+
+# Drive it under the inspector (renders the App + walks every fixture):
+dockyard dev
+```
+
+## Swap to a real data source
+
+Each handler is a small pure function that returns a typed payload. To wire a
+real source:
+
+1. Open `internal/handlers/handlers.go`.
+2. Replace the body of `CreateChart` / `CreateTable` / `CreateMetricCard`
+   with a call to your service. The input is the model's typed request; the
+   output's `Kind`, `State`, and `Message` fields control which UI state the
+   App renders — set `State` to `WidgetStateError` with a `Message` to render
+   a working retry, `WidgetStateEmpty` with copy when there is no data, and
+   so on.
+3. The contract structs in `internal/contracts/` are the integration surface
+   for both the model (input) and the App (output). Keep them stable, or
+   regenerate the schema with `dockyard generate` after a change.
+
+## Customise the widgets
+
+The shared `web/ui` Svelte inventory is the design system — compose its
+primitives (`MetricCard`, `DataTable`, `StatusChip`, `Sparkline`, `PageState`,
+…) inside your widget renderers. Anything genuinely shareable lands in
+`web/ui/` (and `docs/design/CONVENTIONS.md`) per CLAUDE.md §20.

@@ -1,0 +1,14 @@
+{
+  "name": "error",
+  "description": "The metric service is down — render the error state with a retry.",
+  "state": "error",
+  "input": { "label": "Customer health", "value": null },
+  "output_override": {
+    "kind": "metric_card",
+    "label": "Customer health",
+    "value": null,
+    "theme": "auto",
+    "state": "error",
+    "message": "Health service unavailable. Retry to refresh."
+  }
+}

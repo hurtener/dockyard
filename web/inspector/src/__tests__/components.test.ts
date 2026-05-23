@@ -75,7 +75,7 @@ describe('RpcPanel', () => {
 });
 
 describe('AppFrame', () => {
-  it('renders the App in a sandboxed iframe', () => {
+  it('renders the App in a sandboxed iframe', async () => {
     const { container } = render(AppFrame, {
       props: {
         html: '<!doctype html><title>app</title>',
@@ -86,6 +86,11 @@ describe('AppFrame', () => {
     expect(iframe).not.toBeNull();
     // The iframe is sandboxed deny-by-default (CLAUDE.md §7).
     expect(iframe?.getAttribute('sandbox')).toBe('allow-scripts');
+    // `srcdoc` is set inside a queueMicrotask in the mount effect so the
+    // attribute is not present in the same tick as render(). Awaiting a
+    // microtask is the documented Chromium-iframe-race workaround
+    // (see AppFrame.svelte).
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
     expect(iframe?.getAttribute('srcdoc')).toContain('app');
   });
 });
