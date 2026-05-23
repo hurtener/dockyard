@@ -217,3 +217,31 @@ A check against an unbuilt surface `skip()`s, never `fail()`s.
   files and `contracts.ts` and runs `codegen.CrossCheck` per tool side,
   reporting a desync as a `CheckStaleCodegen` Blocker. `validate/doc.go`'s
   cross-check claim is now accurate. See D-113.
+
+- **R4 N3 — D-113 wording clarification (depth-audit-2).** D-113 originally
+  read "`dockyard validate` runs codegen.CrossCheck, so `dockyard build`
+  catches schema↔TS desync". The depth-audit-2 follow-up found this
+  overpromised the `build` path: `internal/buildpkg/build.go` runs
+  `regenerateContracts` (stage 1) BEFORE invoking the validate gate (stage 2),
+  so a hand-edited drifted `contracts.ts` is OVERWRITTEN by the regeneration
+  step before `checkCrossCodegen` ever reads it. The build artifact still
+  upholds P1, but via a different mechanism than `validate`-standalone — the
+  build path "erases the drift", the validate-standalone and `dockyard test`
+  paths "flag the drift". R4 N3 rewrites D-113 to distinguish the two paths
+  explicitly, and tightens `internal/validate/doc.go` so the stale/cross-codegen
+  bullets match the behaviour. No code changed.
+
+- **R4 N4 — binary-boundary subprocess test for schema↔TS desync
+  (depth-audit-2).** `internal/validate/run_test.go` covers
+  `checkCrossCodegen` in-package; `dockyard test` and `dockyard build` tests
+  reach the gate through their wrappers. No test drove the REAL `dockyard
+  validate` binary against a project with a hand-edited
+  `contracts.ts` desync. R4 N4 adds
+  `test/integration/r4_validate_desync_test.go`
+  (`TestR4_ValidateBinaryRejectsSchemaTSDesync`): it scaffolds a real project
+  via the wave-7 `scaffoldWave7Project` helper, edits the committed
+  `contracts.ts` to add a phantom `GreetOutput.extra` field absent from the
+  JSON Schema, runs the real `dockyard validate` binary as a subprocess
+  (`runCLI`), and asserts a non-zero exit with the cross-codegen Blocker
+  fingerprint in the output. A future regression of the binary-boundary
+  defense fails this test.

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/hurtener/dockyard/internal/protocolcodec"
+	"github.com/hurtener/dockyard/runtime/server"
 	"github.com/hurtener/dockyard/runtime/store"
 	"github.com/hurtener/dockyard/runtime/store/sqlitestore"
 	"github.com/hurtener/dockyard/runtime/tasks"
@@ -258,6 +259,13 @@ func TestPhase14_ConcurrencyStress(t *testing.T) {
 // real HTTP transport, through the Tasks transport mount (RFC §8.2). The mount
 // intercepts tasks/* JSON-RPC frames and answers them from the engine; the
 // initialize handshake carries the capabilities.tasks block.
+//
+// The Tasks engine is attached via the canonical `server.Options.Tasks` seam
+// (D-108) — the production wiring — not by wrapping `tasks.Mount.HTTPMiddleware`
+// around a hand-rolled `sdkStandIn` handler. Routing through the seam means a
+// regression that broke `Options.Tasks` while keeping `tasks.Mount` intact
+// would now fail this test, closing the failure mode R2 exists to prevent
+// (remediation R4 S4).
 func TestPhase14_TasksOverTransport(t *testing.T) {
 	t.Parallel()
 	e, st := newDurableEngine(t, &tasks.Options{
@@ -278,17 +286,31 @@ func TestPhase14_TasksOverTransport(t *testing.T) {
 	created, _ := codec.DecodeCreateTaskResult(raw)
 	id := created.Task.ID
 
-	// Mount tasks/* ahead of a stand-in SDK handler that returns an initialize
-	// result — the shape the real SDK produces.
-	mount := tasks.NewMount(e)
-	sdkStandIn := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(
-			`{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{}},"protocolVersion":"2025-06-18"}}`))
-	})
-	srv := httptest.NewServer(mount.HTTPMiddleware(sdkStandIn))
+	// Build a real runtime/server with the Tasks engine attached through
+	// Options.Tasks — the production wiring D-108 mandates. The SDK server
+	// answers initialize (with the mount injecting capabilities.tasks); the
+	// attached mount answers tasks/* frames.
+	s, err := server.New(server.Info{
+		Name:    "phase14-app",
+		Version: "0.1.0",
+	}, &server.Options{Logger: quietLogger(), Tasks: e})
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	if !s.TasksEnabled() {
+		t.Fatal("server.Options.Tasks did not enable the Tasks mount")
+	}
+	handler, err := s.HTTPHandler(&server.HTTPOptions{Security: server.DefaultHTTPSecurity()})
+	if err != nil {
+		t.Fatalf("HTTPHandler: %v", err)
+	}
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
+	// post sends a JSON-RPC frame and decodes the response envelope. tasks/*
+	// frames return plain JSON from the mount; the SDK-served initialize is
+	// framed as SSE on the real go-sdk transport, so its envelope is parsed
+	// from a `data:` line.
 	post := func(method string, params json.RawMessage) map[string]json.RawMessage {
 		t.Helper()
 		frame := map[string]any{"jsonrpc": "2.0", "id": 1, "method": method}
@@ -296,21 +318,38 @@ func TestPhase14_TasksOverTransport(t *testing.T) {
 			frame["params"] = params
 		}
 		body, _ := json.Marshal(frame)
-		resp, err := http.Post(srv.URL, "application/json", bytes.NewReader(body))
+		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		// The streamable-HTTP transport requires this Accept header for an
+		// SDK-served frame (e.g. initialize); the mount tolerates it for a
+		// tasks/* frame it intercepts before the SDK sees it.
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("%s POST: %v", method, err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		out, _ := io.ReadAll(resp.Body)
+		envelopeJSON := bytes.TrimSpace(out)
+		if !bytes.HasPrefix(envelopeJSON, []byte("{")) {
+			for _, line := range bytes.Split(out, []byte("\n")) {
+				if d := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:"))); len(d) > 0 && d[0] == '{' {
+					envelopeJSON = d
+					break
+				}
+			}
+		}
 		var decoded map[string]json.RawMessage
-		if err := json.Unmarshal(out, &decoded); err != nil {
+		if err := json.Unmarshal(envelopeJSON, &decoded); err != nil {
 			t.Fatalf("%s decode: %v (body %s)", method, err, out)
 		}
 		return decoded
 	}
 
-	// 1. initialize — the capabilities.tasks block must be injected.
-	initResp := post("initialize", json.RawMessage(`{"protocolVersion":"2025-06-18"}`))
+	// 1. initialize — the capabilities.tasks block must be injected by the
+	//    mount on top of the SDK's own initialize result.
+	initResp := post("initialize", json.RawMessage(
+		`{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"raw","version":"0"}}`))
 	var initResult struct {
 		Capabilities map[string]json.RawMessage `json:"capabilities"`
 	}
@@ -318,7 +357,7 @@ func TestPhase14_TasksOverTransport(t *testing.T) {
 		t.Fatalf("decode initialize result: %v", err)
 	}
 	if _, ok := initResult.Capabilities["tasks"]; !ok {
-		t.Fatal("initialize handshake over the transport carries no capabilities.tasks block")
+		t.Fatal("initialize handshake over the wired server carries no capabilities.tasks block (Options.Tasks regressed?)")
 	}
 
 	// 2. tasks/get over the wire.

@@ -1,8 +1,9 @@
-.PHONY: help build test vet lint preflight drift-audit check-mirror install-hooks clean dev generate web web-install coverage bench
+.PHONY: help build test vet lint preflight drift-audit check-mirror install-hooks clean dev generate web web-install coverage bench inspector-bundle
 
 help:
 	@echo "Dockyard — make targets"
-	@echo "  build           Build the dockyard binary (CGo-free static)"
+	@echo "  build           Build the dockyard binary (CGo-free static; embeds the inspector SPA)"
+	@echo "  inspector-bundle  Build web/inspector and stage it into internal/inspector/dist/"
 	@echo "  test            go test -race ./..."
 	@echo "  coverage        Per-package coverage profile + the mechanical band gate"
 	@echo "  bench           Run the Go benchmarks (on demand — not a CI gate)"
@@ -19,7 +20,32 @@ help:
 
 GO_SOURCES := $(shell find . -name '*.go' -not -path './vendor/*' 2>/dev/null | head -1)
 
-build:
+# inspector-bundle — produce the production web/inspector SPA bundle and stage
+# it into internal/inspector/dist/, which the `//go:embed all:dist` directive
+# in internal/inspector/assets_embed.go points at. `make build` depends on
+# this so a `bin/dockyard` produced by the canonical build always embeds the
+# real Svelte SPA, not the in-Go placeholder page (remediation R4 B1).
+#
+# The staged tree is .gitignored apart from a .gitkeep anchor, so rebuilds
+# never dirty the working tree. Skips gracefully when npm or web/inspector is
+# absent — the Go build then embeds only the .gitkeep, and the inspector
+# falls back to its in-Go placeholder page.
+inspector-bundle:
+	@if [ ! -f web/inspector/package.json ]; then \
+		echo "skip inspector-bundle: web/inspector not landed"; \
+	elif ! command -v npm >/dev/null 2>&1; then \
+		echo "skip inspector-bundle: npm not installed"; \
+	else \
+		echo "== inspector-bundle: vite build + stage into internal/inspector/dist =="; \
+		( cd web/inspector && \
+			if [ ! -d node_modules ]; then npm ci --no-audit --no-fund; fi && \
+			npm run build ) || exit 1; \
+		mkdir -p internal/inspector/dist; \
+		find internal/inspector/dist -mindepth 1 ! -name '.gitkeep' -exec rm -rf {} +; \
+		cp -R web/inspector/dist/. internal/inspector/dist/; \
+	fi
+
+build: inspector-bundle
 	@if [ -f cmd/dockyard/main.go ]; then \
 		CGO_ENABLED=0 go build -ldflags='-s -w' -o bin/dockyard ./cmd/dockyard; \
 	else \
@@ -143,5 +169,10 @@ clean:
 	@rm -rf bin/ dist/ build/
 	@rm -f coverage.out
 	@for p in $(WEB_PROJECTS); do rm -rf "$$p/coverage" "$$p/dist"; done
+	@# The staged inspector bundle is a `make build` artifact. Clean it back to
+	@# the .gitkeep anchor so a fresh build re-stages from web/inspector/dist/.
+	@if [ -d internal/inspector/dist ]; then \
+		find internal/inspector/dist -mindepth 1 ! -name '.gitkeep' -exec rm -rf {} + ; \
+	fi
 	@find . -name '*.test' -delete 2>/dev/null || true
 	@find . -name 'coverage.out' -delete 2>/dev/null || true

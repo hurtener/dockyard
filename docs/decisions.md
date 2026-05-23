@@ -2635,6 +2635,25 @@ still works.
 
 ---
 
+## D-105, D-106, D-107 — unused reserved range (parallel pre-Wave-9 remediation allocation)
+
+**Status:** Reserved, never used; superseded by D-108 and onward.
+
+The pre-Wave-9 depth audit produced multiple remediations (R1–R3) authored in
+parallel against the same `docs/decisions.md` log. R1 was allocated D-103/D-104
+and merged first; R2 was pre-allocated the next ascending block but landed only
+its actual architectural decision under D-108 (the `Options.Tasks` engine
+attachment) — its other R2 surface (the stdio mount's pipe-pair plumbing, the
+HTTP middleware ordering correction) was settled in the same wave under D-109
+and D-110. The D-105/D-106/D-107 ordinals were the worktree-coordination
+buffer between the two parallel branches and were never claimed by a real
+decision before R3 advanced the counter; rather than rewrite or backfill them
+they are recorded here so the gap is not mistaken for lost history. A future
+decision picks up at the next free ordinal (post-D-118 at the time of this
+note); the unused range is permanently retired (remediation R4 S3).
+
+---
+
 ## D-108 — The Tasks transport mount is joined to `runtime/server` via an `Options.Tasks` engine attachment
 
 **Status:** Settled (remediation R2 — pre-Wave-9 depth audit).
@@ -2797,9 +2816,9 @@ non-zero `HTTPSecurity` with the flag off.
 
 ---
 
-## D-113 — `dockyard validate` runs codegen.CrossCheck, so `dockyard build` catches schema↔TS desync
+## D-113 — `dockyard validate` runs codegen.CrossCheck so the standalone and `dockyard test` paths catch schema↔TS desync; `dockyard build` defends via regeneration
 
-**Status:** Settled (depth-audit remediation R3).
+**Status:** Settled (depth-audit remediation R3; wording clarified by R4 N3).
 
 P1 (contract-first) makes a desync between the two independently-generated
 Design-A artifacts — the JSON Schema and the TypeScript — a hard failure;
@@ -2808,16 +2827,33 @@ Design-A artifacts — the JSON Schema and the TypeScript — a hard failure;
 `internal/validate`: `validate`'s `checkStaleCodegen` only byte-compared each
 artifact against a fresh regeneration. Yet `internal/validate/doc.go` claimed
 artifacts are "cross-checked for schema↔TS drift", and `dockyard build` runs
-`validate` (not the test gate) — so a committed, internally-inconsistent
-schema/TS pair passed `validate` and `build`.
+`validate` — so a committed, internally-inconsistent schema/TS pair passed
+`validate` (and read past the doc comment as passing `build`).
 
 R3 adds `checkCrossCodegen` to `internal/validate`: it reads the committed
-schema files and `contracts.ts` from disk (deliberately not a regeneration —
+schema files and `contracts.ts` from disk (deliberately NOT a regeneration —
 the point is to gate what is checked in) and runs `codegen.CrossCheck` per tool
 side. A desync is reported under the existing `CheckStaleCodegen` class as a
-Blocker — the same build-blocker class as stale codegen, consistent with P1 — so
-`dockyard build` now also catches it. `validate/doc.go`'s long-standing claim is
-now accurate.
+Blocker — the same build-blocker class as stale codegen, consistent with P1.
+
+**Which entry point catches which class of drift (R4 N3 clarification).**
+The defense varies by entry point, and the original D-113 wording overpromised
+the `build` path:
+
+- `dockyard validate` (standalone) and `dockyard test` invoke the validate
+  gate directly on the committed sources, so `checkCrossCodegen` runs and a
+  hand-edited drifted `contracts.ts` is flagged as a Blocker. This is the
+  honest cross-check defense.
+- `dockyard build` runs `regenerateContracts` (stage 1 of `internal/buildpkg`)
+  BEFORE invoking the validate gate (stage 2). At build time, a hand-edited
+  `contracts.ts` is therefore *rewritten* by the regeneration step before
+  `checkCrossCodegen` ever reads it. So `build`'s defense is "the regeneration
+  step erases the drift", not "the validate gate flags it" — and the
+  build artifact still upholds P1 (the binary embeds consistent contracts),
+  just via a different mechanism than `validate`-standalone.
+
+Both mechanisms uphold P1; `validate/doc.go`'s wording now distinguishes them
+explicitly so the gate's behaviour matches the documentation.
 
 ---
 
@@ -2841,6 +2877,59 @@ passed to `tracer.Start`, so the exported span nests under its parent. An absent
 or malformed `ParentSpanID` is tolerated as "no parent" — the span is exported
 as a trace root rather than the event being dropped. The IDGenerator continues
 to assign the span's own IDs unchanged; only the parent linkage is added.
+
+---
+
+## D-115 — `make build` embeds the production `web/inspector` SPA via an `inspector-bundle` prerequisite; `internal/inspector/dist/` is a `.gitkeep`-anchored, gitignored staging tree
+
+**Status:** Settled (depth-audit-2 remediation R4 B1).
+**Supersedes:** the committed-placeholder-bundle scheme of D-098 (the
+`internal/inspector/dist/index.html` placeholder file).
+
+D-098 settled — at Phase 22, when the inspector's `//go:embed all:dist`
+directive landed and the production frontend build was still nascent — that
+"a committed placeholder bundle (`internal/inspector/dist/`) keeps the
+`//go:embed` directive resolvable before any frontend build; wiring the
+production `web/inspector` build into the binary is the Phase 23 `dockyard
+inspect` packaging step." The second pre-Wave-9 depth audit (Blocker B1)
+found that the Phase 23 packaging step was never built: `Makefile` and the
+CI `go` job ran `go build` directly, the `web/inspector` Vite output was
+never copied into `internal/inspector/dist/`, and so the shipped `bin/dockyard`
+embedded only the Phase 22 placeholder. RFC §12 line 711 ("renders Apps
+locally") was met by the in-package tests and the per-package frontend gate,
+but not by the product a developer installed and ran.
+
+R4 closes the packaging step. A new `make inspector-bundle` target runs
+`vite build` for `web/inspector` (after `npm ci` if needed) and stages the
+resulting `dist/` tree into `internal/inspector/dist/`; `make build` declares
+`inspector-bundle` as a prerequisite so the canonical build always produces a
+binary whose inspector is the production Svelte SPA. `make build` still pins
+`CGO_ENABLED=0` — the staged frontend is a build artifact, not a CGo
+dependency. The CI `go` job gained a `setup-node` step so the build pipeline
+has `npm` available; the `preflight` job's Node cache list now includes
+`web/inspector/package-lock.json` for parity. `make web` is unchanged —
+type-check + tests + coverage for every `web/` project — keeping the
+developer's per-project frontend loop separate from the bundling concern.
+
+The staging tree is hygienic by construction. The Phase 22 placeholder
+`internal/inspector/dist/index.html` is replaced with a tracked, empty
+`internal/inspector/dist/.gitkeep` anchor (so `//go:embed all:dist` always
+resolves); the rest of the dist tree (`internal/inspector/dist/*`) is added
+to `.gitignore` so a `make build` never dirties the working tree. When the
+bundle has not been staged (a fresh clone, or `go build ./cmd/dockyard`
+directly without the Makefile), the inspector backend falls back to its
+in-Go `placeholderHTML` page (`internal/inspector/assets.go` — the existing
+behaviour) so the backend is always usable; the placeholder is now Go source,
+not a tracked HTML file. `make clean` restores the dist tree to its
+`.gitkeep` anchor.
+
+The regression guard (R4 S6) lives in `scripts/smoke/phase-23.sh`: the smoke
+script asserts the staged `internal/inspector/dist/index.html` carries a
+Vite-emitted `<script type="module" crossorigin src=...>` reference to the
+hashed asset bundle, and fails when the legacy placeholder string returns or
+no script tag is present. Together B1 + S6 mean a regression of the
+`make inspector-bundle` prerequisite — a typo in the Makefile, a CI step
+that skips `make build` — fails preflight, not the user.
 
 ---
 

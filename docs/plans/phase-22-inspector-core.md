@@ -203,3 +203,25 @@ also repointed ~22 inspector `--dy-*` references to the real token names in
 `web/ui/src/tokens.css` and removed their ad-hoc hex fallbacks (§20). No
 behaviour from the original Phase 22 acceptance criteria changed; the
 remediation only wired surface that was built but unreachable.
+
+### R4 — `internal/inspector/dist/` is an embed anchor, not a placeholder bundle (depth-audit-2)
+
+A second pre-Wave-9 depth audit found that the Phase 22 committed
+`internal/inspector/dist/index.html` placeholder bundle — D-098's
+"committed-placeholder bundle (`internal/inspector/dist/`) keeps the
+`//go:embed` directive resolvable before any frontend build" — was still the
+only thing the shipped binary embedded, because the Phase 23 packaging step
+(D-098's "wiring the production `web/inspector` build into the binary is the
+Phase 23 `dockyard inspect` packaging step") was never built. The real fix
+belongs to Phase 23 and is recorded there; this Phase 22 entry only notes
+that the placeholder approach D-098 settled is superseded.
+
+R4 replaces the tracked placeholder `internal/inspector/dist/index.html` with
+a tracked `.gitkeep` anchor and adds the dist tree to `.gitignore`, so the
+`//go:embed all:dist` directive still resolves and the build is never dirtied
+by a rebuild. When no real bundle has been staged the inspector backend
+falls back to its in-Go `placeholderHTML` page (see
+`internal/inspector/assets.go`) — the behaviour the Phase 22 placeholder
+provided is preserved, just sourced from Go rather than from a tracked HTML
+file. See Phase 23's R4 entry for the corresponding `make build` /
+`inspector-bundle` packaging step.

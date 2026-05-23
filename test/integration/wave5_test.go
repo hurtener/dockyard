@@ -119,18 +119,32 @@ func newWave5Engine(t *testing.T, opts *tasks.Options) (*tasks.Engine, store.Sto
 }
 
 // newWave5Server builds a real runtime/server carrying the contract-first
-// wave5ReportInput→wave5ReportOutput tool — the server half of the wired transport. The
-// Tasks mount sits in front of this server's HTTP handler; the SDK server still
-// answers initialize and tools/list, the mount answers tasks/*.
-func newWave5Server(t *testing.T) *server.Server {
+// wave5ReportInput→wave5ReportOutput tool, with the Tasks engine attached via
+// the canonical `server.Options.Tasks` seam (RFC §8.2, D-108). The SDK server
+// still answers initialize and tools/list; the attached mount answers tasks/*
+// and injects the `capabilities.tasks` block. `authFn` (nil = the
+// unauthenticated path) supplies the HTTP requestor-identity seam.
+//
+// Routing through Options.Tasks is the production wiring: a Wave 5 E2E that
+// wrapped `tasks.NewMount(e).HTTPMiddleware(sdkHandler)` directly would not
+// catch a regression that broke Options.Tasks while leaving tasks.Mount
+// intact — the exact failure mode R2 exists to prevent (remediation R4 S4).
+func newWave5Server(t *testing.T, e *tasks.Engine, authFn tasks.AuthContextFunc) *server.Server {
 	t.Helper()
 	s, err := server.New(server.Info{
 		Name:    "wave5-app",
 		Title:   "Wave 5 Tasks App",
 		Version: "5.0.0",
-	}, &server.Options{Logger: quietLogger()})
+	}, &server.Options{
+		Logger:           quietLogger(),
+		Tasks:            e,
+		TasksAuthContext: authFn,
+	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
+	}
+	if !s.TasksEnabled() {
+		t.Fatal("server.Options.Tasks did not enable the Tasks mount on runtime/server")
 	}
 	reportTool := tool.New[wave5ReportInput, wave5ReportOutput]("generate_report").
 		Describe("generate a long-running account report").
@@ -146,21 +160,21 @@ func newWave5Server(t *testing.T) *server.Server {
 	return s
 }
 
-// wave5HTTP wires the integrated transport: the real runtime/server HTTP
-// handler with the real tasks.Mount middleware in front, served behind an
-// httptest.Server. authFn supplies the requestor's auth context to the mount
-// (nil = the unauthenticated path). It returns the live httptest.Server.
-func wave5HTTP(t *testing.T, s *server.Server, e *tasks.Engine, authFn tasks.AuthContextFunc) *httptest.Server {
+// wave5HTTP wires the integrated transport: the real runtime/server HTTPHandler
+// — which composes the attached tasks.Mount internally through D-108's
+// Options.Tasks seam — served behind an httptest.Server. It returns the live
+// httptest.Server. Construct the server with `newWave5Server(t, e, authFn)`
+// so the Tasks engine is attached before HTTPHandler is invoked.
+func wave5HTTP(t *testing.T, s *server.Server) *httptest.Server {
 	t.Helper()
-	sdkHandler, err := s.HTTPHandler(&server.HTTPOptions{Security: server.DefaultHTTPSecurity()})
+	if !s.TasksEnabled() {
+		t.Fatal("wave5HTTP: server has no Tasks engine attached — call newWave5Server(t, e, authFn)")
+	}
+	handler, err := s.HTTPHandler(&server.HTTPOptions{Security: server.DefaultHTTPSecurity()})
 	if err != nil {
 		t.Fatalf("server.HTTPHandler: %v", err)
 	}
-	mount := tasks.NewMount(e)
-	if authFn != nil {
-		mount = mount.WithAuthContext(authFn)
-	}
-	ts := httptest.NewServer(mount.HTTPMiddleware(sdkHandler))
+	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
 	return ts
 }
@@ -268,8 +282,8 @@ func TestWave5_TaskLifecycleOverRealTransport(t *testing.T) {
 		PollInterval:          10,
 	})
 	defer func() { _ = st.Close() }()
-	s := newWave5Server(t)
-	ts := wave5HTTP(t, s, e, nil)
+	s := newWave5Server(t, e, nil)
+	ts := wave5HTTP(t, s)
 
 	// 1. A real SDK client completes the initialize handshake over the real
 	//    streamable-HTTP transport — the mount captures the SDK's initialize
@@ -606,12 +620,14 @@ func TestWave5_CrossContextRejectionOverTransport(t *testing.T) {
 		PollInterval:          10,
 	})
 	defer func() { _ = st.Close() }()
-	s := newWave5Server(t)
 
 	// The mount derives the requestor's auth context from an X-Auth header —
-	// the deployment-supplied identity seam.
+	// the deployment-supplied identity seam. It is attached via the canonical
+	// server.Options.TasksAuthContext seam (D-108), not by wrapping the mount
+	// manually around the SDK handler.
 	authFn := func(r *http.Request) string { return r.Header.Get("X-Auth") }
-	ts := wave5HTTP(t, s, e, authFn)
+	s := newWave5Server(t, e, authFn)
+	ts := wave5HTTP(t, s)
 
 	// Alice creates a task; her auth context is recorded on the durable record.
 	raw, err := e.CreateForToolCall(context.Background(), tasks.CreateToolCallParams{
