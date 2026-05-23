@@ -24,6 +24,7 @@
     buildFixtures,
     type Fixture,
     type FixtureKind,
+    type ProjectFixture,
   } from './fixtures.js';
 
   interface Props {
@@ -31,20 +32,36 @@
     contracts: ToolContract[];
     /** The fetch state — drives the four-state PageState. */
     panelState: PageStateValue;
+    /**
+     * The project's on-disk fixtures (Phase 24, D-126), loaded from
+     * `<dir>/fixtures/<tool>/<kind>.json`. When a `<tool, kind>` pair has a
+     * project fixture, it takes precedence over the schema-derived synthetic
+     * payload — the App renders the realistic data the template ships
+     * rather than `"sample-value"` placeholders.
+     */
+    projectFixtures?: ProjectFixture[];
     /** Called when the user retries a failed contracts fetch. */
     onRetry?: () => void;
     /** Called when a fixture is applied — feeds the App synthetic content. */
     onApply?: (fixture: Fixture, contract: ToolContract) => void;
   }
 
-  let { contracts, panelState, onRetry, onApply }: Props = $props();
+  let { contracts, panelState, projectFixtures = [], onRetry, onApply }: Props = $props();
 
   let selectedTool = $state(0);
   let selectedKind = $state<FixtureKind>('happy');
 
   const contract = $derived(contracts[selectedTool]);
+  const overrides = $derived.by(() => {
+    const map: Partial<Record<FixtureKind, ProjectFixture>> = {};
+    if (!contract) return map;
+    for (const f of projectFixtures) {
+      if (f.tool === contract.name) map[f.kind] = f;
+    }
+    return map;
+  });
   const fixtures = $derived(
-    contract ? buildFixtures(contract) : undefined,
+    contract ? buildFixtures(contract, overrides) : undefined,
   );
   const active = $derived(fixtures ? fixtures[selectedKind] : undefined);
 
@@ -52,11 +69,23 @@
     if (active && contract) onApply?.(active, contract);
   }
 
-  // Re-apply automatically when the selection changes so the preview tracks
-  // the switcher — the fixture *drives* the App's UI state (the acceptance
-  // criterion).
+  // Auto-apply on mount and whenever the (tool, kind) selection actually
+  // changes. The bare `active` reference change-fires on every reactive tick
+  // because the upstream host bridge's RPC log writes back into this tree
+  // (Phase 24 loop discovered in the live demo); gating on a stable string
+  // key derived from the selection breaks the cycle while still tracking
+  // user changes.
+  //
+  // `untrack` keeps lastApplied out of the effect's dependency graph so
+  // updating it doesn't re-trigger the effect immediately.
+  let lastApplied = '';
   $effect(() => {
-    if (active && contract) onApply?.(active, contract);
+    void selectedTool;
+    void selectedKind;
+    const key = contract ? `${contract.name}::${selectedKind}` : '';
+    if (!key || !active || key === lastApplied) return;
+    lastApplied = key;
+    onApply?.(active, contract);
   });
 </script>
 
@@ -72,7 +101,10 @@
     {#if contracts.length > 0}
       <label class="field">
         <span class="field-label">Tool</span>
-        <select bind:value={selectedTool} data-testid="fixture-tool-select">
+        <select
+          bind:value={selectedTool}
+          data-testid="fixture-tool-select"
+        >
           {#each contracts as c, i (c.name)}
             <option value={i}>{c.name}</option>
           {/each}

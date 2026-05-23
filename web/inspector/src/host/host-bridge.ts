@@ -385,18 +385,44 @@ export class HostBridge {
     });
   }
 
+  // Every outbound message flows through one of the three helpers below.
+  // postSafe() applies a JSON round-trip at the boundary to unwrap any
+  // Svelte 5 $state Proxy that has snuck into the payload (capabilities,
+  // hostContext, fixture content all originate from $state). Window's
+  // structured-clone serialiser rejects Proxies with a DataCloneError;
+  // a JSON round-trip is cheap, deterministic, and safe for the values
+  // this protocol carries (plain JSON-shaped objects with no functions,
+  // Maps or Dates). Using JSON rather than structuredClone also avoids
+  // triggering Svelte's $derived re-evaluation cycle that a deep
+  // structuredClone walk would cause. Phase 24 — D-127.
+  private postSafe(message: JsonRpcMessage): void {
+    let plain: unknown;
+    try {
+      plain = JSON.parse(JSON.stringify(message));
+    } catch {
+      // A genuinely non-serialisable payload — drop with a one-line log
+      // so the developer notices; the inspector is a dev surface and a
+      // logged-and-dropped is preferable to a thrown that crashes the
+      // bridge.
+      // eslint-disable-next-line no-console
+      console.warn('[host-bridge] dropping non-cloneable message', message);
+      return;
+    }
+    this.peer.postMessage(plain);
+  }
+
   private notify(method: string, params: unknown): void {
     if (this.closed) return;
     const message = { jsonrpc: '2.0' as const, method, params };
     this.log('outbound', message);
-    this.peer.postMessage(message);
+    this.postSafe(message);
   }
 
   private respond(id: JsonRpcRequest['id'], result: unknown): void {
     if (this.closed) return;
     const message = { jsonrpc: '2.0' as const, id, result };
     this.log('outbound', message);
-    this.peer.postMessage(message);
+    this.postSafe(message);
   }
 
   private respondError(
@@ -411,7 +437,7 @@ export class HostBridge {
       error: { code, message: text },
     };
     this.log('outbound', message);
-    this.peer.postMessage(message);
+    this.postSafe(message);
   }
 
   private log(direction: 'inbound' | 'outbound', message: JsonRpcMessage): void {
