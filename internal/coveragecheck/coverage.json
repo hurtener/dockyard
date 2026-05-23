@@ -106,6 +106,16 @@
     "github.com/hurtener/dockyard/runtime/tool": {
       "min": 85,
       "band": "conformance"
+    },
+    "github.com/hurtener/dockyard/templates/analytics-widgets": {
+      "min": 80,
+      "band": "new-package",
+      "reason": "The analytics-widgets builtin: //go:embed + the substitution table that materialises it (Phase 24, decision D-128). Held to the new-package band — the unit test (builtin_test.go) drives Materialise + substitutionsFor + titleCase; the integration test drives the full real cycle end to end."
+    },
+    "github.com/hurtener/dockyard/templates/analytics-widgets/pkg/handlers": {
+      "min": 75,
+      "band": "cli-tooling",
+      "reason": "Demonstration handlers shipped by the analytics-widgets template (Phase 24, decision D-124). Synthetic data; a developer who scaffolds the project swaps each handler body for a real source. Held above the 70% CLI-tooling floor (the Phase 24 plan target) — the surface is exemplary, not production-critical for the framework itself."
     }
   },
   "exempt": [
