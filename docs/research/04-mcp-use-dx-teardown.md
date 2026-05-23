@@ -4,6 +4,15 @@
 **Sources:** See §7. All primary sources reachable except `npmjs.com/package/create-mcp-use-app` (HTTP 403 to WebFetch — template list recovered via DeepWiki mirror instead, flagged inline).
 **Status:** Draft for RFC-001-Dockyard
 
+> **Editor's note (Phase 24 + 25, 2026-05-23):** This brief refers to the V1
+> template set by its original working names — `analytical-card` and
+> `approval-flow` (singular). V1 ships them as **`analytics-widgets`** (D-124,
+> Phase 24) and **`approval-flows`** (Phase 25). The historical references below
+> are preserved verbatim: research briefs are *context*, not *design*, and
+> rewriting a brief's findings is forbidden (`AGENTS.md` §16). When you see
+> `analytical-card` / `approval-flow` below, read them as the V1 templates
+> `analytics-widgets` / `approval-flows`.
+
 ## 1. Why this brief exists
 
 The braindump sets an explicit bar: Dockyard's DX must be **better than mcp-use's** (Dump 3, Dump 4). mcp-use is the closest competitor — it self-describes as "the framework for MCP with the best DX" and as "the fullstack MCP framework to build MCP Apps for ChatGPT / Claude & MCP Servers for AI Agents." It has solved, in TypeScript, most of the surface Dockyard wants to own: scaffolding, hot reload, a server+widget workflow, and a built-in inspector.

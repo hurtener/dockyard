@@ -4,7 +4,7 @@
 // The no-template path is the first-class one (RFC §10): `dockyard new <name>`
 // with no --template produces a blank but working MCP server — a manifest, one
 // example contract-first tool, the generated contract artifacts, a runnable
-// main, and a test. Templates (analytics-widgets, approval-flow, inspector)
+// main, and a test. Templates (analytics-widgets, approval-flows, inspector)
 // are optional product-pattern showcases layered on by Wave 9: the template-
 // discovery seam (Phase 24) is implemented in this package alongside the
 // no-template scaffold, and a named template is materialised via

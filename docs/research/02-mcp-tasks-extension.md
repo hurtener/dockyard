@@ -9,6 +9,14 @@
 
 **Status:** Draft for RFC-001-Dockyard
 
+> **Editor's note (Phase 25, 2026-05-23):** This brief refers to the human-in-
+> the-loop template as `approval-flow` (singular). V1 ships it as
+> **`approval-flows`** (plural) — the rename was approved in Phase 25 (see
+> `docs/plans/phase-25-approval-flows.md`). The historical references below are
+> preserved verbatim: research briefs are *context*, not *design*, and rewriting
+> a brief's findings is forbidden (`AGENTS.md` §16). When you see `approval-flow`
+> below, read it as the V1 template `approval-flows`.
+
 ---
 
 ## 1. Why this brief exists

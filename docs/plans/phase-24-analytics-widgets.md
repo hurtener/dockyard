@@ -110,7 +110,7 @@ template-local `ChartFrame`, and honours the host theme automatically through
 
 ## Non-goals
 
-- The `approval-flow` and `inspector` templates (Phases 25 and 26).
+- The `approval-flows` and `inspector` templates (Phases 25 and 26).
 - Fullscreen or pip display modes for the analytics-widgets App (manifest
   declares `inline` only; future templates may declare others).
 - A theme registry, a skin system, or a plugin pattern for widget renderers —

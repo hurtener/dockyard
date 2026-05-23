@@ -14,6 +14,14 @@ inline through a Svelte App that composes the shared `web/ui` inventory
 (plus the new `Sparkline`). Replaces the master plan's original name
 `analytical-card`. D-124.
 
+**`approval-flows`** — the V1 product-pattern template (Phase 25, RFC §10 + §8.6):
+the Tasks × Apps showcase. Two contract-first task-augmented tools —
+`request_approval` (generic approve/reject card) and `propose_with_edits`
+(structured form with user-editable proposed values) — wired to one inline App
+that drives the `input_required` round-trip from inside the iframe and
+completes the task with the user's decision. Replaces the master plan's
+original name `approval-flow` (singular).
+
 **App runtime** — the Dockyard runtime library (`runtime/`): the importable Go
 package tree — `runtime/server` (the MCP server core), and later
 `runtime/apps`, `runtime/tasks`, `runtime/obs`, `runtime/store` — vendored into
@@ -233,6 +241,14 @@ Phase 18's `dockyard validate` command calls it. RFC §6.2. D-034.
 
 ## E
 
+**Elicitation-response** — the View → host `postMessage` notification
+(`ui/notifications/elicitation-response`) the bridge ships in Phase 25
+through which an App answers a task's `input_required` prompt (RFC §8.4,
+§8.6). The inspector's host-half forwards the typed params to its
+backend, which posts a raw `tasks/result` JSON-RPC frame to the
+attached server — the suspended task resumes with the user's reply.
+D-134.
+
 **Edge validation** — argument validation at the catalog edge: the Dockyard
 handler runtime validates a tool call's incoming arguments against the tool's
 generated input JSON Schema *before* the typed handler runs, so a schema-violating
@@ -266,6 +282,13 @@ so the generated JSON Schema carries an `enum` array. Reflection cannot see a
 Go `const` block, so the values must be registered. RFC §6.1. D-051.
 
 ## F
+
+**`FieldDiff`** — the shared `web/ui` component (Phase 25) that pairs an
+original (current) value with an editable proposed value. Renders the
+five V1 field types (`string`, `number`, `boolean`, `enum`, `text`) and
+falls back to plain text for an unknown type. Used by the
+`approval-flows` template's `propose_with_edits` App, reusable in any
+human-in-the-loop / review-and-commit UX.
 
 **Fixture switcher** — the inspector's Fixtures DetailRail panel: a
 `happy` / `empty` / `error` / `permission` / `slow` / `large` selector wired to
@@ -647,6 +670,15 @@ may compose it). Documented in `docs/design/CONVENTIONS.md` §3. D-127.
 `init()` blank-import. V1 ships two: `inmem` (in-memory, for single-user stdio apps)
 and `sqlite` (durable, `modernc.org/sqlite`). Every driver must pass the conformance
 suite. RFC §13. D-026.
+
+**Scaffold tasks-engine wiring** — the scaffold's emitted
+`tasks.NewEngine` + `server.Options.Tasks` construction in a
+materialised template's `main.go` whenever the template declares a tool
+with `task_support` ∈ {`optional`, `required`} (Phase 25 / D-135). The
+R2 follow-up D-108 named: a template that needs Tasks now ships a
+self-contained, runnable scaffold; the developer does not hand-wire the
+engine. Generalises beyond `approval-flows` to any future template (or
+no-template scaffold) that needs the Tasks extension.
 
 **Supervisor** — within the dev-loop orchestrator (Phase 19), a
 `context`-scoped unit owning one child process's lifecycle: start, restart

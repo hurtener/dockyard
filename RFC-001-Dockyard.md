@@ -558,7 +558,7 @@ single-user stdio mode (Brief 02 §4.5).
 
 ### 8.6 Tasks × Apps
 
-Tasks and Apps compose: the braindump's `task-runner` and `approval-flow` patterns
+Tasks and Apps compose: the braindump's `task-runner` and `approval-flows` patterns
 are an App UI bound to a task-returning tool, polling `tasks/get` (or consuming
 `notifications/tasks/status`) to render progress and cancel/retry actions. The
 inspector renders the task lifecycle and `input_required` round-trips so Tasks is
@@ -633,7 +633,7 @@ scaffold paths:
   three:**
   - **`analytics-widgets`** — chart / table / metric-card widgets, rendered
     inline (one App, three contract-first widget tools; see decision D-124).
-  - **`approval-flow`** — human-in-the-loop review (pairs with Tasks, §8.6).
+  - **`approval-flows`** — human-in-the-loop review (pairs with Tasks, §8.6).
   - **`inspector`** — object / log / trace / metadata inspection panels.
 
 Every template generates fixtures, tests, the manifest, and loading/empty/error/
