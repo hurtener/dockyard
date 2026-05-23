@@ -94,6 +94,33 @@ export class DisplayModeUnavailableError extends Error {
 const DEFAULT_CLIENT = { name: '@dockyard/bridge', version: '0.1.0' };
 
 /**
+ * Builds the default host peer — a sink that posts to `window.parent` with
+ * a wildcard `targetOrigin`. The wildcard is required and correct here:
+ * an MCP App's bundle runs inside a sandboxed iframe (`sandbox="allow-
+ * scripts"`, RFC §7.4) which gives it an opaque (`null`) origin; the host
+ * frame has its own origin. Without an explicit target origin,
+ * `Window.postMessage(message)` defaults to `'/'` (same-origin only), so
+ * every message is silently dropped at the boundary — the bridge's
+ * `ui/initialize` would never arrive, the host never answers, and the
+ * handshake hangs forever. The host bridge is the trust boundary: it
+ * decides whether to honour an inbound message; the View half cannot
+ * usefully narrow the target origin because the host iframe is
+ * cross-origin from its perspective. See decision D-124 (post-mortem).
+ */
+function defaultParentSink(): MessageSink | undefined {
+  const parent = (globalThis as { window?: { parent?: Window } }).window?.parent;
+  if (!parent) return undefined;
+  return {
+    postMessage(message: unknown): void {
+      // Cross-document postMessage requires targetOrigin; '*' is the
+      // correct value for a sandboxed iframe whose parent is opaque from
+      // the View's perspective.
+      parent.postMessage(message, '*');
+    },
+  };
+}
+
+/**
  * The bridge shell. Construct with `createBridge`, then `await connect()` once;
  * after that the stores are live and the typed helpers are usable.
  */
@@ -113,9 +140,7 @@ export class BridgeShell {
 
   constructor(options: BridgeOptions = {}) {
     this.options = options;
-    const peer =
-      options.peer ??
-      (globalThis as { window?: { parent?: MessageSink } }).window?.parent;
+    const peer = options.peer ?? defaultParentSink();
     if (!peer) {
       throw new Error(
         'BridgeShell: no host peer — pass options.peer outside an iframe',

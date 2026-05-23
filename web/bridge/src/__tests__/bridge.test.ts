@@ -182,3 +182,63 @@ describe('BridgeShell — display-mode negotiation (RFC §7.2)', () => {
     expect(bridge.availableDisplayModes()).toEqual(['inline']);
   });
 });
+
+describe('BridgeShell — default host peer', () => {
+  // Regression for the Phase-24 inspector handshake bug: the default peer
+  // path posts to `window.parent.postMessage(message, '*')` and not the
+  // single-arg form. Cross-document postMessage requires an explicit
+  // targetOrigin, and the View runs inside a sandboxed (opaque-origin)
+  // iframe whose parent is necessarily cross-origin from its perspective.
+  // Without '*' the browser silently drops every outbound message and the
+  // bridge's `ui/initialize` never reaches the host (handshake hangs).
+
+  it('posts outbound messages to window.parent with a wildcard targetOrigin', async () => {
+    type PostArgs = [unknown, string?];
+    const calls: PostArgs[] = [];
+    const fakeWindow = {
+      parent: {
+        postMessage: (message: unknown, targetOrigin?: string): void => {
+          calls.push([message, targetOrigin]);
+        },
+      },
+    };
+    const realWindow = (globalThis as { window?: unknown }).window;
+    (globalThis as { window?: unknown }).window = fakeWindow;
+    try {
+      // We don't await connect() here — only need to prove that constructing
+      // the bridge + calling connect() invokes the parent's postMessage with
+      // a wildcard targetOrigin. We pass an explicit `source` so the bridge
+      // doesn't try to addEventListener on the fake window.
+      const source = {
+        addEventListener(): void {},
+        removeEventListener(): void {},
+      };
+      const bridge = createBridge({ source, styleTarget: null });
+      void bridge.connect().catch(() => {
+        /* the fake host never answers; the connect promise stays pending */
+      });
+      expect(calls.length).toBeGreaterThanOrEqual(1);
+      const [message, targetOrigin] = calls[0]!;
+      expect(targetOrigin).toBe('*');
+      // The first outbound message is the ui/initialize request.
+      expect(message).toMatchObject({
+        jsonrpc: '2.0',
+        method: 'ui/initialize',
+      });
+      bridge.close();
+    } finally {
+      (globalThis as { window?: unknown }).window = realWindow;
+    }
+  });
+
+  it('throws a clear error when no window.parent is available', () => {
+    const realWindow = (globalThis as { window?: unknown }).window;
+    (globalThis as { window?: unknown }).window = undefined;
+    try {
+      expect(() => createBridge({})).toThrowError(/no host peer/);
+    } finally {
+      (globalThis as { window?: unknown }).window = realWindow;
+    }
+  });
+});
+
