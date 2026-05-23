@@ -24,6 +24,7 @@ func newNewCmd() *cobra.Command {
 		dir          string
 		modulePath   string
 		dockyardPath string
+		templateName string
 	)
 
 	cmd := &cobra.Command{
@@ -36,8 +37,8 @@ contract-first tool, its generated JSON Schema and TypeScript, a runnable main,
 and a contract test. The generated project builds and serves immediately.
 
 The no-template path is first-class — no --template flag is required to get a
-working server. Templates (analytical-card, approval-flow, inspector) are
-optional product-pattern showcases added in a later phase.`,
+working server. Templates (analytics-widgets, approval-flow, inspector) are
+optional product-pattern showcases; pass --template <name> to scaffold one.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -45,12 +46,27 @@ optional product-pattern showcases added in a later phase.`,
 			if err != nil {
 				return err
 			}
-			res, err := scaffold.Generate(scaffold.Options{
+			// When --dockyard-path is set, default the web sibling to
+			// <dockyard-path>/web — every template that needs the in-repo
+			// @dockyard/bridge / @dockyard/ui packages then resolves them.
+			// Pre-publish only: a released Dockyard leaves both empty.
+			resolvedWeb := ""
+			if resolvedDockyard != "" {
+				resolvedWeb = filepath.Join(resolvedDockyard, "web")
+			}
+			opts := scaffold.Options{
 				Name:            name,
 				Dir:             dir,
 				ModulePath:      modulePath,
 				DockyardReplace: resolvedDockyard,
-			})
+				DockyardWebPath: resolvedWeb,
+			}
+			var res scaffold.Result
+			if templateName == "" {
+				res, err = scaffold.Generate(opts)
+			} else {
+				res, err = scaffold.GenerateFromTemplate(opts, templateName)
+			}
 			if err != nil {
 				return mapScaffoldError(err)
 			}
@@ -63,6 +79,9 @@ optional product-pattern showcases added in a later phase.`,
 		"parent directory to create the project under (default: current directory)")
 	cmd.Flags().StringVar(&modulePath, "module", "",
 		"Go module path for the new project's go.mod (default: example.com/<name>)")
+	cmd.Flags().StringVar(&templateName, "template", "",
+		"product-pattern template to scaffold (e.g. analytics-widgets). "+
+			"Omit for the blank no-template scaffold (the first-class path).")
 	// --dockyard-path is the pre-release seam: until Dockyard is published to a
 	// module registry, a scaffolded project needs a `replace` directive
 	// pointing at a local Dockyard checkout to compile. It is hidden because a
@@ -96,6 +115,8 @@ func mapScaffoldError(err error) error {
 		return errf("%w", err)
 	case errors.Is(err, scaffold.ErrTargetExists):
 		return errf("%w — choose another name or remove the directory", err)
+	case errors.Is(err, scaffold.ErrUnknownTemplate):
+		return errf("%w — run `dockyard new --help` for the registered set", err)
 	default:
 		return errf("scaffold failed: %w", err)
 	}
