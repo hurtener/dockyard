@@ -1,0 +1,14 @@
+{
+  "name": "slow",
+  "description": "Metric still loading — exercises the loading state.",
+  "state": "loading",
+  "input": { "label": "Customer health", "value": null },
+  "output_override": {
+    "kind": "metric_card",
+    "label": "Customer health",
+    "value": null,
+    "theme": "auto",
+    "state": "loading",
+    "message": "Computing health score…"
+  }
+}

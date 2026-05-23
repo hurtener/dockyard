@@ -15,6 +15,13 @@ import (
 	"os/signal"
 
 	"github.com/hurtener/dockyard/internal/cli"
+
+	// Builtin templates register themselves into the process-wide template
+	// Registry at init() time (Phase 24, decision D-128). The CLI's
+	// `dockyard new --template <name>` verb looks them up by name. Adding a
+	// new template is one new blank import here plus one new
+	// templates/<name>/ directory.
+	_ "github.com/hurtener/dockyard/templates/analytics-widgets"
 )
 
 func main() {

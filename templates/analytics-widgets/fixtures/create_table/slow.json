@@ -1,0 +1,17 @@
+{
+  "name": "slow",
+  "description": "Table is still loading — exercise the loading state.",
+  "state": "loading",
+  "input": {
+    "columns": [{ "key": "name", "label": "Account", "type": "string" }],
+    "rows": []
+  },
+  "output_override": {
+    "kind": "table",
+    "columns": [{ "key": "name", "label": "Account", "type": "string" }],
+    "rows": [],
+    "theme": "auto",
+    "state": "loading",
+    "message": "Fetching accounts…"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "empty",
+  "description": "A chart with no data this period.",
+  "state": "empty",
+  "input": {
+    "type": "line",
+    "title": "Daily active users (last 7 days)",
+    "data": {
+      "categories": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+      "series": []
+    }
+  }
+}

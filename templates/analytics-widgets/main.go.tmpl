@@ -1,0 +1,159 @@
+// Command __PROJECT_NAME__ is the analytics-widgets MCP server scaffolded by
+// `dockyard new --template analytics-widgets` (RFC §10, Phase 24).
+//
+// It registers three contract-first widget tools — create_chart, create_table,
+// create_metric_card — wired to one inline-only App. The transport is chosen
+// by the DOCKYARD_TRANSPORT environment variable ("stdio" by default, or
+// "http" for the streamable-HTTP service mode). Wire it into an MCP host
+// (Claude, Cursor, …) with `dockyard install`.
+package main
+
+import (
+	"context"
+	"embed"
+	"errors"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+
+	"github.com/hurtener/dockyard/runtime/apps"
+	"github.com/hurtener/dockyard/runtime/server"
+	"github.com/hurtener/dockyard/runtime/tool"
+
+	"__MODULE_PATH__/internal/contracts"
+	"__MODULE_PATH__/internal/handlers"
+)
+
+// uiBundle holds the Vite-built single-file App bundle. `dockyard build` runs
+// `npm run build` in web/ before `go build`, so web/dist/index.html exists at
+// embed time. The `all:` prefix preserves hashed asset names (RFC §14, brief
+// 06 §2.2); empty `_` and `.` files would otherwise be skipped.
+//
+//go:embed all:web/dist
+var uiBundle embed.FS
+
+// httpAddr is the address the HTTP transport listens on when
+// DOCKYARD_TRANSPORT=http. DOCKYARD_HTTP_ADDR overrides it.
+const httpAddr = "127.0.0.1:8080"
+
+// appURI is the ui:// URI under which the widgets App is served as an MCP
+// resource. The host segment is the manifest name (RFC §7.1 + brief 01 §2.2).
+const (
+	appURI  = "ui://__PROJECT_NAME__/widgets"
+	appName = "widgets"
+)
+
+func main() {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	srv, err := server.New(server.Info{
+		Name:    "__PROJECT_NAME__",
+		Title:   "__PROJECT_TITLE__",
+		Version: "0.1.0",
+	}, &server.Options{Logger: logger})
+	if err != nil {
+		logger.Error("create server", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	if err := registerApp(srv); err != nil {
+		logger.Error("register app", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	if err := registerTools(srv); err != nil {
+		logger.Error("register tools", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	if err := serve(ctx, srv, logger); err != nil {
+		logger.Error("serve", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+}
+
+// registerApp installs the embedded single-file Svelte bundle as the
+// `ui://<name>/widgets` MCP App resource (RFC §7.1, §7.4 — inline, deny-by-
+// default CSP). Every widget tool declares `.UI(appName)` so its result
+// renders inside this App in the host's chat surface.
+func registerApp(srv *server.Server) error {
+	html, err := fs.ReadFile(uiBundle, "web/dist/index.html")
+	if err != nil {
+		return err
+	}
+	return apps.Register(srv, apps.App{
+		URI:   appURI,
+		Name:  appName,
+		Title: "__PROJECT_TITLE__ — widgets",
+		HTML:  html,
+	})
+}
+
+// registerTools wires the three widget tools onto the server. Each tool is
+// declared with the runtime/tool fluent builder over its typed contract pair
+// (P1 — the generated schema is what the host sees; the Go struct is the
+// source of truth).
+func registerTools(srv *server.Server) error {
+	if err := tool.New[contracts.CreateChartInput, contracts.CreateChartOutput]("create_chart").
+		Describe("Render a chart (bar | line | area | pie | scatter | radar) inline in the host.").
+		UI(appName).
+		Handler(handlers.CreateChart).
+		Register(srv); err != nil {
+		return err
+	}
+	if err := tool.New[contracts.CreateTableInput, contracts.CreateTableOutput]("create_table").
+		Describe("Render a sortable, paged data table inline in the host.").
+		UI(appName).
+		Handler(handlers.CreateTable).
+		Register(srv); err != nil {
+		return err
+	}
+	if err := tool.New[contracts.CreateMetricCardInput, contracts.CreateMetricCardOutput]("create_metric_card").
+		Describe("Render a KPI metric card with an optional sparkline and breakdown.").
+		UI(appName).
+		Handler(handlers.CreateMetricCard).
+		Register(srv); err != nil {
+		return err
+	}
+	return nil
+}
+
+// serve brings up the transport named by DOCKYARD_TRANSPORT.
+func serve(ctx context.Context, srv *server.Server, logger *slog.Logger) error {
+	switch transport := os.Getenv("DOCKYARD_TRANSPORT"); transport {
+	case "", "stdio":
+		return srv.ServeStdio(ctx)
+	case "http":
+		return serveHTTP(ctx, srv, logger)
+	default:
+		return errors.New("unsupported DOCKYARD_TRANSPORT " + transport + " (want \"stdio\" or \"http\")")
+	}
+}
+
+// serveHTTP serves the streamable-HTTP transport with the runtime's secure
+// defaults (RFC §5.2).
+func serveHTTP(ctx context.Context, srv *server.Server, logger *slog.Logger) error {
+	handler, err := srv.HTTPHandler(nil)
+	if err != nil {
+		return err
+	}
+	addr := httpAddr
+	if override := os.Getenv("DOCKYARD_HTTP_ADDR"); override != "" {
+		addr = override
+	}
+	httpSrv := &http.Server{Addr: addr, Handler: handler}
+	go func() {
+		<-ctx.Done()
+		_ = httpSrv.Close()
+	}()
+	logger.Info("serving streamable-HTTP transport", slog.String("addr", addr))
+	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}

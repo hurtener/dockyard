@@ -1,0 +1,17 @@
+{
+  "name": "permission",
+  "description": "Caller cannot read this account list.",
+  "state": "permission",
+  "input": {
+    "columns": [{ "key": "name", "label": "Account", "type": "string" }],
+    "rows": []
+  },
+  "output_override": {
+    "kind": "table",
+    "columns": [{ "key": "name", "label": "Account", "type": "string" }],
+    "rows": [],
+    "theme": "auto",
+    "state": "permission",
+    "message": "You do not have permission to view account-level details."
+  }
+}

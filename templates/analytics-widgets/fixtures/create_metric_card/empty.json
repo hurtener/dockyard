@@ -1,0 +1,9 @@
+{
+  "name": "empty",
+  "description": "No metric reported (e.g. a new account with no signal yet).",
+  "state": "empty",
+  "input": {
+    "label": "Customer health",
+    "value": null
+  }
+}

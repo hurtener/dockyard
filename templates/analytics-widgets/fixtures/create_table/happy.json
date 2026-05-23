@@ -1,0 +1,21 @@
+{
+  "name": "happy",
+  "description": "Top accounts by ARR.",
+  "state": "ready",
+  "input": {
+    "columns": [
+      { "key": "name", "label": "Account", "type": "string", "sortable": true },
+      { "key": "arr", "label": "ARR", "type": "currency", "sortable": true },
+      { "key": "owner", "label": "Owner", "type": "string", "sortable": false },
+      { "key": "status", "label": "Status", "type": "status", "sortable": false }
+    ],
+    "rows": [
+      { "name": "Acme Corp", "arr": 142000, "owner": "K. Ito", "status": "healthy" },
+      { "name": "Globex", "arr": 98500, "owner": "M. Devi", "status": "at risk" },
+      { "name": "Initech", "arr": 72500, "owner": "K. Ito", "status": "healthy" },
+      { "name": "Hooli", "arr": 55000, "owner": "J. Park", "status": "healthy" },
+      { "name": "Pied Piper", "arr": 41000, "owner": "M. Devi", "status": "watch" }
+    ],
+    "sort": { "column": "arr", "dir": "desc" }
+  }
+}
