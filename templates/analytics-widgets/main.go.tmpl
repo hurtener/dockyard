@@ -19,6 +19,7 @@ import (
 	"os/signal"
 
 	"github.com/hurtener/dockyard/runtime/apps"
+	"github.com/hurtener/dockyard/runtime/obs"
 	"github.com/hurtener/dockyard/runtime/server"
 	"github.com/hurtener/dockyard/runtime/tool"
 
@@ -51,15 +52,29 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	// The obs/v1 SSE sink is the out-of-band, localhost-bound event stream the
+	// inspector subscribes to (RFC §11.3, §12). Mounting it lets `dockyard
+	// inspect --url <server>` relay the live obs/v1 events into its Events /
+	// Analytics / Tasks panels. Stdio servers MUST keep this out-of-band — the
+	// SSE listener never touches the MCP pipe.
+	obsSink, err := obs.NewSSESink("")
+	if err != nil {
+		logger.Error("create obs sink", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	defer func() { _ = obsSink.Close() }()
+
 	srv, err := server.New(server.Info{
 		Name:    "__PROJECT_NAME__",
 		Title:   "__PROJECT_TITLE__",
 		Version: "0.1.0",
-	}, &server.Options{Logger: logger})
+	}, &server.Options{Logger: logger, Obs: obsSink})
 	if err != nil {
 		logger.Error("create server", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+	logger.Info("obs/v1 SSE stream",
+		slog.String("addr", "http://"+obsSink.Addr()+"/obs/v1/stream"))
 
 	if err := registerApp(srv); err != nil {
 		logger.Error("register app", slog.String("error", err.Error()))
@@ -71,7 +86,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := serve(ctx, srv, logger); err != nil {
+	if err := serve(ctx, srv, obsSink, logger); err != nil {
 		logger.Error("serve", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
@@ -124,29 +139,38 @@ func registerTools(srv *server.Server) error {
 }
 
 // serve brings up the transport named by DOCKYARD_TRANSPORT.
-func serve(ctx context.Context, srv *server.Server, logger *slog.Logger) error {
+func serve(ctx context.Context, srv *server.Server, obsSink *obs.SSESink, logger *slog.Logger) error {
 	switch transport := os.Getenv("DOCKYARD_TRANSPORT"); transport {
 	case "", "stdio":
+		// Stdio keeps the SSE sink strictly out-of-band — the inspector reaches
+		// it via the sink's own loopback listener (printed on startup).
 		return srv.ServeStdio(ctx)
 	case "http":
-		return serveHTTP(ctx, srv, logger)
+		return serveHTTP(ctx, srv, obsSink, logger)
 	default:
 		return errors.New("unsupported DOCKYARD_TRANSPORT " + transport + " (want \"stdio\" or \"http\")")
 	}
 }
 
 // serveHTTP serves the streamable-HTTP transport with the runtime's secure
-// defaults (RFC §5.2).
-func serveHTTP(ctx context.Context, srv *server.Server, logger *slog.Logger) error {
+// defaults (RFC §5.2). It additionally mounts the obs/v1 SSE stream on
+// `/obs/v1/stream` of the SAME listener so the inspector can subscribe with
+// just `--url <server>` — no second port to discover. Mounting is safe: the
+// MCP handler answers a distinct set of routes, and CrossOriginProtection
+// covers the new path too.
+func serveHTTP(ctx context.Context, srv *server.Server, obsSink *obs.SSESink, logger *slog.Logger) error {
 	handler, err := srv.HTTPHandler(nil)
 	if err != nil {
 		return err
 	}
+	mux := http.NewServeMux()
+	mux.Handle("/obs/v1/stream", obsSink.Handler())
+	mux.Handle("/", handler)
 	addr := httpAddr
 	if override := os.Getenv("DOCKYARD_HTTP_ADDR"); override != "" {
 		addr = override
 	}
-	httpSrv := &http.Server{Addr: addr, Handler: handler}
+	httpSrv := &http.Server{Addr: addr, Handler: mux}
 	go func() {
 		<-ctx.Done()
 		_ = httpSrv.Close()
