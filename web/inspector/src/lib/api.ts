@@ -154,3 +154,48 @@ export async function fetchApps(
     }))
     .filter((a) => a.html !== '');
 }
+
+/**
+ * Fetches the project's on-disk fixtures from `GET /api/fixtures` (Phase 24,
+ * D-126). When the inspector was attached with `--dir <project>`, the
+ * backend reads `<project>/fixtures/<tool>/<kind>.json` and serves them
+ * here; the Fixtures switcher prefers these realistic payloads over the
+ * schema-derived synthetic fixtures. A detached or fixture-less project
+ * yields an empty list and the switcher falls back to synthetic fixtures.
+ */
+import type { ProjectFixture, FixtureKind } from './fixtures.js';
+export async function fetchProjectFixtures(
+  base = '',
+  fetchImpl: typeof fetch = fetch,
+): Promise<ProjectFixture[]> {
+  const resp = await fetchImpl(`${base}/api/fixtures`);
+  if (!resp.ok) {
+    throw new Error(`inspector: /api/fixtures returned ${resp.status}`);
+  }
+  const data: unknown = await resp.json();
+  if (!Array.isArray(data)) return [];
+  const knownKinds = new Set<string>([
+    'happy', 'empty', 'error', 'permission', 'slow', 'large',
+  ]);
+  return data
+    .filter((d): d is Record<string, unknown> => typeof d === 'object' && d !== null)
+    .filter((d) =>
+      typeof d.tool === 'string' &&
+      typeof d.kind === 'string' &&
+      knownKinds.has(d.kind),
+    )
+    .map((d) => ({
+      tool: d.tool as string,
+      kind: d.kind as FixtureKind,
+      description: typeof d.description === 'string' ? d.description : undefined,
+      state: typeof d.state === 'string' ? d.state : (d.kind as string),
+      input:
+        typeof d.input === 'object' && d.input !== null
+          ? (d.input as Record<string, unknown>)
+          : undefined,
+      structuredContent:
+        typeof d.structuredContent === 'object' && d.structuredContent !== null
+          ? (d.structuredContent as Record<string, unknown>)
+          : undefined,
+    }));
+}

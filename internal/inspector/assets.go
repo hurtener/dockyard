@@ -81,6 +81,32 @@ func newMux(opts Options, log *slog.Logger) http.Handler {
 		_, _ = w.Write([]byte("[]"))
 	})
 
+	// /api/fixtures — the read-only on-disk fixture loader (Phase 24, D-126).
+	// When the inspector was attached with --dir <project>, the loader reads
+	// <project>/fixtures/<tool>/<kind>.json and surfaces them to the FixturesPanel.
+	// The frontend prefers these real-data fixtures over the schema-derived
+	// synthetic ones the Phase 23 switcher ships; an unattached or fixture-less
+	// project answers with an empty array and the switcher degrades cleanly.
+	mux.HandleFunc("GET /api/fixtures", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		fixtures := []ProjectFixture{}
+		if opts.Fixtures != nil {
+			loaded, err := opts.Fixtures()
+			if err != nil {
+				log.WarnContext(context.Background(), "dockyard inspector: fixtures load failed",
+					slog.String("error", err.Error()))
+				w.WriteHeader(http.StatusBadGateway)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			if len(loaded) > 0 {
+				fixtures = loaded
+			}
+		}
+		_ = json.NewEncoder(w).Encode(fixtures)
+	})
+
 	// /api/apps — the read-only App-preview source. It performs a read-only
 	// resources/list + resources/read of the attached server's ui:// resources
 	// (RFC §12 line 711 — the inspector renders the server's Apps; D-103). When
