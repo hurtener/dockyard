@@ -438,4 +438,3 @@ spotted before V1:
 The Phase 24 smoke (`scripts/smoke/phase-24.sh`) gains two new assertions: the
 `POST /api/tools/invoke` endpoint exists, and the inspector frontend bundle
 embeds the Dockyard logo asset. `make preflight` is green: OK=243 / FAIL=0.
-
