@@ -119,11 +119,12 @@ When a phase plan and the RFC drift, the RFC wins. File a follow-up to fix the p
 │   ├── ui/                      # shared Svelte component inventory — the design system (§20)
 │   └── bridge/                  # the Svelte bridge shell library (RFC §7.3)
 ├── templates/                   # `dockyard new --template` sources (RFC §10)
+├── skills/                      # Agent Skills — one SKILL.md per workflow (§19, Phase 29)
 ├── examples/
 ├── test/integration/
 ├── scripts/
 │   ├── preflight.sh             # the preflight gate
-│   ├── drift-audit.sh           # design-coherence checks
+│   ├── drift-audit.sh           # design-coherence checks (incl. §19 hook — D-138)
 │   ├── smoke/                   # per-phase smoke scripts
 │   ├── hooks/pre-commit
 │   └── install-hooks.sh
@@ -132,6 +133,8 @@ When a phase plan and the RFC drift, the RFC wins. File a follow-up to fix the p
     ├── research/                # phase-planning research briefs + INDEX.md
     ├── specifications/          # vendored MCP spec snapshots
     ├── design/                  # design system: CONVENTIONS.md, tokens, mockups (§20)
+    ├── site/                    # published tech-docs site — VitePress (§19, Phase 29; D-137)
+    ├── screenshots/             # in-repo screenshots referenced by docs + PR bodies
     ├── decisions.md             # append-only D-NNN log
     └── glossary.md
 ```

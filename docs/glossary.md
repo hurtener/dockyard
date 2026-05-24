@@ -7,6 +7,13 @@ same PR that introduces it. When in doubt, the RFC wins (AGENTS.md §15).
 
 ## A
 
+**Agent Skill** — a directory under `skills/` containing a `SKILL.md` file
+(per the agentskills.io specification) that teaches an AI coding agent one
+coherent Dockyard workflow. Dockyard ships eight V1 skills (Phase 29):
+`scaffold-a-server`, `add-a-tool`, `attach-a-ui-resource`,
+`define-contracts`, `run-the-dev-loop`, `validate`, `package`,
+`test-with-the-inspector`. AGENTS.md §19; D-141.
+
 **`analytics-widgets`** — the V1 product-pattern template (Phase 24, RFC §10):
 one MCP App that exposes three contract-first widget tools
 (`create_chart`, `create_table`, `create_metric_card`) and renders each
@@ -148,6 +155,16 @@ windows × amd64 and arm64. Built sequentially, one `go build` per target with
 than aborting the run. `buildpkg.DefaultMatrix()` returns it. RFC §14. D-087.
 
 ## D
+
+**docs site** — Dockyard's published technical-documentation site (Phase 29),
+built with VitePress from sources under `docs/site/` and deployed to GitHub
+Pages by `.github/workflows/docs.yml`. The site stitches together the home
+page, getting-started walkthroughs per shipped template, per-surface guides,
+an auto-derived CLI reference (`internal/clidocs`, D-140), the agent-skills
+index, and reference pages that **transclude** the canonical RFC, master
+plan, decisions log, glossary, and design conventions via VitePress's
+`<!--@include: …-->` directive so the site cannot drift from the in-repo
+canonical sources. D-137, D-141.
 
 **dev loop** — the `dockyard dev` orchestrated edit-feedback cycle (Phase 19):
 an embedded `fsnotify` watcher choreographing a Go-server restart on a `.go`
@@ -637,6 +654,24 @@ the tool's `Builder` and read through `Builder.Flags()`. RFC §6.3. D-045.
 example contract-first tool, the generated contract artifacts, a runnable
 `main.go`, a contract test, and project metadata. Owned by `internal/scaffold`;
 deterministic for a fixed invocation and golden-pinned. RFC §9.1, §10.
+
+**§19 hygiene rule** — the AGENTS.md §19 rule that a PR changing user-facing
+surface (a CLI verb, a manifest field, a template, the generated-project shape,
+a public runtime API) **also updates the affected skill(s) and docs page(s) in
+the same PR**. Mechanically enforced from Phase 29 onward by the
+`internal/skillcheck` validator, the §19 hook in `scripts/drift-audit.sh`, and
+the docs site build's dead-link check. D-138, D-142.
+
+**`SKILL.md`** — the Markdown-with-YAML-frontmatter file at the root of an
+Agent Skill, per the agentskills.io specification. Required frontmatter:
+`name` (lowercase letters, digits and hyphens; ≤64 chars; matches the parent
+directory name) and `description` (≤1024 chars). Validated by
+`internal/skillcheck` in CI; a malformed `SKILL.md` fails drift-audit.
+
+**`skillcheck`** — the in-repo SKILL.md validator (`internal/skillcheck`,
+plus the small `cmd/skillcheck` CLI) Phase 29 introduces. Invoked by
+`scripts/drift-audit.sh`'s §19 hook (D-138) and by `scripts/smoke/phase-29.sh`
+to mechanically reject a malformed skill before it merges.
 
 **Shape + size capture** — the default obs/v1 tool input/output capture policy
 (`obs.CapturePolicyShape`): an event carries only the structural fingerprint of

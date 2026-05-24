@@ -3727,3 +3727,264 @@ worth its maintenance cost.
 This decision **closes Wave 9 at two templates** and clears the way for Wave
 10. Phase 29's dependency line is updated from `21, 26` to `21, 25`
 accordingly.
+
+---
+
+## D-137 — The published tech-docs site is built with VitePress under `docs/site/`
+
+**Date:** 2026-05-23
+**Status:** Settled
+**Where it lives:** RFC §2 (the authoritative-sources priority chain the docs
+site teaches), AGENTS.md §19 (the published docs are part of the §19 hygiene
+surface), `docs/plans/phase-29-skills-docs.md`.
+
+**The decision.** Dockyard's published technical-documentation site
+(`docs/site/`, deployed to GitHub Pages by `.github/workflows/docs.yml`) is
+built with **VitePress** (1.6.x at the time of writing). The site stitches
+together: the home page; a getting-started section with one walkthrough per
+shipped V1 template (`analytics-widgets`, `approval-flows`); per-surface
+guides; a CLI reference auto-derived from the cobra command tree by
+`internal/clidocs`; an agent-skills index; and reference pages that
+**transclude** the in-repo canonical sources (RFC-001, the master plan,
+the decisions log, the glossary, the design conventions) via VitePress's
+`<!--@include: …-->` directive so the site is the same source of truth, not
+a copy that drifts.
+
+**Why VitePress, not mdBook / Astro Starlight / MkDocs Material.**
+
+1. **Same toolchain we already ship.** The repo already uses Vite for
+   `web/bridge`, `web/ui`, `web/inspector`, and every template's
+   `web/`. VitePress is Vite-powered; the docs site adds no new runtime
+   technology — `make docs` is the same `npm ci && npm run build` shape
+   the existing `make web` target uses. No second tool family to teach.
+2. **CGo-free / Node-only.** The published artifact is a static site,
+   consistent with the framework's pure-Go runtime guarantee. mdBook
+   would add a Rust toolchain to CI for one job; Astro Starlight is
+   heavier and uses an additional component model; MkDocs would add
+   Python. VitePress reuses node + npm.
+3. **Markdown-native + transclusion.** VitePress's `<!--@include: …-->`
+   directive lets the canonical RFC, plans, decisions, glossary, and
+   design conventions render as the docs site's reference pages without
+   duplication. A canonical-source edit is reflected on the next site
+   build — drift is mechanically impossible for those pages.
+4. **Built-in search + dead-link checking.** VitePress's `themeConfig.search`
+   (local provider) ships search without a third-party service; setting
+   `ignoreDeadLinks: false` (the config default we keep on) fails the
+   build on a dead internal link — exactly the §19 hygiene rule the
+   docs surface is supposed to enforce.
+5. **Low operational complexity.** One config file, one build command,
+   one CI workflow. The published site is one tag away from a release
+   cut (Phase 30).
+
+**What the decision rules out for V1.**
+
+- A docs CMS (Sphinx, Hugo, Docusaurus, MkDocs) — heavier, and none
+  reduce the toolchain count below "VitePress reuses Vite".
+- Versioned docs trees and a heavy search backend (Algolia, MeiliSearch).
+  V1 ships from `main`; if a future post-V1 need for versioned docs
+  arises, VitePress supports it via the standard multi-config pattern.
+
+**Knock-on rules (enforced).** The docs site is part of the AGENTS.md §19
+hygiene surface: a PR that changes user-facing surface (a CLI verb, a
+manifest field, a template, the generated-project shape, a public runtime
+API) updates the affected docs page(s) in the same PR. The `make docs`
+build step fails on a dead internal link; CI runs it on every PR (build-
+only) and on every push to `main` (build + deploy).
+
+---
+
+## D-138 — `scripts/drift-audit.sh` enforces AGENTS.md §19 mechanically
+
+**Date:** 2026-05-23
+**Status:** Settled
+**Where it lives:** AGENTS.md §19 ("keeping skills and docs in sync with the
+surface is mandatory repo hygiene"), `scripts/drift-audit.sh` §6,
+`docs/plans/phase-29-skills-docs.md`.
+
+**The decision.** Before Phase 29, AGENTS.md §19 existed in the text but
+had no mechanical enforcement: a contributor changing a CLI verb without
+updating the affected skill or docs page passed CI silently. Phase 29
+closes that gap. `scripts/drift-audit.sh` now carries three §19 checks:
+
+1. **Every `SKILL.md` parses against the agentskills.io spec.** The
+   `internal/skillcheck` Go validator (with golden-tested fixtures for
+   each violation class) is invoked over the `skills/` tree; a
+   malformed `SKILL.md` fails drift-audit, which fails CI.
+2. **Every `dockyard` CLI verb has a referencing skill or docs page.**
+   The hook reads the verbs from `internal/cli/root.go` (the
+   `root.AddCommand(newXxxCmd)` registration block, the canonical
+   composition point) and asserts each verb is mentioned in either
+   `skills/` or `docs/site/`. A new verb without docs trips the hook.
+3. **Every shipped template has a docs walkthrough.** The hook walks
+   `templates/*/` and asserts each one whose `builtin.go` exists (the
+   canonical "this template is shipped" marker, D-128)
+   has a `docs/site/getting-started/<name>.md` page.
+
+The hook short-circuits when `skills/` or `docs/site/` is absent so it
+remains correct across the lifetime of the repo — pre-Phase-29 commits
+do not retroactively fail. The malformed-fixture path is exercised by
+`scripts/smoke/phase-29.sh` so a future regression in the validator
+fails the smoke check, not just the silent §19 hygiene.
+
+**Why not a lint plugin / `go generate` hook.** The `drift-audit` script
+is the project's existing convention for mechanical design-coherence
+checks (mirror, phase-plan↔smoke pairing, RFC references, brief
+references). Adding the §19 checks there keeps one entry point, one
+failure shape, and one CI step. A separate lint plugin would fragment
+the surface contributors look at when they hit a drift failure.
+
+**Knock-on rule.** A PR that changes user-facing surface and skips the
+skill / docs update fails the local pre-commit hook (which runs
+`make drift-audit`) and the CI `drift-audit` job. The §14 pre-merge
+checklist explicitly references this rule.
+
+---
+
+## D-139 — Pre-publish workflow: a fresh scaffold needs `go mod tidy` + `dockyard generate` once
+
+**Date:** 2026-05-23
+**Status:** Settled (documented behaviour, not new design)
+**Where it lives:** Documented in `skills/scaffold-a-server/SKILL.md`,
+`docs/site/getting-started/index.md`,
+`docs/site/getting-started/analytics-widgets.md`,
+`docs/site/getting-started/approval-flows.md`.
+
+**Observation.** During Phase 29's live-skill validation, a freshly
+scaffolded project (blank or template) needs two one-time post-scaffold
+steps before `dockyard validate` / `go test` will pass:
+
+1. `go mod tidy` — the generated `go.mod` carries a `replace` directive
+   to the local Dockyard checkout (D-080), but no `go.sum`. The
+   first `go test` / `go run` would otherwise fail to resolve transitive
+   deps.
+2. `dockyard generate` — a **template** scaffold (not the blank one)
+   ships the Go contracts but not the generated JSON Schema + TypeScript;
+   `dockyard validate` flags them as stale until `dockyard generate` has
+   run once. The blank scaffold ships the generated artifacts pre-built
+   so the first `dockyard validate` is already clean.
+
+**Decision.** Surface both steps in the published docs and the
+`scaffold-a-server` skill so a developer following either path lands at
+a green `dockyard validate` on the first try. The scaffold pipeline
+itself is **not** changed in Phase 29 (changing it would touch the
+template engine and the codegen step ordering — outside scope; the right
+place is a future scaffold-quality pass). Phase 29's bar is "the skills
+work end-to-end as written"; documenting the two extra commands gets
+the bar.
+
+**Knock-on.** A future scaffold-pipeline improvement that auto-runs
+`go mod tidy` and `dockyard generate` at scaffold time will supersede
+this decision — at that point, remove the two extra steps from the
+skill + docs in the same PR (§19 hygiene).
+
+---
+
+## D-140 — `internal/clidocs` renders the CLI reference page from the cobra command tree
+
+**Date:** 2026-05-23
+**Status:** Settled
+**Where it lives:** `internal/clidocs/`, `docs/site/cli/index.md` (the
+generated output), `Makefile` `docs` target, AGENTS.md §19.
+
+**The decision.** The published docs site's CLI reference page
+(`docs/site/cli/index.md`) is **generated** from the cobra command tree
+by a small in-repo helper (`internal/clidocs.Render`, with a tiny
+`cmd/clidocs/main.go` driver). `make docs` invokes the helper before the
+VitePress build so the page is regenerated on every site build. The
+output is deterministic — given the same command tree, the generated
+bytes are identical — so a rerun with no CLI surface change produces no
+diff.
+
+**Why generate, not hand-write.** A hand-maintained CLI reference would
+drift the first time a flag was added without a docs update. Cobra
+already owns every verb's `Short`, `Long`, `Use` and flag list as the
+single source of truth; the helper just renders it. The §19 hygiene
+rule for CLI verbs is partially enforced by the
+D-138 drift-audit hook (verb has a skill or docs page); for
+flag-level drift, the auto-render closes the gap so a developer literally
+cannot ship a CLI change that leaves the page stale (the new flag will
+appear in the rebuilt page; a removed flag will disappear).
+
+**Hidden flags excluded.** The renderer filters `cobra.Flag.Hidden` so
+internal pre-publish seams (notably `dockyard new --dockyard-path`,
+D-080) do not appear in the public docs.
+
+**Knock-on.** A future contributor adding a verb only needs to land
+the verb's `internal/cli/<verb>.go` file and the `root.AddCommand` line;
+`make docs` regenerates the page automatically. The §14 pre-merge
+checklist already requires running `make preflight` / `make drift-audit`
+before merge — the docs site's CI workflow runs `make docs`, so a
+divergent commit-hand-edit of `docs/site/cli/index.md` is also caught.
+
+---
+
+## D-141 — Skills + docs site live alongside repo source under `skills/` and `docs/site/`
+
+**Date:** 2026-05-23
+**Status:** Settled
+**Where it lives:** AGENTS.md §3 (the repository-layout invariant — the
+two new top-level / under-`docs/` paths Phase 29 introduces), AGENTS.md
+§19, `docs/plans/phase-29-skills-docs.md`.
+
+**The decision.** The Agent Skills tree lives at the repo root under
+`skills/`; the published documentation site lives under `docs/site/`.
+Both are tracked in-tree and version-controlled with the source code
+they document.
+
+**Why in-tree, not a separate docs repo.** Three reasons.
+
+1. **§19 hygiene is a single-PR rule.** "Updating the affected skill(s)
+   and docs in the same PR" is only mechanically enforceable when the
+   skills and docs live with the source — a separate repo would split
+   the change across PR boundaries, defeating the rule.
+2. **The transclusion model.** The reference pages (`docs/site/reference/`)
+   transclude the canonical RFC / plans / decisions / glossary / design
+   conventions via VitePress's `<!--@include: …-->`. Cross-repo transclusion
+   would require a build step copying files between repos, which is the
+   exact drift surface §19 forbids.
+3. **Discoverability.** A developer reading `skills/` in the repo gets
+   the same instructions an agent gets when it loads them. There is one
+   source.
+
+**Why `docs/site/` instead of a new top-level `site/`.** The repo's
+documentation already lives under `docs/`; nesting `site/` under it
+keeps the layout coherent and discoverable. The `docs/site/.vitepress/`
+prefix marks it as a built artefact directory clearly.
+
+**Why `skills/` at the root, not under `docs/`.** The agentskills.io
+specification expects discovery of skills at a directory root (an agent
+points at `skills/` as its scan root). Putting them under `docs/` would
+work but obscure the convention. Keeping the layout flat at the root
+matches every other skills-bearing repo in the ecosystem.
+
+**Knock-on.** AGENTS.md §3's layout table is updated in this PR to list
+both new paths.
+
+---
+
+## D-142 — VitePress dead-link checking is the §19 fail-fast for docs page references
+
+**Date:** 2026-05-23
+**Status:** Settled
+**Where it lives:** `docs/site/.vitepress/config.ts` (`ignoreDeadLinks: false`),
+`.github/workflows/docs.yml` (the build job that runs on every PR).
+
+**The decision.** VitePress's `ignoreDeadLinks` option is left at its
+strict default (`false`) so an internal link to a page that no longer
+exists fails the docs build. The CI `docs` workflow runs the build on
+every PR — not only on `main` — so a PR that breaks a docs page surface
+is caught before merge, not after deploy.
+
+**Why this is part of §19.** §19's promise is "a PR that changes
+user-facing surface updates the affected docs in the same PR." A removed
+docs page is a user-facing surface change too — and the strictest catch
+is the link-check: any other page that linked to the removed page now
+fails the build. Combined with the D-138 drift-audit hook
+(every CLI verb has a referencing surface, every template has a
+walkthrough), this gives the §19 hygiene rule two complementary teeth:
+drift-audit catches missing surfaces; the docs build catches broken
+references between surfaces.
+
+**Knock-on.** A contributor who wants to remove a docs page for a real
+reason (e.g. a removed surface) must, in the same PR, remove every
+inbound link. The build will tell them which ones.

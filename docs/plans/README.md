@@ -448,14 +448,16 @@ pass for drift.
 **Goal.** Author Dockyard's agent-skill set in the Agent Skills `SKILL.md` format
 (agentskills.io conventions), covering the core developer workflows — scaffold a
 server, add a tool, attach a UI resource, define contracts, run the dev loop,
-validate, package — so a developer building with Dockyard via an AI coding agent is
-productive from day one. Stand up the GitHub Pages technical-documentation site,
-built and deployed by CI. From this phase on, keeping skills and docs in sync with
-the surface is mandatory repo hygiene (AGENTS.md §19).
-**Acceptance.** `skills/` ships installable Agent Skills that validate against the
+validate, package, test with the inspector — so a developer building with Dockyard
+via an AI coding agent is productive from day one. Stand up the GitHub Pages
+technical-documentation site, built and deployed by CI (VitePress, D-137). From
+this phase on, keeping skills and docs in sync with the surface is mandatory repo
+hygiene (AGENTS.md §19), mechanically enforced by `scripts/drift-audit.sh` (D-138)
+and the `internal/skillcheck` validator.
+**Acceptance.** `skills/` ships eight Agent Skills that validate against the
 `SKILL.md` format; the GitHub Pages site builds and publishes the tech docs from
 CI; the AGENTS.md §19 hygiene rule is in force and reflected in the §14 checklist.
-**Briefs.** 04 (DX). **Deps.** 21, 26.
+**Briefs.** 04 (DX). **Deps.** 21, 25 (Phase 26 was deferred post-V1 in D-136).
 
 #### 30 — V1 release engineering + cut (RFC §1, §14)
 
