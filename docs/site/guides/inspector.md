@@ -3,15 +3,23 @@
 The inspector is Dockyard's local **test + debug** surface
 ([RFC §12](/reference/rfc)). It is:
 
-- **Dev-mode-gated, localhost-only, read-only.** Never a production
-  client; never reachable off-localhost (P4 in §1).
+- **Dev-mode-gated, localhost-only, operator-initiated only.** Never a
+  production client; never reachable off-localhost (P4 in §1). "Operator-
+  initiated only" — re-cast from the older "read-only" framing in
+  [D-144](/reference/decisions) — means every client-shaped operation is
+  driven by an explicit operator UI action (a button click), runs in a
+  short-lived per-request MCP client session, and has a documented
+  decision entry (D-099 / D-103 / D-131 / D-134) explaining why it stays
+  within P4.
 - **A pure `obs/v1` consumer.** It reads no runtime internals — every
   signal it shows is an emitted `obs/v1` event (P2).
 - **Wired to your project.** Verdicts re-run `dockyard validate`; the
   Fixtures switcher derives from the project's generated tool
   contracts; the App preview reads the running server's `ui://`
-  resources read-only (decisions
-  [D-103](/reference/decisions), [D-130](/reference/decisions)).
+  resources via short-lived MCP client sessions, scoped to operator-
+  initiated UI actions (decisions
+  [D-103](/reference/decisions), [D-130](/reference/decisions),
+  [D-144](/reference/decisions)).
 
 ## Attach
 

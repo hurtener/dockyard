@@ -1,0 +1,40 @@
+time=2026-05-24T12:15:04.527-03:00 level=INFO msg="dockyard server starting" name=prompts-demo version=0.1.0 tools=0
+=== prompts/list ===
+- code_review
+- explain_error
+- summarize_for_review
+
+=== prompts/get code_review ===
+{
+  "description": "Review a Go diff against a rubric — Phase 28 prompt example.",
+  "messages": [
+    {
+      "content": {
+        "type": "text",
+        "text": "You are a careful Go reviewer. Stay concrete and cite the file:line you are referring to."
+      },
+      "role": "system"
+    },
+    {
+      "content": {
+        "type": "text",
+        "text": "Rubric:\n1) correctness; 2) test coverage; 3) any race risk; 4) one suggested change."
+      },
+      "role": "user"
+    },
+    {
+      "content": {
+        "type": "text",
+        "text": "Diff:\n```Go\nfunc main() {}\n```"
+      },
+      "role": "user"
+    },
+    {
+      "content": {
+        "type": "text",
+        "text": "Write the review."
+      },
+      "role": "user"
+    }
+  ]
+}

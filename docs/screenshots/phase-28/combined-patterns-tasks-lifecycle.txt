@@ -1,0 +1,45 @@
+time=2026-05-24T12:15:34.601-03:00 level=INFO msg="dockyard server starting" name=combined-patterns version=0.1.0 tools=2
+=== rollout_health(checkout-v2) ===
+{
+  "flag": "checkout-v2",
+  "kind": "metric_card",
+  "label": "checkout-v2 rollout health",
+  "state": "ready",
+  "suggested_action": "rollback",
+  "theme": "auto",
+  "tone": "critical",
+  "trend": [
+    7.470920281344249,
+    7.932115194343533,
+    8.404027625504412,
+    8.812152978359913,
+    9.092057233556801,
+    9.199549663735791,
+    9.117659577715825,
+    8.85931561947979,
+    8.465304619564714,
+    7.997832251340967,
+    7.530702122966075,
+    7.137663810450356
+  ],
+  "unit": "%",
+  "value": 8
+}
+2026/05/24 12:15:34 INFO task created taskId=task_282ac68282cb46660bfd765dbd3d08e4 tool=propose_rollout_action
+
+=== propose_rollout_action(checkout-v2 → 50%) — initial (awaiting) ===
+{
+  "action": "advance",
+  "category": "rollout",
+  "decided_at": "0001-01-01T00:00:00Z",
+  "description": "Health is OK.",
+  "flag": "checkout-v2",
+  "kind": "approval",
+  "rationale": "Health is OK.",
+  "state": "awaiting",
+  "target_ramp": 50,
+  "task_id": "task_282ac68282cb46660bfd765dbd3d08e4",
+  "title": "Advance checkout-v2 to 50%"
+}
+
+=== task task_282ac68282cb46660bfd765dbd3d08e4 reached terminal status: completed ===

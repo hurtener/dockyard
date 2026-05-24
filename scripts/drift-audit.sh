@@ -108,6 +108,33 @@ if [ -d skills ] && [ -d docs/site ]; then
       fi
     done
   fi
+
+  # 6d. Every shipped example has a README the docs site links to (Phase
+  #     28, D-153). An example without a README is in-flight work or
+  #     cruft; an example whose README is not linked from the docs site
+  #     is unreachable from a developer's first read of the published
+  #     docs. The check enforces both.
+  #
+  #     "Shipped" here is "the example has a cmd/server entrypoint" —
+  #     mirrors the templates' builtin.go marker. examples/customer-
+  #     health is the manifest reference fixture (consumed by
+  #     test/integration/wave2_test.go) and is intentionally not a
+  #     buildable example, so it is exempt: no cmd/server, no check.
+  if [ -d examples ]; then
+    for e in examples/*/; do
+      name=$(basename "$e")
+      [ -d "${e}cmd/server" ] || continue
+      if [ ! -f "${e}README.md" ]; then
+        note "AGENTS.md §19: example '${name}' has no examples/${name}/README.md"
+      fi
+      # The examples index page is the docs-site link target — a single
+      # canonical reference for the example set. It must mention the
+      # example by slug so a new example without a docs link fails fast.
+      if ! grep -qsE "examples/${name}\b" docs/site/getting-started/examples.md 2>/dev/null; then
+        note "AGENTS.md §19: example '${name}' is not referenced from docs/site/getting-started/examples.md"
+      fi
+    done
+  fi
 elif [ -d skills ] && [ ! -d docs/site ]; then
   note "skills/ exists but docs/site/ does not — §19 requires both"
 elif [ ! -d skills ] && [ -d docs/site ]; then

@@ -1,0 +1,84 @@
+# Example manifest for `combined-patterns` (Phase 28, D-150).
+#
+# This example shows that the analytics-widgets and approval-flows patterns
+# COMPOSE on one MCP App — they aren't isolated. The chosen domain is a
+# "feature-flag rollout reviewer": an agent surfaces a rollout's health
+# metric (analytics widget) and then proposes a roll-forward action that
+# the user approves (approval flow). The two flows share one App; the
+# agent might call them in sequence ("show me the rollout health" → "if it
+# looks fine, propose the next ramp") and the user sees both in the same
+# chat surface.
+name: combined-patterns
+title: Combined Patterns
+version: 0.1.0
+
+runtime:
+  transports: [stdio, http]
+  ui:
+    framework: svelte
+    bundle: single-file
+
+tools:
+  - name: rollout_health
+    description: Show a metric card summarising the current rollout's health (an inline analytics widget).
+    input: internal/contracts.RolloutHealthInput
+    output: internal/contracts.RolloutHealthOutput
+    ui: rollout_metric
+    task_support: forbidden            # synchronous read, never a Task
+
+  - name: propose_rollout_action
+    description: Propose the next rollout action (advance / pause / rollback) for human approval.
+    input: internal/contracts.ProposeRolloutActionInput
+    output: internal/contracts.ProposeRolloutActionOutput
+    ui: rollout_approval
+    task_support: required             # task-augmented — pauses for user approval
+
+# Two apps — one per view contract. RFC §8.6 requires every tool sharing a
+# ui:// app to agree on task_support; a synchronous metric widget and a
+# task-augmented approval flow are different VIEWS even though they target
+# the same product surface. The single index.html ships both renderers
+# behind a dispatcher; both apps point at the same bundle.
+apps:
+  # Both apps point at web/src/App.svelte — the canonical Svelte source
+  # (V1 supports Svelte only). The Dockyard validate engine inspects
+  # this file for the four-state page rule + the .svelte extension; the
+  # RUNTIME serves the simpler hand-written cmd/server/index.html (see
+  # cmd/server/main.go's //go:embed) so the example builds with no
+  # `npm install`. The two halves agree on the rendered shape — the
+  # Svelte source is what a developer would compile with Vite for a
+  # production deployment.
+  - id: rollout_metric
+    uri: ui://combined-patterns/rollout-metric
+    entry: web/src/App.svelte
+    display_modes: [inline]
+    csp:
+      connect: []
+      resource: []
+    visibility: [model, app]
+  - id: rollout_approval
+    uri: ui://combined-patterns/rollout-approval
+    entry: web/src/App.svelte
+    display_modes: [inline]
+    csp:
+      connect: []
+      resource: []
+    visibility: [model, app]
+
+tasks:
+  # Lifecycle limits scoped for the demo; an HTTP / multi-user deployment
+  # would tighten these further per the brief-02 §4.6 guidance.
+  max_ttl_millis: 3600000              # 1 hour
+  default_ttl_millis: 900000           # 15 minutes
+  purge_interval_millis: 60000         # 1 minute
+  max_concurrent_per_requestor: 8
+
+quality:
+  # The App ships both an analytics-widget renderer (metric card) and an
+  # approval-card renderer; the four UI-state gates apply.
+  require_loading_state: true
+  require_empty_state: true
+  require_error_state: true
+  require_permission_state: true
+  require_fixtures: true
+  require_contract_tests: true
+  require_spec_compliance: true

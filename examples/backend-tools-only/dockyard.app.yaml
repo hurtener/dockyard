@@ -1,0 +1,54 @@
+# Example manifest for `backend-tools-only` (Phase 28, D-150).
+#
+# This example demonstrates the common case where a developer just wants to
+# expose tools to an agent — no in-chat UI, no MCP Apps. The manifest declares
+# only tools; no `apps[]` block; no `runtime.ui` section.
+#
+# Domain: an in-memory bookmarks catalog. Three contract-first tools
+# (`list_bookmarks`, `add_bookmark`, `search_bookmarks`) that an agent reaches
+# for to read, write, and search a small in-process dataset. Realistic enough
+# for a real product slice; tiny enough that a developer can read the whole
+# server in one sitting.
+name: backend-tools-only
+title: Backend Tools Only
+version: 0.1.0
+
+runtime:
+  # stdio is the default deployment mode for a backend-only server reached
+  # from an agent host (Claude Code, Cursor, …). http is the streamable-HTTP
+  # service mode for an HTTP-mounted deployment. No `ui:` block — this
+  # server ships no MCP App.
+  transports: [stdio, http]
+
+tools:
+  - name: list_bookmarks
+    description: List every bookmark in the catalog, optionally filtered by tag.
+    input: internal/contracts.ListBookmarksInput
+    output: internal/contracts.ListBookmarksOutput
+    # task_support: forbidden makes the contract intent explicit — this is a
+    # synchronous read, never an MCP Task (RFC §8.4).
+    task_support: forbidden
+  - name: add_bookmark
+    description: Add a bookmark to the catalog and return the stored record.
+    input: internal/contracts.AddBookmarkInput
+    output: internal/contracts.AddBookmarkOutput
+    task_support: forbidden
+  - name: search_bookmarks
+    description: Substring-search bookmark titles, URLs, and notes.
+    input: internal/contracts.SearchBookmarksInput
+    output: internal/contracts.SearchBookmarksOutput
+    task_support: forbidden
+
+# No apps[] — this is a backend-tools-only server.
+
+quality:
+  # No UI surface, so the four UI-state gates do not apply. Contract tests +
+  # fixtures + spec compliance still hold; they catch a contract drift before
+  # the model ever sees the schema.
+  require_loading_state: false
+  require_empty_state: false
+  require_error_state: false
+  require_permission_state: false
+  require_fixtures: true
+  require_contract_tests: true
+  require_spec_compliance: true

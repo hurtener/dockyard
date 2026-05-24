@@ -1,6 +1,6 @@
 ---
 name: test-with-the-inspector
-description: Drive and debug a Dockyard MCP server through Dockyard's local inspector (`dockyard inspect`). Use to invoke tools by hand, switch fixtures across UI states (happy/empty/error/permission/slow/large), watch the live `obs/v1` stream, render Apps in a sandboxed iframe, and walk a task's lifecycle in the Tasks panel. Dev-mode-gated, localhost-only, read-only.
+description: Drive and debug a Dockyard MCP server through Dockyard's local inspector (`dockyard inspect`). Use to invoke tools by hand, switch fixtures across UI states (happy/empty/error/permission/slow/large), watch the live `obs/v1` stream, render Apps in a sandboxed iframe, and walk a task's lifecycle in the Tasks panel. Dev-mode-gated, localhost-only, operator-initiated only (D-144).
 license: Apache-2.0
 metadata:
   framework: dockyard
@@ -12,14 +12,19 @@ metadata:
 
 The inspector is Dockyard's local **test + debug** surface. It is:
 
-- **Dev-mode-gated, localhost-only, read-only.** Never a production
-  client; never reachable off-localhost (RFC §12, P4 in §1).
+- **Dev-mode-gated, localhost-only, operator-initiated only.** Never a
+  production client; never reachable off-localhost (RFC §12, P4 in §1).
+  "Operator-initiated only" — re-cast from the older "read-only" framing
+  in D-144 — means every client-shaped operation is driven by an
+  explicit UI action (a button click), runs in a short-lived per-request
+  MCP client session, and has a documented decision entry (D-099, D-103,
+  D-131, D-134) explaining why it stays within P4.
 - **A pure `obs/v1` consumer.** It reads no runtime internals; every
   signal it shows is an emitted `obs/v1` event (P2).
 - **Wired to your project.** Verdicts re-run `dockyard validate`; the
   Fixtures switcher derives from the project's generated tool contracts
   (D-130); the App preview reads the running server's `ui://`
-  resources read-only (D-103).
+  resources via short-lived operator-initiated sessions (D-103, D-144).
 
 ## Attach to a running server
 

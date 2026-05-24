@@ -17,16 +17,17 @@ import (
 // newInspectCmd builds the `dockyard inspect` command — the standalone inspector
 // verb (RFC §12, §9.1). It attaches Dockyard's local test/debug surface to any
 // running MCP server: it serves the inspector UI on a loopback port and relays
-// the server's obs/v1 stream to it, read-only.
+// the server's obs/v1 stream to it, plus a small set of operator-initiated MCP
+// client operations (D-099, D-103, D-131, D-134, D-144).
 //
-// The inspector is dev-mode-gated, localhost-only, and read-only — `dockyard
-// inspect` is the standalone entry into that surface. RFC §12 also names an
-// automatic attach inside `dockyard dev`; that auto-attach is a deferred seam
-// (D-101) and is not yet implemented — `dockyard inspect` is the only shipping
-// entry point. The inspector binds a loopback address only: a non-loopback
-// `--port` host is rejected by
-// internal/inspector's ErrNonLoopbackBind gate before the listener opens, the
-// mechanical enforcement of RFC §12 and the CVE-2025-49596 lesson.
+// The inspector is dev-mode-gated, localhost-only, and operator-initiated only
+// — `dockyard inspect` is the standalone entry into that surface. RFC §12 also
+// names an automatic attach inside `dockyard dev`; that auto-attach is a
+// deferred seam (D-101) and is not yet implemented — `dockyard inspect` is the
+// only shipping entry point. The inspector binds a loopback address only: a
+// non-loopback `--port` host is rejected by internal/inspector's
+// ErrNonLoopbackBind gate before the listener opens, the mechanical enforcement
+// of RFC §12 and the CVE-2025-49596 lesson.
 //
 // inspect wraps internal/inspector, the reusable inspector backend; the
 // orchestration is a thin RunE, not logic buried here.
@@ -60,11 +61,15 @@ The Verdicts panel and the Fixtures switcher are sourced from the project at
 --dir: the verdicts re-run 'dockyard validate', the fixtures derive from the
 project's generated tool contracts (P1). When --dir names no Dockyard project,
 those panels degrade to their honest empty state. The App preview reads the
-attached server's ui:// resources read-only.
+attached server's ui:// resources via short-lived, operator-initiated MCP
+client sessions (D-103, D-144).
 
-The inspector is dev-mode-gated, localhost-only, and read-only: it is never a
-production MCP client and never reachable off-localhost. A non-loopback bind is
-refused before the listener opens. Press Ctrl-C to stop.`,
+The inspector is dev-mode-gated, localhost-only, and operator-initiated only
+(D-144): every client-shaped operation is driven by an explicit UI action in
+the localhost-bound web frontend, runs in a short-lived per-request session,
+and has a documented decision entry. It is never a production MCP client and
+never reachable off-localhost. A non-loopback bind is refused before the
+listener opens. Press Ctrl-C to stop.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			projectDir, err := resolveProjectDir(dir)
@@ -126,7 +131,8 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 			return infErr
 		}
 		relay = inspector.NewRelay(obsURL)
-		// The App-preview source reads the server's ui:// resources read-only
+		// The App-preview source reads the server's ui:// resources via short-
+		// lived, operator-initiated MCP client sessions (D-144)
 		// (RFC §12 line 711, D-103) — it takes the bare MCP base URL, not the
 		// derived obs stream URL.
 		appSource = inspector.AppsFromServer(cfg.serverURL)

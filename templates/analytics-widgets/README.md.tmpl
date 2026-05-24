@@ -47,6 +47,19 @@ theme via `hostContext.styles.variables`.
 
 ## Run
 
+**Pre-publish first step (D-139).** Until Dockyard is released to a
+module registry, a scaffold's `go.mod` carries a `replace` directive
+but no `go.sum`. Run `go mod tidy` once, plus `dockyard generate` to
+materialise the JSON Schema + TypeScript sidecars (the template ships
+the Go contracts; the generated sidecars are not checked in):
+
+```sh
+go mod tidy
+dockyard generate
+```
+
+Then:
+
 ```sh
 # Local stdio:
 go run .

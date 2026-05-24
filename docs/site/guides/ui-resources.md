@@ -130,10 +130,12 @@ dockyard inspect --url <server> --dir .
 ```
 
 The inspector renders your App in a sandboxed iframe (the same CSP
-your manifest declares). The App preview is read-only — the inspector
-fetches the `ui://` resource via `resources/read` (decision
-[D-103](/reference/decisions)) and never executes server side-effects on
-its own.
+your manifest declares). The App preview fetches the `ui://` resource
+via `resources/read` in a short-lived, operator-initiated MCP client
+session (decisions [D-103](/reference/decisions),
+[D-144](/reference/decisions)); the inspector itself never executes
+server side-effects on its own — every mutating call comes from an
+explicit UI action.
 
 ## See also
 

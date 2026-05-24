@@ -77,7 +77,8 @@ DOCKYARD_TRANSPORT=http dockyard run
 dockyard inspect --url http://127.0.0.1:8080
 ```
 
-The inspector is dev-mode-gated, localhost-only, and read-only (RFC §12).
+The inspector is dev-mode-gated, localhost-only, and operator-initiated
+only ([RFC §12](/reference/rfc); [D-144](/reference/decisions)).
 It renders your App in a sandboxed iframe, shows the live `obs/v1`
 stream, lets you fire tools by hand, and switches fixtures across the
 six UI states (`happy`, `empty`, `error`, `permission`, `slow`, `large`).

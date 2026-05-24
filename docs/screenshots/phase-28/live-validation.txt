@@ -1,0 +1,86 @@
+====================================================================
+Phase 28 — live validation transcript
+Date: Sun May 24 12:13:53 -03 2026
+Repo: /Users/santiagobenvenuto/Repos/dockyard-phase-28
+Each example is copied to a fresh temp directory and given a 
+stand-alone go.mod with a 'replace github.com/hurtener/dockyard
+=> <repo root>' directive (D-139 pre-publish workflow). Then the
+full Dockyard developer cycle runs against it: go mod tidy,
+dockyard generate, dockyard validate, go build, go test.
+====================================================================
+
+==============================================
+Example: backend-tools-only
+==============================================
+Project copy: /var/folders/qf/9hz3q9b55xb9hjwg0w478_h00000gn/T/tmp.o5gmCdgpKP/backend-tools-only
+
+--- go mod tidy ---
+(go mod tidy completed)
+
+--- dockyard generate ---
+generate: 7 files written, 7 changed
+  changed  internal/contracts/add_bookmark_input.schema.json
+  changed  internal/contracts/add_bookmark_output.schema.json
+  changed  internal/contracts/contracts.ts
+  changed  internal/contracts/list_bookmarks_input.schema.json
+  changed  internal/contracts/list_bookmarks_output.schema.json
+  changed  internal/contracts/search_bookmarks_input.schema.json
+  changed  internal/contracts/search_bookmarks_output.schema.json
+
+--- dockyard validate ---
+validate: OK — no issues
+
+--- go build ./... ---
+(build succeeded)
+
+--- go test -race ./internal/handlers ---
+ok  	example.com/backend-tools-only/internal/handlers	1.299s
+
+==============================================
+Example: combined-patterns
+==============================================
+Project copy: /var/folders/qf/9hz3q9b55xb9hjwg0w478_h00000gn/T/tmp.o5gmCdgpKP/combined-patterns
+
+--- go mod tidy ---
+(go mod tidy completed)
+
+--- dockyard generate ---
+generate: 5 files written, 5 changed
+  changed  internal/contracts/contracts.ts
+  changed  internal/contracts/propose_rollout_action_input.schema.json
+  changed  internal/contracts/propose_rollout_action_output.schema.json
+  changed  internal/contracts/rollout_health_input.schema.json
+  changed  internal/contracts/rollout_health_output.schema.json
+
+--- dockyard validate ---
+validate: OK — no issues
+
+--- go build ./... ---
+(build succeeded)
+
+--- go test -race ./internal/handlers ---
+ok  	example.com/combined-patterns/internal/handlers	1.379s
+
+==============================================
+Example: prompts-demo
+==============================================
+Project copy: /var/folders/qf/9hz3q9b55xb9hjwg0w478_h00000gn/T/tmp.o5gmCdgpKP/prompts-demo
+
+--- go mod tidy ---
+(go mod tidy completed)
+
+--- dockyard generate ---
+generate: 3 files written, 3 changed
+  changed  internal/contracts/contracts.ts
+  changed  internal/contracts/summarize_text_input.schema.json
+  changed  internal/contracts/summarize_text_output.schema.json
+
+--- dockyard validate ---
+validate: OK — no issues
+
+--- go build ./... ---
+(build succeeded)
+
+--- go test -race ./internal/handlers ---
+ok  	example.com/prompts-demo/internal/handlers	1.355s
+

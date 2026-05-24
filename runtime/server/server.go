@@ -154,6 +154,7 @@ type Server struct {
 	tools             []string      // registered tool names, in registration order
 	resources         []string      // registered resource URIs, in registration order
 	resourceTemplates []string      // registered resource-template URI templates, in registration order
+	prompts           []string      // registered prompt names, in registration order (Phase 28)
 
 	// tasksMount routes tasks/* JSON-RPC frames into the attached Tasks engine
 	// ahead of the SDK server (RFC §8.2). It is nil unless a Tasks engine was
@@ -270,6 +271,18 @@ func (s *Server) Info() Info { return s.info }
 func (s *Server) Tools() []string {
 	out := make([]string, len(s.tools))
 	copy(out, s.tools)
+	return out
+}
+
+// Prompts returns the names of registered prompts, in registration order
+// (Phase 28). The returned slice is a copy and safe for the caller to
+// retain. Empty when no prompt has been registered.
+func (s *Server) Prompts() []string {
+	if s == nil {
+		return nil
+	}
+	out := make([]string, len(s.prompts))
+	copy(out, s.prompts)
 	return out
 }
 

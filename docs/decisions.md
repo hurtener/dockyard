@@ -4301,3 +4301,238 @@ the goroutine assertion with SDK session-cleanup timing.
 session path adds a sibling test with `Stateless: false` and a
 session-aware goroutine-leak sentinel (e.g. polling until the SDK's
 session-cleanup interval elapses). That is out of scope for Phase 27.
+
+---
+
+## D-150 — Phase 28 worked examples ship under `examples/`, NOT as `dockyard new --template` entry points
+
+**Date:** 2026-05-24
+**Status:** Settled (Phase 28 — worked examples)
+**Where it lives:** `examples/backend-tools-only`,
+`examples/combined-patterns`, `examples/prompts-demo`,
+`scripts/drift-audit.sh` (the §19 hook extension that enforces the
+README + docs-link requirement), `docs/site/getting-started/examples.md`.
+
+**Why.** Phase 28 ships three worked examples that complement the two
+shipped templates (`analytics-widgets`, `approval-flows`). The natural
+question: should they also be `dockyard new --template <slug>` entry
+points, embedded into the binary the way `internal/scaffold/builtin.go`
+imports the template `builtin.go` files? Two reasons say no.
+
+First, **templates and examples answer different developer questions.**
+A template answers "I want to start a new server with this shape — give
+me the scaffold." An example answers "I want to see this pattern in
+context — show me the code, the wiring, the tests." A developer reads
+an example; they scaffold a template. Embedding the examples into the
+binary would conflate the two affordances, and the `dockyard new
+--template` flag already has a clear contract — one entry per shipped
+template.
+
+Second, **examples grow more freely than templates.** A template is a
+contract: a developer who scaffolded with v1.0 expects v1.1 to keep
+the same shape; a substantive divergence is a breaking template change.
+Examples have no such contract — a developer reads them at one point
+in time. Keeping them out of the binary lets new examples land without
+the scaffold-substitution discipline templates require.
+
+**The decision.** Examples live under `examples/<slug>/` as standalone
+reference projects, share the root `go.mod`, build with `go build
+./examples/<slug>/...`, and are NEVER embedded into the binary. The
+`dockyard new` verb is unchanged — its `--template` flag continues to
+take only the two shipped template names.
+
+**Why under the root module, not nested modules.** A nested
+`examples/<slug>/go.mod` with a `replace` directive would mirror what
+`dockyard new` materialises today (a generated project with a
+`replace github.com/hurtener/dockyard => …` line). The downside: nested
+modules are skipped by `go test ./...`, so the examples' contract
+tests would not be part of the in-tree gate. Living under the root
+module makes the examples first-class members of the test + coverage
+matrix — a runtime API change that broke an example would fail CI in
+the same PR.
+
+**Knock-on.** The drift-audit §19 hook is extended to enforce every
+shipped example has a README and is referenced from
+`docs/site/getting-started/examples.md` (the canonical link target).
+A "shipped example" is identified by the presence of a `cmd/server/`
+subdirectory — mirrors the templates' `builtin.go` marker.
+`examples/customer-health/` is the RFC §4.2 manifest reference fixture
+(consumed by `test/integration/wave2_test.go`); it has no `cmd/server/`
+and is intentionally exempt from the hook.
+
+---
+
+## D-151 — `runtime/server.AddPrompt` is a focused, registration-only API; obs/v1 carries `prompt.get` with a resource.read-shaped payload
+
+**Date:** 2026-05-24
+**Status:** Settled (Phase 28 — prompts surface)
+**Where it lives:** `runtime/server/prompt.go` (the API),
+`runtime/server/prompt_test.go` (the tests), `runtime/obs/payload.go`
+(PromptGetPayload), `runtime/obs/recorder.go` (Recorder.PromptGet),
+`runtime/obs/event.go` (KindPromptGet existed since Phase 15 but had
+no carrier), `examples/prompts-demo/` (the worked example).
+
+**Why.** Dockyard supports the MCP Tools primitive end to end —
+contract-first input/output, the runtime/tool builder, the
+inspector's Tools panel, every fixture state. The MCP Prompts primitive
+the SDK supports via `mcp.Server.AddPrompt` was reachable via the SDK
+but unused in Dockyard: no Dockyard-flavored API, no obs/v1 carrier,
+no example. Phase 28 closes the gap with the **minimum** scope that
+makes prompts a first-class Dockyard surface without straying into
+prompts-API-design.
+
+**The decision.** `runtime/server.AddPrompt(s *Server, def PromptDef,
+fn PromptHandler) error` registers a prompt. PromptDef mirrors the
+SDK's mcp.Prompt fields (Name, Title, Description, Arguments) but uses
+a typed Dockyard `PromptArgument` so the runtime API never exposes the
+raw SDK type (RFC §5.4, P3). PromptHandler signature is
+`func(ctx, PromptRequest) (PromptResult, error)`. The handler is
+panic-recovered with the same `guardHandler` mechanism every tool +
+resource handler routes through (AGENTS.md §5, §13, D-053). Each
+prompts/get invocation emits an obs/v1 `prompt.get` start+end pair via
+`Recorder.PromptGet` — payload shape mirrors `resource.read`
+(name + message count + serialized byte size) rather than `tool.call`
+(full input/output capture), because a prompt's "input" is a flat
+argument map and its "output" is a rendered message list — neither
+benefits from the tool.call capture-policy machinery.
+
+A new `runtime/server` field — `prompts []string` — tracks
+registration order; the `Server.Prompts()` accessor mirrors
+`Server.Tools()`. A new logbridge helper —
+`withPromptRequestSession` — stamps obs.WithSession from the prompt
+request's session id so emitted events carry SessionID.
+
+**Why not a contract-first prompts builder.** See D-152.
+
+**Why a defensive recover() around `mcp.Server.AddPrompt`.** The
+current SDK's AddPrompt does not return an error and does not panic.
+Mirrors `addToolSafe`'s pattern: a future SDK that panics on a bad
+registration becomes a swallowed registration rather than a crash
+during server assembly. The current SDK never panics here; the
+recover() is for forward-compatibility, not present-day need.
+
+**Knock-on.** The inspector's panels do not (yet) render Prompts —
+Phase 23 scope was tools / resources / Tasks. The `prompts-demo`
+example's README documents this gap and points at a Prompts-aware
+host (Claude Code, an MCP CLI) for the visible demo. Adding a
+Prompts panel to the inspector is a post-V1 candidate, governed by
+the same operator-initiated-only (D-144) framing the existing
+panels are.
+
+---
+
+## D-152 — Contract-first does NOT extend to prompts; AddPrompt is registration-only
+
+**Date:** 2026-05-24
+**Status:** Settled (Phase 28 — prompts surface)
+**Where it lives:** `runtime/server/prompt.go` (the API + the comment
+documenting the constraint), `runtime/server/doc.go` (the Phase 28
+prompts paragraph), `docs/decisions.md` (this entry).
+
+**Why.** Dockyard's contract-first guarantee — typed Go struct → JSON
+Schema, the schema the host sees IS the Go type — is the framework's
+spine (P1, RFC §6). The natural question for any new primitive: does
+contract-first apply? For tools (Phase 04) yes. For resources (Phase
+07) the URI is the contract and the content is opaque bytes; the JSON
+Schema layer is not the right model. For prompts, the picture is
+similar but distinct.
+
+The MCP spec types `Prompt.Arguments` as a flat list of named string
+fields — each argument is just `{Name, Title?, Description?, Required?}`.
+A host calls `prompts/get` with a `map[string]string` argument map; the
+handler returns a list of rendered messages. There is no structured
+argument object the way `tools/call` has a typed `Arguments` payload —
+no JSON Schema fits naturally over a flat string map (every field has
+type "string"; the structure has no nested shape).
+
+A "contract-first prompts builder" would either:
+
+- Force the developer to declare a Go struct whose fields are all
+  strings, generate a trivial schema, and accept that the schema
+  carries no real validation power (a contract for the sake of having
+  one); or
+- Invent a Dockyard-specific richer prompt shape and lower it onto the
+  SDK's flat-string shape on the wire, introducing a Dockyard-vs-MCP
+  asymmetry (a P3 violation: the runtime API should not expose a
+  shape the wire does not).
+
+Neither is worth the API surface. **The decision** is the second
+path's negation: AddPrompt is a registration-only pass-through that
+exposes the SDK's flat-string argument shape verbatim (under
+Dockyard-flavored types so the SDK struct does not leak through). A
+developer who needs a structured argument shape registers a **tool**
+instead — the contract-first pipeline applies there. A developer who
+just needs a curated template uses AddPrompt with string arguments —
+the MCP-native shape.
+
+**Why this is consistent with P1.** P1 says "Contract-first: a tool's
+input and output are typed Go structs; JSON Schema, TypeScript types,
+and fixtures are generated, never hand-written." It scopes to tools.
+Prompts are a sibling primitive with a different shape; P1's
+"generated, never hand-written" guarantee does not generalise to a
+primitive that has nothing to generate.
+
+**Knock-on.** A future Dockyard phase that wants richer prompts (e.g.
+a Dockyard-side template engine that fills slots with structured
+data before rendering) would build it ABOVE AddPrompt — a Dockyard
+helper that takes a typed struct, fills a template, and calls
+AddPrompt with the rendered messages. The runtime API stays at the
+spec-shaped layer; helpers live above it.
+
+---
+
+## D-153 — `scripts/drift-audit.sh` §19 hook extends to `examples/`: every shipped example needs a README + a docs-site reference
+
+**Date:** 2026-05-24
+**Status:** Settled (Phase 28 — drift-audit extension)
+**Where it lives:** `scripts/drift-audit.sh` (the `6d.` block),
+`docs/site/getting-started/examples.md` (the canonical link target),
+`scripts/smoke/phase-28.sh` (the smoke check that asserts the hook
+exists).
+
+**Why.** The §19 hook (D-138) mechanically enforces docs hygiene
+around the surfaces Phase 29 made publishable: CLI verbs, shipped
+templates, the SKILL.md format. With Phase 28's three worked examples,
+the same drift risk applies to `examples/`: an example without a
+README is in-flight work or cruft, and an example whose README is not
+linked from the docs site is unreachable from a developer's first
+read. The §19 rule already mandates the hygiene in prose; the hook
+mechanises it.
+
+**The decision.** A new `6d.` block in `scripts/drift-audit.sh` walks
+every `examples/<slug>/` directory whose name marks it as a buildable
+example (a `cmd/server/` subdirectory — the analog of the templates'
+`builtin.go` marker). For each such directory, it requires:
+
+1. `examples/<slug>/README.md` exists.
+2. The slug appears in `docs/site/getting-started/examples.md`
+   (the canonical examples index page).
+
+A new example without either fails drift-audit and the PR cannot
+merge. The check intentionally does NOT require an individual
+docs-site walkthrough for each example (templates have that
+requirement; examples are explicitly the "read the code + the README"
+surface — the index page is the single authoritative reference). This
+keeps the cost of adding an example low.
+
+**Why a `cmd/server/` marker, not a `builtin.go` marker.** Examples
+are explicitly NOT embedded in the binary (D-150), so they have no
+`builtin.go`. The `cmd/server/` directory is the canonical entrypoint
+shape Phase 28's three examples standardised; it is the smallest
+mechanical signal that distinguishes a buildable example from a
+fixture-only directory.
+
+**Why the exemption matters: `examples/customer-health/`.** That
+directory has been in-tree since Phase 06 as the RFC §4.2 manifest
+reference fixture, consumed by `test/integration/wave2_test.go` to
+verify the manifest loader against the published example shape. It
+has no `cmd/server/` and is intentionally not a buildable example;
+the hook's `cmd/server/` marker correctly skips it without an
+allow-list entry.
+
+**Knock-on.** A future post-V1 example that wants its own
+docs-walkthrough page (a more involved demo, a multi-part tutorial)
+adds the page under `docs/site/getting-started/<slug>.md` and the
+sidebar entry in the VitePress config — same shape the templates'
+walkthroughs use. The hook continues to require only the index-page
+reference; the walkthrough is additive.
