@@ -42,3 +42,16 @@ go.work.sum
 # committed (otherwise every `make build` would dirty the working tree).
 internal/inspector/dist/*
 !internal/inspector/dist/.gitkeep
+
+# VitePress docs site (Phase 29) — install + build artefacts. The site source
+# is tracked under docs/site/ (.vitepress/config.ts, index.md, etc.); the
+# node_modules tree and the built dist/cache are produced by `make docs` and
+# never committed.
+docs/site/node_modules/
+docs/site/.vitepress/dist/
+docs/site/.vitepress/cache/
+
+# Playwright MCP scratch directory (locally captured screenshots are copied
+# into docs/screenshots/phase-NN/ for the PR; the raw .playwright-mcp/
+# directory is never committed).
+/.playwright-mcp/

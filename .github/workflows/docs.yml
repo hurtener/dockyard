@@ -1,0 +1,69 @@
+name: docs
+
+# Build the published tech-docs site on every PR (validation only) and on
+# every push to main; deploy to GitHub Pages on main. The build is
+# load-bearing on PRs even when no deploy happens — a dead internal link
+# fails the build, which is exactly the §19 hygiene rule (AGENTS.md §19):
+# a PR that breaks a docs page surface is caught before merge.
+#
+# Pinned versions match .github/workflows/ci.yml so the docs and the rest
+# of the toolchain age together.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Pages deploy permissions follow the official actions/deploy-pages
+# template: the deploy job (only) needs `pages: write` + `id-token: write`.
+# The build job runs as read-only.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deploy can be in flight at a time. A push to main that lands
+# while a previous build is mid-deploy supersedes it cleanly.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build VitePress site
+    runs-on: ubuntu-latest
+    env:
+      # Pin the published-site base URL to the GitHub Pages path. Override
+      # by editing this value if the repo is renamed; the config reads
+      # DOCS_BASE from the environment.
+      DOCS_BASE: /dockyard/
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: docs/site/package-lock.json
+      # `make docs` regenerates the auto-derived CLI reference page from
+      # the cobra command tree (internal/clidocs) and runs the VitePress
+      # build. A dead internal link or a malformed include is a build
+      # failure (config sets ignoreDeadLinks: false).
+      - run: make docs
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site/.vitepress/dist
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
