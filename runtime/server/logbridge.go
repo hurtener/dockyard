@@ -85,6 +85,19 @@ func withRequestSession(ctx context.Context, req *mcpsdk.CallToolRequest) contex
 	return obs.WithSession(ctx, req.Session.ID())
 }
 
+// withPromptRequestSession is the prompts/get counterpart of
+// [withRequestSession]: it stamps obs.WithSession from the prompt request's
+// session id so an obs/v1 prompt.get event carries SessionID. The
+// ServerSession itself is not threaded onto ctx for a prompt request — there
+// is no prompt-side logging bridge — only the session id needed by the obs
+// emit sites (Phase 28).
+func withPromptRequestSession(ctx context.Context, req *mcpsdk.GetPromptRequest) context.Context {
+	if req == nil || req.Session == nil {
+		return ctx
+	}
+	return obs.WithSession(ctx, req.Session.ID())
+}
+
 // withResourceRequestSession is the resources/read counterpart of
 // [withRequestSession]: it stamps obs.WithSession from the read request's
 // session id so an obs/v1 resource.read (or an app.load minted inside it)

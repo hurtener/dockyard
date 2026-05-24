@@ -39,6 +39,15 @@
 // family — the typed surface the Apps layer's ui:// auto-discovery composes —
 // with the same panic-recovered handler invocation as AddResource.
 //
+// Phase 28 adds the prompts surface (AddPrompt). Prompts are templates
+// the host PULLS via prompts/get; the Phase 28 API is a thin pass-through
+// to the SDK's prompt registration with the same panic recovery and the
+// same obs/v1 lifecycle every other Dockyard handler gets (obs.KindPromptGet).
+// Dockyard's contract-first pattern does not extend naturally to prompts —
+// MCP prompt arguments are typed as a flat string map, not a structured
+// object — so AddPrompt is a focused, registration-only surface (D-152)
+// rather than a contract-first builder.
+//
 // The Apps and Tasks extension layers and the obs/v1 stream land in later
 // phases (RFC §5.3, §7, §8, §11); the seams here are kept deliberately small so
 // those phases extend without reshaping this package.

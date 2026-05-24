@@ -48,6 +48,24 @@ type ResourceReadPayload struct {
 	Bytes int `json:"bytes"`
 }
 
+// PromptGetPayload is the payload of a [KindPromptGet] event — a prompts/get
+// invocation of a registered MCP Prompt (Phase 28; runtime/server.AddPrompt).
+//
+// Prompts in MCP are templates the host pulls (rather than tools the model
+// pushes); the obs/v1 carrier mirrors the resource.read shape — name + size
+// guardrail — rather than the tool.call full input/output capture, because
+// a prompt's "input" is a small string-argument map and its "output" is a
+// rendered message list rather than a typed contract.
+type PromptGetPayload struct {
+	// Prompt is the registered prompt name.
+	Prompt string `json:"prompt"`
+	// Messages is the count of messages in the rendered GetPromptResult.
+	Messages int `json:"messages,omitempty"`
+	// Bytes is the JSON-serialised size of the rendered messages — a size
+	// guardrail signal mirroring [ResourceReadPayload.Bytes].
+	Bytes int `json:"bytes,omitempty"`
+}
+
 // AppLoadPayload is the payload of a [KindAppLoad] event — a ui:// App resource
 // served to a host (RFC §7, brief 05 §3.2).
 type AppLoadPayload struct {

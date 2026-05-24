@@ -278,6 +278,31 @@ func (r *Recorder) ResourceRead(ctx context.Context, sc SpanContext, uri string)
 	}
 }
 
+// --- prompt.get --------------------------------------------------------------
+
+// PromptGet records the start of a prompts/get and returns a function that
+// records its end with the rendered message count and serialized byte size.
+// It mirrors [ResourceRead]'s shape: a prompts/get is a host-pulled
+// template render whose interesting observability signals are name + size,
+// not a typed input/output capture (Phase 28; runtime/server.AddPrompt).
+//
+// The returned closure is safe to call exactly once.
+func (r *Recorder) PromptGet(ctx context.Context, sc SpanContext, prompt string) func(messages, bytes int, err error) {
+	if r == nil {
+		return func(int, int, error) {}
+	}
+	start := r.timestamp()
+	r.emit(ctx, sc, KindPromptGet, PhaseStart, PromptGetPayload{Prompt: prompt}, nil, nil)
+	return func(messages, bytes int, err error) {
+		dur := durMS(start, r.timestamp())
+		r.emit(ctx, sc, KindPromptGet, PhaseEnd, PromptGetPayload{
+			Prompt:   prompt,
+			Messages: messages,
+			Bytes:    bytes,
+		}, &dur, errorInfo(err))
+	}
+}
+
 // --- app.load ----------------------------------------------------------------
 
 // AppLoad records a point-in-time app.load event: a ui:// App resource served
