@@ -10,6 +10,16 @@
       "min": 70,
       "band": "cli-tooling"
     },
+    "github.com/hurtener/dockyard/internal/clidocs": {
+      "min": 75,
+      "band": "cli-tooling",
+      "reason": "Phase 29 — renders the published CLI reference page from the cobra command tree (D-140). Walks the in-tree command set; held to the CLI-tooling band."
+    },
+    "github.com/hurtener/dockyard/internal/skillcheck": {
+      "min": 80,
+      "band": "new-package",
+      "reason": "Phase 29 — SKILL.md format validator for the §19 hygiene rule (D-138). Pure-fn / read-only; held to the new-package band."
+    },
     "github.com/hurtener/dockyard/internal/codegen": {
       "min": 80,
       "band": "new-package"
@@ -131,6 +141,8 @@
   "exempt": [
     "github.com/hurtener/dockyard/cmd/dockyard",
     "github.com/hurtener/dockyard/internal/coveragecheck/cmd/coveragecheck",
+    "github.com/hurtener/dockyard/internal/clidocs/cmd/clidocs",
+    "github.com/hurtener/dockyard/internal/skillcheck/cmd/skillcheck",
     "github.com/hurtener/dockyard/test/integration"
   ]
 }

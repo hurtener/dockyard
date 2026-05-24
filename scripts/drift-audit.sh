@@ -5,6 +5,10 @@
 #   - every docs/plans/phase-NN-*.md has a matching scripts/smoke/phase-NN.sh
 #   - every `RFC §N.M` reference in a phase plan resolves to a real RFC heading
 #   - every `brief NN` reference resolves to a docs/research/NN-*.md file
+#   - AGENTS.md §19 hygiene: every `dockyard` CLI verb is referenced from a
+#     shipped Agent Skill (skills/) or the docs site (docs/site/); every
+#     shipped template has a docs/site/ walkthrough; every SKILL.md parses
+#     against the agentskills.io spec via internal/skillcheck (D-138).
 # Exits non-zero on any failure.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -54,6 +58,60 @@ if compgen -G "docs/plans/phase-*.md" >/dev/null; then
     compgen -G "docs/research/${bb}-*.md" >/dev/null \
       || note "phase plan cites brief ${b} — no docs/research/${bb}-*.md"
   done
+fi
+
+# 6. AGENTS.md §19 hygiene — the skills + docs surfaces stay in sync with
+#    the shipped CLI + templates (Phase 29; D-138). The check is skipped
+#    until skills/ and docs/site/ land, mirroring how earlier hooks
+#    no-op against unbuilt surfaces.
+if [ -d skills ] && [ -d docs/site ]; then
+  # 6a. Every SKILL.md parses against the agentskills.io spec.
+  if command -v go >/dev/null 2>&1; then
+    if ! go run ./internal/skillcheck/cmd/skillcheck skills >/dev/null 2>&1; then
+      go run ./internal/skillcheck/cmd/skillcheck skills 2>&1 | sed 's/^/  /'
+      note "skills/: one or more SKILL.md files are malformed"
+    fi
+  else
+    echo "  note: 'go' not on PATH — skipping skillcheck validation"
+  fi
+
+  # 6b. Every dockyard CLI verb has a referencing skill or docs page.
+  # Verbs are the constructor functions registered onto root in
+  # internal/cli/root.go (newXxxCmd). The grep finds them with a
+  # tight regex so a new verb shows up automatically.
+  if [ -f internal/cli/root.go ]; then
+    verbs=$(grep -hoE 'root\.AddCommand\(new[A-Z][A-Za-z]+Cmd' internal/cli/root.go \
+            | sed -E 's/root\.AddCommand\(new([A-Z][A-Za-z]+)Cmd/\1/' \
+            | tr '[:upper:]' '[:lower:]' | sort -u)
+    for v in $verbs; do
+      # Each verb must appear in either a SKILL.md or a docs/site/ page.
+      # The `dockyard <verb>` token is what the skills and docs use; the
+      # check is intentionally exact so a typo fails fast.
+      if ! grep -rqsE "dockyard ${v}\b" skills/ docs/site/; then
+        note "AGENTS.md §19: 'dockyard ${v}' has no skill or docs reference"
+      fi
+    done
+  fi
+
+  # 6c. Every shipped template has a docs/site/ walkthrough.
+  if [ -d templates ]; then
+    for t in templates/*/; do
+      name=$(basename "$t")
+      [ "$name" = "_template" ] && continue
+      # builtin.go is the canonical "this template is shipped" marker:
+      # internal/scaffold/builtin.go imports the template's builtin.go
+      # to register it via init(). A directory without one is in-flight
+      # work, not a shipped template.
+      [ -f "${t}builtin.go" ] || continue
+      if [ ! -f "docs/site/getting-started/${name}.md" ]; then
+        note "AGENTS.md §19: template '${name}' has no docs/site/getting-started/${name}.md walkthrough"
+      fi
+    done
+  fi
+elif [ -d skills ] && [ ! -d docs/site ]; then
+  note "skills/ exists but docs/site/ does not — §19 requires both"
+elif [ ! -d skills ] && [ -d docs/site ]; then
+  note "docs/site/ exists but skills/ does not — §19 requires both"
 fi
 
 if [ "$fail" -ne 0 ]; then

@@ -1,4 +1,4 @@
-.PHONY: help build test vet lint preflight drift-audit check-mirror install-hooks clean dev generate web web-install coverage bench inspector-bundle
+.PHONY: help build test vet lint preflight drift-audit check-mirror install-hooks clean dev generate web web-install coverage bench inspector-bundle docs docs-install
 
 help:
 	@echo "Dockyard — make targets"
@@ -16,6 +16,8 @@ help:
 	@echo "  drift-audit     Verify design coherence (RFC, plans, briefs, mirror)"
 	@echo "  check-mirror    Verify AGENTS.md == CLAUDE.md"
 	@echo "  install-hooks   Install the pre-commit hook (one-time, per clone)"
+	@echo "  docs            Build the published tech-docs site (Phase 29; VitePress under docs/site/)"
+	@echo "  docs-install    Install the docs/site/ npm dependencies"
 	@echo "  clean           Remove build artifacts"
 
 GO_SOURCES := $(shell find . -name '*.go' -not -path './vendor/*' 2>/dev/null | head -1)
@@ -165,10 +167,49 @@ check-mirror:
 install-hooks:
 	@bash scripts/install-hooks.sh
 
+# docs — build Dockyard's published technical-documentation site (Phase 29,
+# decision D-137: VitePress under docs/site/, deployed to GitHub Pages by
+# .github/workflows/docs.yml). The target also regenerates the auto-derived
+# CLI reference page (internal/clidocs) so a verb / flag rename is reflected
+# in the published docs without a hand edit (AGENTS.md §19 hygiene).
+#
+# Skips gracefully where docs/site/package.json is absent (the docs surface
+# has not landed yet) or npm is missing (CI may run a build-only path). The
+# CLI-reference regen step runs unconditionally when docs/ exists because
+# it is just `go run` against the in-tree CLI tree.
+docs:
+	@if [ ! -d docs/site ]; then \
+		echo "skip docs: docs/site/ not present"; \
+	elif [ ! -f docs/site/package.json ]; then \
+		echo "skip docs: docs/site/package.json missing"; \
+	elif ! command -v npm >/dev/null 2>&1; then \
+		echo "skip docs: npm not installed"; \
+	else \
+		echo "== docs: regenerate CLI reference =="; \
+		mkdir -p docs/site/cli; \
+		go run ./internal/clidocs/cmd/clidocs -out docs/site/cli/index.md; \
+		echo "== docs: build VitePress site =="; \
+		( cd docs/site && \
+			if [ ! -d node_modules ]; then npm ci --no-audit --no-fund; fi && \
+			npm run build ) || exit 1; \
+	fi
+
+docs-install:
+	@if [ ! -f docs/site/package.json ]; then \
+		echo "skip docs-install: docs/site/package.json missing"; \
+	elif ! command -v npm >/dev/null 2>&1; then \
+		echo "skip docs-install: npm not installed"; \
+	else \
+		( cd docs/site && npm ci --no-audit --no-fund ) || exit 1; \
+	fi
+
 clean:
 	@rm -rf bin/ dist/ build/
 	@rm -f coverage.out
 	@for p in $(WEB_PROJECTS); do rm -rf "$$p/coverage" "$$p/dist"; done
+	@# Docs site build artefacts (Phase 29). node_modules is left intact
+	@# so a rebuild reuses the install; remove it manually if needed.
+	@rm -rf docs/site/.vitepress/dist docs/site/.vitepress/cache
 	@# The staged inspector bundle is a `make build` artifact. Clean it back to
 	@# the .gitkeep anchor so a fresh build re-stages from web/inspector/dist/.
 	@if [ -d internal/inspector/dist ]; then \
