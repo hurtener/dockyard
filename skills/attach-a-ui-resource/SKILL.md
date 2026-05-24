@@ -183,8 +183,9 @@ dockyard validate        # checks the app↔tool wiring, CSP, MIME, four-state
 dockyard inspect --url <server>   # open the app preview, fire the tool
 ```
 
-The inspector's App preview reads the live `ui://` resource read-only
-(D-103). You should see your App render the tool result with realistic
+The inspector's App preview reads the live `ui://` resource via a
+short-lived, operator-initiated MCP client session (D-103, D-144).
+You should see your App render the tool result with realistic
 synthetic data from the fixture switcher (D-130).
 
 ## Common pitfalls

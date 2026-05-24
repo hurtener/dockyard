@@ -22,6 +22,19 @@ inspector's host-half delivers the reply to the attached server's
 
 ## Try it
 
+**Pre-publish first step (D-139).** Until Dockyard is released to a
+module registry, a scaffold's `go.mod` carries a `replace` directive
+but no `go.sum`. Run `go mod tidy` once, plus `dockyard generate` to
+materialise the JSON Schema + TypeScript sidecars (the template ships
+the Go contracts; the generated sidecars are not checked in):
+
+```bash
+go mod tidy
+dockyard generate
+```
+
+Then:
+
 ```bash
 # 1) Local dev loop — the inspector renders the App, the obs/v1 stream
 #    shows task progress events, the Tasks panel shows the lifecycle.

@@ -114,11 +114,15 @@ The Verdicts panel and the Fixtures switcher are sourced from the project at
 --dir: the verdicts re-run 'dockyard validate', the fixtures derive from the
 project's generated tool contracts (P1). When --dir names no Dockyard project,
 those panels degrade to their honest empty state. The App preview reads the
-attached server's ui:// resources read-only.
+attached server's ui:// resources via short-lived, operator-initiated MCP
+client sessions (D-103, D-144).
 
-The inspector is dev-mode-gated, localhost-only, and read-only: it is never a
-production MCP client and never reachable off-localhost. A non-loopback bind is
-refused before the listener opens. Press Ctrl-C to stop.
+The inspector is dev-mode-gated, localhost-only, and operator-initiated only
+(D-144): every client-shaped operation is driven by an explicit UI action in
+the localhost-bound web frontend, runs in a short-lived per-request session,
+and has a documented decision entry. It is never a production MCP client and
+never reachable off-localhost. A non-loopback bind is refused before the
+listener opens. Press Ctrl-C to stop.
 ```
 
 | Flag | Description | Default |

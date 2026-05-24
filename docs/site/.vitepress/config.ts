@@ -53,6 +53,7 @@ export default defineConfig({
             { text: "Overview", link: "/getting-started/" },
             { text: "analytics-widgets walkthrough", link: "/getting-started/analytics-widgets" },
             { text: "approval-flows walkthrough", link: "/getting-started/approval-flows" },
+            { text: "Worked examples", link: "/getting-started/examples" },
           ],
         },
       ],
