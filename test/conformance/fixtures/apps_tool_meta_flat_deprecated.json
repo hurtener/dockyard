@@ -1,0 +1,4 @@
+{
+  "_cite": "docs/specifications/mcp-apps-2026-01-26.mdx — the DEPRECATED flat `_meta[\"ui/resourceUri\"]` form. The codec tolerates this on read (preserves the link) and NEVER emits it (the encoder re-emits the nested form).",
+  "ui/resourceUri": "ui://legacy-server/dashboard"
+}

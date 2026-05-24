@@ -23,6 +23,13 @@ func FuzzEnumsFromSource(f *testing.F) {
 	f.Add("not go source at all")
 	f.Add("package p\nconst X = 1 + ")
 	f.Add("package p\ntype T int\nconst (\n\tA T = iota\n\tB\n)\n")
+	// Phase 27 hostile-input additions — the parser is fed adversarial Go-ish
+	// source that exercises the recover guard's regression set (D-094):
+	f.Add("package p\nconst ( \n\tA = \nB \n) \n")
+	f.Add("package p\nconst (\n\tA = `unterminated raw")
+	f.Add("\x00\x01package p\nconst (A = 1)")
+	f.Add("package p\nconst ( A , B = 1 , 2 )") // grouped enum on one line
+	f.Add("package p\nconst ( A int = iota; B; C \"x\" )")
 
 	f.Fuzz(func(_ *testing.T, src string) {
 		opts, err := EnumsFromSource(src)
@@ -44,6 +51,13 @@ func FuzzTypeScriptForSource(f *testing.F) {
 	f.Add("")
 	f.Add("garbage input }{")
 	f.Add("package p\ntype A struct{ B B }\ntype B struct{ A A }\n")
+	// Phase 27 hostile-input additions — adversarial source the tygo
+	// recover guard must contain (D-094):
+	f.Add("package p\ntype T struct {\n\tF map[string]map[string]map[string]map[string]int\n}\n")
+	f.Add("package p\ntype Generic[T any] struct{ V T }\n") // type parameters
+	f.Add("package p\ntype T struct {\n\tF func(a, b, c, d, e, f int) (int, error)\n}\n")
+	f.Add("package p\ntype T struct {\n\tF interface{ M() error }\n}\n")
+	f.Add("package p\ntype T struct {\n\tF [1024][1024]int\n}\n")
 
 	f.Fuzz(func(t *testing.T, src string) {
 		out, err := TypeScriptForSource(src)

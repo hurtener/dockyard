@@ -1,0 +1,10 @@
+{
+  "_cite": "docs/specifications/mcp-tasks-experimental.mdx, section 'Task object' — a working task (Tasks experimental, pinned SHA 0b65dc6188d9a35c83b064c3d1517931f311cd67).",
+  "taskId": "task_7f3a",
+  "status": "working",
+  "statusMessage": "collecting rows",
+  "createdAt": "2026-05-11T23:04:32Z",
+  "lastUpdatedAt": "2026-05-11T23:04:32Z",
+  "ttl": 60000,
+  "pollInterval": 1000
+}

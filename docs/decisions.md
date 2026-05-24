@@ -3988,3 +3988,316 @@ references between surfaces.
 **Knock-on.** A contributor who wants to remove a docs page for a real
 reason (e.g. a removed surface) must, in the same PR, remove every
 inbound link. The build will tell them which ones.
+
+---
+
+## D-143 — The MCP spec-compliance conformance suite lives under `test/conformance/` with fixture-side citation headers
+
+**Date:** 2026-05-24
+**Status:** Settled (Phase 27)
+**Where it lives:** `test/conformance/` (the package), `test/conformance/fixtures/`
+(the JSON fixtures), `docs/specifications/` (the vendored spec snapshots the
+fixtures cite).
+
+**The decision.** Dockyard's MCP spec-compliance conformance suite (RFC §16)
+lives in a top-level `test/conformance/` package, parallel to
+`test/integration/`. Each conformance test rounds-trips a Dockyard wire
+shape through `internal/protocolcodec` against a fixture that lives in
+`test/conformance/fixtures/` and carries a `_cite` field at its top level.
+The `_cite` field names the vendored spec snapshot section the fixture is
+derived from, including the snapshot's pinned commit SHA + date — so the
+source of truth for every conformance assertion is one grep away from the
+fixture, and a spec bump that changes a wire shape surfaces as a diff in
+both the snapshot AND the fixture (never silent).
+
+**Why a separate package, not folded into `internal/protocolcodec/golden_test.go`.**
+The codec's existing golden tests assert one expected wire string for one
+constructed input — the encoder's canonicalization made concrete. The
+conformance suite drives the codec from the OUTSIDE: given a spec-canonical
+JSON input, decode it, re-encode it, and assert the round-trip is byte-stable
+against the same fixture. The two suites complement each other — the golden
+tests pin the encoder's emission; the conformance suite pins the codec's
+spec-compliance — and live in different files so a contributor running
+`go test ./test/conformance/...` gets the spec-side bar without the golden-
+side coupling, and vice versa.
+
+**Why `_cite` instead of a docstring.** A JSON fixture is data — it cannot
+hold Go-side comments. A `_cite` field with a fixed key keeps the citation
+co-located with the data and machine-strippable. The fixture loader strips
+`_cite` recursively before the byte comparison, so the citation does not
+participate in the assertion — only the wire shape does.
+
+**Knock-on.** A future spec bump (e.g. Apps 2027-xx-xx) lands as: (1) the
+vendored snapshot is updated in `docs/specifications/` with new SHA + date;
+(2) a new codec version is registered in `internal/protocolcodec/version.go`;
+(3) new fixtures land in `test/conformance/fixtures/` with `_cite` headers
+naming the new snapshot section; (4) any deprecated shape gains a "tolerate
+on read, never emit" conformance test on the new codec. The cycle stays
+diffable, just like RFC §16 promises.
+
+---
+
+## D-144 — The inspector's "read-only" claim is re-cast as "operator-initiated only" (clarifies D-099, D-103, D-131, D-134)
+
+**Date:** 2026-05-24
+**Status:** Settled (Phase 27 — security re-audit)
+**Where it lives:** `internal/inspector/doc.go` (the package documentation),
+`test/integration/phase27_inspector_security_test.go` (the bounded
+`mcp.NewClient` audit), this entry.
+
+**Why.** The inspector's pre-Phase-24 doc claim was "read-only" — true while
+D-099's `obs/v1` relay and D-103's `resources/list + resources/read` were
+the only client-shaped operations. After Phase 24's D-131 (operator-
+initiated `tools/call`) and Phase 25's D-134 (operator-initiated
+elicitation `tasks/result`) landed, the claim overpromised: a `tools/call`
+that runs an arbitrary handler is not read-only at the protocol level, even
+when the inspector is dev-gated and localhost-only. Phase 27's security
+re-audit replaces the overpromise with a more precise framing.
+
+**The decision.** The inspector is **operator-initiated only**, not
+"read-only". Every client-shaped operation the inspector performs has:
+(a) a named operator UI trigger (a button click in the localhost-bound web
+frontend); (b) a short-lived per-request MCP client session, never a
+long-lived client; (c) a documented decision entry (D-099 / D-103 / D-131
+/ D-134) explaining why the operation stays within P4. The package doc
+makes this framing explicit, the "no production MCP client" rule is
+preserved (P4 still holds — the inspector is the lone client-shaped
+component, dev-mode-gated, localhost-bound), and the new framing is
+mechanically guarded by the Phase 27 inspector security re-audit:
+`test/integration/phase27_inspector_security_test.go` walks the production
+source tree, finds every `mcp.NewClient` call site, and asserts each is in
+a bounded allow-list (the inspector's three client surfaces + the
+`installpkg` boot check, D-088). A new production `mcp.NewClient` outside
+that allow-list fails the audit before it can merge.
+
+**Why this stays within P4.** The framing change is editorial honesty —
+the inspector's surface is unchanged. It is still:
+
+- The lone client-shaped component (no new package, no production client).
+- Dev-mode-gated, localhost-bound by `requireLoopback` (further hardened
+  in D-145).
+- Driven only by an operator's explicit UI action, never by an off-localhost
+  actor or the server.
+- Short-lived per request — no long-lived client state ever.
+
+The inspector is still not a production MCP client — every clause of P4
+holds. The new framing makes the read/write boundary precise.
+
+**Knock-on.** A future inspector PR that adds a new client-shaped surface
+(another `mcp.NewClient`) must add an allow-list entry in
+`test/integration/phase27_inspector_security_test.go` AND file a
+superseding-or-extending decision in the same PR — same shape as D-131
+and D-134.
+
+---
+
+## D-145 — `requireLoopback` rejects whitespace-padded ports as well as non-loopback hosts (Phase 27 hardening)
+
+**Date:** 2026-05-24
+**Status:** Settled (Phase 27 — security audit defect fix)
+**Where it lives:** `internal/inspector/inspector.go` (the `requireLoopback`
+function), `internal/inspector/inspector_security_test.go` (the bind-shape
+adversarial sweep).
+
+**Why.** The Phase 27 inspector security re-audit surfaced a latent defect
+in the localhost-only gate: `net.SplitHostPort` tolerates whitespace inside
+the port component, so an address like `"127.0.0.1:0 "` (trailing space)
+passed `requireLoopback`'s host check, then failed at `net.Listen` with an
+opaque `listen tcp: lookup tcp/0 : unknown port` error. The bind was still
+rejected — there was no off-localhost reachability — but the operator's
+error class was inconsistent across malformed-address shapes: a
+non-loopback IP got the typed `ErrNonLoopbackBind`, while a whitespace-
+padded port got a transport-layer error.
+
+**The decision.** `requireLoopback` now validates the port string is a
+clean numeric value (digits only, no whitespace, no non-digit characters)
+via the new internal helper `isCleanPort`. A malformed port surfaces as
+`ErrNonLoopbackBind` — the same typed class every other malformed-address
+shape uses. Empty port (the "OS-assigned port" shortcut) is unchanged
+and still accepted.
+
+**Why not parse the port as an integer.** A `strconv.Atoi` would catch
+the same set of malformed shapes but would also accept negative numbers
+or leading-zero forms; `isCleanPort`'s "digit characters only" rule is
+the safest minimal check. The empty-port shortcut is preserved
+because Go's `net.Listen` treats it as "ask the OS for a port" and the
+inspector's `defaultAddr` already depends on that semantics.
+
+**Knock-on.** The change is a defect fix, not a behaviour change for
+legitimate callers — every previously-accepted address remains accepted.
+Operator-visible error classes are now consistent across malformed-
+address shapes, which improves the diagnostic quality of the
+`ErrNonLoopbackBind` typed error.
+
+---
+
+## D-146 — `make coverage` captures `go test` output to a temp log and surfaces it on failure (CI diagnostic hygiene)
+
+**Date:** 2026-05-24
+**Status:** Settled (Phase 27 — folded-in CI hygiene fix)
+**Where it lives:** `Makefile` (the `coverage` target), `.gitignore`
+(the `coverage-test.log` artifact ignore), `scripts/smoke/phase-27.sh`
+(asserts the `>/dev/null` foot-gun is gone).
+
+**Why.** The pre-Phase-27 `make coverage` recipe redirected `go test`
+output to `/dev/null` unconditionally:
+
+    CGO_ENABLED=1 go test -race -covermode=atomic \
+        -coverprofile=coverage.out ./... >/dev/null && \
+    go run ./internal/coveragecheck/cmd/coveragecheck ...
+
+A clean run stayed quiet, which was the point. But a failure — including
+a CI flake — surfaced as a bare `make: *** [coverage] Error 1` with no
+indication of which test failed or why. The PR #49 episode the user
+flagged was exactly this: an intermittent coverage-step failure on CI
+that was undiagnosable from the run log alone.
+
+**The decision.** `make coverage` now tees `go test`'s output to a temp
+log. On success the log is removed (the run stays as quiet as before).
+On failure the recipe (a) copies the log to a stable filename
+`coverage-test.log` (so a CI artifact-upload step picks it up), (b)
+prints the full log inline (so the failing test name + assertion appears
+in the CI step's standard log without requiring artifact navigation),
+and (c) exits with the original go-test status code.
+
+The `coverage-test.log` artifact is gitignored. The Phase 27 smoke
+script asserts the recipe no longer carries the `go test … >/dev/null`
+foot-gun — a regression that re-introduced it would fail Phase 27's
+own smoke check.
+
+**Why not unconditional inline output.** A clean run prints zero test
+output, which is the contract every Phase-21.5-onwards contributor
+expects (`make coverage` is the band-check, not a re-run of every test).
+Tee'ing to a temp + printing-on-failure preserves the quiet-success
+property AND fixes the diagnostic gap.
+
+**Knock-on.** This is the same R4 / Phase 24-finish pattern the `make
+web` recipe already followed (`tee` + print-on-failure). Other
+`make` targets that suppress output the same way are candidates for
+the same treatment; none have surfaced an incident yet, so they are
+left for a future hygiene pass.
+
+---
+
+## D-147 — The inspector mux fuzz target exercises every endpoint with arbitrary bodies (Phase 27 hostile-input sweep)
+
+**Date:** 2026-05-24
+**Status:** Settled (Phase 27 — hostile-input fuzz sweep)
+**Where it lives:** `internal/inspector/fuzz_test.go`
+(`FuzzInspectorMux`), `scripts/smoke/phase-27.sh` (asserts the target
+exists).
+
+**Why.** Phase 27's hostile-input sweep (sub-goal A) requires every
+wire-decoding surface in Dockyard to have a fuzz target with a
+meaningful seed corpus and a "never panic" invariant. The inspector's
+HTTP mux is a wire-decoding surface — it accepts operator-supplied
+request bodies on two POST endpoints (`/api/tools/invoke`,
+`/api/tasks/elicitation`) and a `requireLoopback`-gated path enumeration
+otherwise. Before Phase 27 only the codec / manifest / codegen / tool-
+argument decoders had fuzz coverage; the inspector mux did not.
+
+**The decision.** `FuzzInspectorMux` constructs a real `newMux` over
+stubbed Invoker and Elicitor sources, then drives every endpoint in
+a fixed enumeration with the fuzz-supplied body. The invariant is
+panic-freedom: any status code (200 / 400 / 415 / 503 / 502 / 404) is
+acceptable; only a panic is a fuzz failure. The fuzz harness
+specifically also cancels the request context immediately so the
+streaming endpoints (`/api/obs/stream`, `/api/rpc/log`) return
+promptly rather than blocking the fuzzer.
+
+**Why a stub Invoker / Elicitor.** The fuzz target is a parse-surface
+audit, not an end-to-end test. Stubbing the mutating sources to
+"always succeed" exercises the full handler path (body decode →
+field validation → dispatch) without depending on a live MCP server
+the fuzzer cannot spin up. The end-to-end behaviour is covered by
+integration tests; the fuzz target's bar is the parse surface.
+
+**Knock-on.** Any new inspector HTTP endpoint added in the future must
+land its endpoint in the `endpoints` slice of `FuzzInspectorMux` in
+the same PR. The Phase 27 smoke check asserts the fuzz file exists
+with at least one `Fuzz*` target; the line-level check is a future
+hygiene improvement.
+
+---
+
+## D-148 — The Tasks JSON-RPC frame parser has a dedicated fuzz target with a live engine (Phase 27 hostile-input sweep)
+
+**Date:** 2026-05-24
+**Status:** Settled (Phase 27 — hostile-input fuzz sweep)
+**Where it lives:** `runtime/tasks/fuzz_test.go` (`FuzzMountHandleFrame`),
+`scripts/smoke/phase-27.sh` (asserts the file exists).
+
+**Why.** The Tasks transport mount is the wire surface where Dockyard
+adds frame-routing on top of the SDK's JSON-RPC dispatch table (D-108 /
+D-110). Before Phase 27 the codec's wire types had fuzz coverage
+(Phase 21.5) but the mount's `HandleFrame` parser — which receives
+attacker-influenced bytes off the streamable-HTTP transport when a
+Tasks engine is attached — did not. Phase 27's audit closes that gap.
+
+**The decision.** `FuzzMountHandleFrame` builds a real `tasks.Engine`
+over `NewInMemoryStore` with `AdvertiseList=true` +
+`RequestorIdentifiable=true` so the full method-routing surface
+(tasks/get, tasks/result, tasks/cancel, tasks/list, the Dockyard-
+internal `dockyard/tasks/supplyInput`) is reachable from the fuzzer.
+The invariant under fuzz is uniform: `HandleFrame` NEVER panics on any
+input. A frame-decoding error, an unknown-method error, a typed
+dispatch error, or a "not handled" pass-through are all acceptable;
+only a panic is a fuzz failure. The fuzz harness pre-cancels its
+context so a tasks/result frame that would otherwise block does not
+hang the fuzz session.
+
+**Why a live engine, not a stub.** The parser dispatches to the engine
+in the SAME goroutine that decoded the frame, so a stub would miss any
+panic the engine introduces under adversarial input (a malformed
+SupplyInputParams, a hostile-large taskId). A live in-memory engine is
+cheap and exercises the full path.
+
+**Knock-on.** A future Tasks method (vendor-prefixed or otherwise) is
+automatically covered as long as it routes through `Engine.Dispatch` /
+`Engine.DispatchAs`; the harness re-uses the same mount and engine. A
+spec bump that changes the Tasks wire envelope adds a new fuzz seed
+to the corpus in the same PR.
+
+---
+
+## D-149 — The HTTPSecurity stress test uses Stateless=true so the goroutine-leak sentinel is meaningful
+
+**Date:** 2026-05-24
+**Status:** Settled (Phase 27 — HTTPSecurity stress)
+**Where it lives:** `test/integration/phase27_httpsecurity_stress_test.go`
+(`TestPhase27_HTTPSecurity_StressUnderAdversarialLoad`).
+
+**Why.** The Phase 27 HTTPSecurity stress test (sub-goal B) drives ≥20
+concurrent clients × 30 requests against a real
+`runtime/server.HTTPHandler` with the explicit `DefaultHTTPSecurity`
+posture and a real `tasks.Engine` attached, then asserts no panic, no
+incorrect rejection, and no goroutine leak past a settle window. In the
+default stateful mode, the SDK's streamable-HTTP transport retains a
+per-session goroutine for a session-cleanup window AFTER the client has
+disconnected — so 600 sequential initialize POSTs leave ~150-200
+goroutines alive when the test's settle window expires. That is a
+legitimate SDK behaviour, not a Dockyard leak, but it would make the
+goroutine-leak sentinel impossible to tune sensibly.
+
+**The decision.** The stress test constructs the HTTP handler with
+`Stateless: true`. Each POST is then served as an ephemeral session
+that initializes, dispatches, and tears down within the request
+lifetime — the cleanup window is zero, and the goroutine count
+settles to baseline (within a generous tolerance) inside seconds. The
+tolerance (50 extra goroutines past baseline) is wide enough to absorb
+test-harness goroutines (the `httptest` server, the `http.Client`
+pool) and narrow enough to detect a real leak in `runtime/server` or
+the Tasks mount.
+
+**Why not a stateful run.** The stateful path is exercised by the
+existing Wave 3 tests and the Phase 24 + 25 end-to-end runs. The
+Phase 27 stress test's bar is the SECURITY posture under adversarial
+concurrency, not the SDK's session-lifecycle behaviour. Using
+`Stateless: true` keeps the test focused on the layers Dockyard owns
+(the explicit security middleware + the Tasks mount) without entangling
+the goroutine assertion with SDK session-cleanup timing.
+
+**Knock-on.** A future Phase that needs to stress-test the stateful
+session path adds a sibling test with `Stateless: false` and a
+session-aware goroutine-leak sentinel (e.g. polling until the SDK's
+session-cleanup interval elapses). That is out of scope for Phase 27.

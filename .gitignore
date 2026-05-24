@@ -12,6 +12,7 @@
 coverage.out
 coverage.txt
 coverage.html
+coverage-test.log
 # internal/coveragecheck/coverage.json is the committed threshold config — not
 # an artifact — so it must stay tracked; the broad `coverage.*` glob is avoided.
 

@@ -1,0 +1,10 @@
+{
+  "_cite": "docs/specifications/mcp-apps-2026-01-26.mdx, section '_meta.ui' fields on a Resource — CSP + permissions block (Apps spec 2026-01-26, pinned SHA 298e884ec3f02daba085acdb02042d73bd00b355).",
+  "ui": {
+    "csp": {
+      "connectDomains": ["https://api.openweathermap.org"],
+      "resourceDomains": ["https://cdn.jsdelivr.net"]
+    },
+    "prefersBorder": true
+  }
+}
