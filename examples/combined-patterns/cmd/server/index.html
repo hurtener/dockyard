@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Combined Patterns</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fff;
+        --fg: #111;
+        --muted: #666;
+        --ok: #1f7a3a;
+        --warn: #b85c00;
+        --critical: #b30016;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0d1117;
+          --fg: #e6edf3;
+          --muted: #8b949e;
+          --ok: #4ac26b;
+          --warn: #ec8c1a;
+          --critical: #f85149;
+        }
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.45 -apple-system, BlinkMacSystemFont, Segoe UI, Roboto,
+          Helvetica, Arial, sans-serif;
+      }
+      .frame { padding: 16px; }
+      .card {
+        border: 1px solid color-mix(in srgb, var(--fg) 15%, transparent);
+        border-radius: 8px;
+        padding: 12px 16px;
+      }
+      .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+      .value { font-size: 28px; font-weight: 600; }
+      .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin-left: 8px; }
+      .chip.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
+      .chip.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
+      .chip.critical { background: color-mix(in srgb, var(--critical) 12%, transparent); color: var(--critical); }
+      .row { display: flex; align-items: baseline; gap: 6px; }
+      .meta { color: var(--muted); font-size: 12px; margin-top: 6px; }
+      .btn {
+        appearance: none;
+        background: var(--fg);
+        color: var(--bg);
+        border: 0;
+        border-radius: 6px;
+        padding: 6px 12px;
+        font: inherit;
+        cursor: pointer;
+      }
+      .btn.secondary {
+        background: transparent;
+        color: var(--fg);
+        border: 1px solid color-mix(in srgb, var(--fg) 35%, transparent);
+      }
+      .actions { display: flex; gap: 8px; margin-top: 12px; }
+      h2 { margin: 0 0 6px 0; }
+      pre.empty { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div id="root" class="frame">
+      <div class="card empty"><span class="label">combined-patterns</span><div class="meta">waiting for a tool result…</div></div>
+    </div>
+    <script>
+      // Minimal App dispatcher: read structuredContent.kind, render a
+      // metric card OR an approval card. The example deliberately ships
+      // a single static HTML file (no Vite, no Svelte build) so the
+      // example is buildable + inspectable without an `npm install` —
+      // see examples/combined-patterns/README.md for the design note.
+      const root = document.getElementById('root');
+
+      function render(payload) {
+        if (!payload || !payload.structuredContent) {
+          root.innerHTML = '<div class="card empty"><span class="label">no payload</span></div>';
+          return;
+        }
+        const s = payload.structuredContent;
+        if (s.kind === 'metric_card') renderMetric(s);
+        else if (s.kind === 'approval') renderApproval(s, payload);
+        else root.innerHTML = '<div class="card"><span class="label">unknown kind: ' + escapeHTML(String(s.kind || '')) + '</span></div>';
+      }
+
+      function renderMetric(s) {
+        if (s.state === 'loading') {
+          root.innerHTML = '<div class="card"><span class="label">loading…</span></div>';
+          return;
+        }
+        if (s.state === 'empty') {
+          root.innerHTML =
+            '<div class="card"><span class="label">' + escapeHTML(s.flag || '—') +
+            ' rollout</span><div class="meta">' + escapeHTML(s.message || 'No data') + '</div></div>';
+          return;
+        }
+        if (s.state === 'error') {
+          root.innerHTML =
+            '<div class="card"><span class="label chip critical">error</span><div class="meta">' +
+            escapeHTML(s.message || 'Could not fetch the metric.') + '</div></div>';
+          return;
+        }
+        if (s.state === 'permission') {
+          root.innerHTML =
+            '<div class="card"><span class="label chip warn">permission</span><div class="meta">' +
+            escapeHTML(s.message || 'Not authorised to read this flag.') + '</div></div>';
+          return;
+        }
+        const toneClass = s.tone || 'ok';
+        root.innerHTML =
+          '<div class="card">' +
+          '<span class="label">' + escapeHTML(s.label || 'metric') + '</span>' +
+          '<div class="row"><span class="value">' + Number(s.value).toFixed(2) + '</span>' +
+          '<span>' + escapeHTML(s.unit || '') + '</span>' +
+          '<span class="chip ' + escapeHTML(toneClass) + '">' + escapeHTML(toneClass) + '</span></div>' +
+          (s.suggested_action ? '<div class="meta">Suggested next action: ' + escapeHTML(s.suggested_action) + '</div>' : '') +
+          '</div>';
+      }
+
+      function renderApproval(s, payload) {
+        if (s.state === 'loading') {
+          root.innerHTML = '<div class="card"><span class="label">loading…</span></div>';
+          return;
+        }
+        if (s.state === 'empty') {
+          root.innerHTML =
+            '<div class="card"><span class="label">approval</span>' +
+            '<div class="meta">' + escapeHTML(s.message || 'No proposal') + '</div></div>';
+          return;
+        }
+        if (s.state === 'error') {
+          root.innerHTML =
+            '<div class="card"><span class="label chip critical">error</span><div class="meta">' +
+            escapeHTML(s.message || 'Approval handler hit an error.') + '</div></div>';
+          return;
+        }
+        if (s.state === 'permission') {
+          root.innerHTML =
+            '<div class="card"><span class="label chip warn">permission</span><div class="meta">' +
+            escapeHTML(s.message || 'Not authorised to approve.') + '</div></div>';
+          return;
+        }
+        if (s.state === 'approved' || s.state === 'rejected') {
+          root.innerHTML =
+            '<div class="card">' +
+            '<h2>' + escapeHTML(s.title || 'Decision recorded') + '</h2>' +
+            '<div class="meta">' + escapeHTML(s.state) +
+            (s.reason ? ' — ' + escapeHTML(s.reason) : '') + '</div></div>';
+          return;
+        }
+        // awaiting: render the prompt + Approve / Reject buttons.
+        const taskID = s.task_id || (payload && payload._meta && payload._meta.taskId) || '';
+        root.innerHTML =
+          '<div class="card">' +
+          '<h2>' + escapeHTML(s.title || 'Approval required') + '</h2>' +
+          '<div class="meta">' + escapeHTML(s.description || '') + '</div>' +
+          '<div class="actions">' +
+          '<button class="btn" id="approve">Approve</button>' +
+          '<button class="btn secondary" id="reject">Reject</button>' +
+          '</div></div>';
+        document.getElementById('approve').addEventListener('click', function () {
+          postReply(taskID, true);
+        });
+        document.getElementById('reject').addEventListener('click', function () {
+          postReply(taskID, false);
+        });
+      }
+
+      function postReply(taskID, approved) {
+        // The bridge surface posts the reply through window.parent
+        // (the inspector / host). The Dockyard bridge shell normally
+        // wraps this in a typed helper; for a static example we send
+        // the raw message shape directly.
+        try {
+          window.parent.postMessage({
+            type: 'dockyard.elicitation-response',
+            taskId: taskID,
+            data: { approved: approved },
+          }, '*');
+        } catch (e) {
+          // ignored — running outside the bridge (e.g. in a browser
+          // for a quick visual check) is supported.
+        }
+      }
+
+      function escapeHTML(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+          return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+        });
+      }
+
+      // Listen for the host's tool-result push. The shape mirrors the
+      // bridge's tool-result event for an MCP App.
+      window.addEventListener('message', function (ev) {
+        if (!ev.data || ev.data.type !== 'tool-result') return;
+        render(ev.data.payload);
+      });
+
+      // Announce readiness to the host (the bridge's ui/initialize
+      // handshake).
+      try {
+        window.parent.postMessage({ type: 'ui/initialize', appURI: 'ui://combined-patterns/rollout' }, '*');
+      } catch (e) {
+        // ignored.
+      }
+    </script>
+  </body>
+</html>
