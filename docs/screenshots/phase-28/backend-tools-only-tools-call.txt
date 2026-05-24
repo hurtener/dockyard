@@ -1,0 +1,40 @@
+time=2026-05-24T12:14:35.691-03:00 level=INFO msg="dockyard server starting" name=backend-tools-only version=0.1.0 tools=1
+=== list_bookmarks result ===
+{
+  "bookmarks": [
+    {
+      "id": "a5c080cc3be09646",
+      "notes": "This example ships in examples/backend-tools-only.",
+      "tags": [
+        "dockyard",
+        "mcp"
+      ],
+      "title": "Dockyard — Go-native MCP framework",
+      "url": "https://github.com/hurtener/dockyard"
+    },
+    {
+      "id": "a2013e7519e4891e",
+      "notes": "Canonical Go style guide.",
+      "tags": [
+        "go",
+        "docs"
+      ],
+      "title": "Go: Effective Go",
+      "url": "https://go.dev/doc/effective_go"
+    },
+    {
+      "id": "aa3c03459584a9cc",
+      "notes": "The protocol Dockyard implements server-side.",
+      "tags": [
+        "mcp",
+        "docs"
+      ],
+      "title": "MCP — Model Context Protocol",
+      "url": "https://modelcontextprotocol.io"
+    }
+  ],
+  "total": 3
+}
+
+=== tools/list ===
+- list_bookmarks: List bookmarks

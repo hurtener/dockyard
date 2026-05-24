@@ -136,6 +136,21 @@
       "min": 55,
       "band": "subprocess-override",
       "reason": "Demonstration handlers shipped by the approval-flows template (Phase 25, decision D-134). Unlike the synchronous analytics-widgets handlers, these are inherently tasks.Engine-driven — the Handler happy paths kick off run* goroutines that the engine pumps via SupplyInput. Their happy-path coverage lives in test/integration/phase25_approval_flows_test.go, which drives the full input_required lifecycle through a real engine; in-package unit tests cover the edge cases (no-engine fallback, terminal builders for approved/rejected/declined, summarisers, decoders, marshallers, finalise helper). The Phase 21.5 coverage-gate override mechanism (D-092) exists precisely for packages whose happy paths require integration coverage rather than mocked-engine duplication."
+    },
+    "github.com/hurtener/dockyard/examples/backend-tools-only/internal/handlers": {
+      "min": 75,
+      "band": "cli-tooling",
+      "reason": "Phase 28 worked example (D-150) — pure-tools server's bookmark catalog handlers. Tests drive every public method + error path; the random-ID failure branch and the `runtime.fs` IO error branches are not hermetically reachable. Held above the 70% CLI-tooling floor."
+    },
+    "github.com/hurtener/dockyard/examples/combined-patterns/internal/handlers": {
+      "min": 80,
+      "band": "new-package",
+      "reason": "Phase 28 worked example (D-150) — analytics + approval composition. Tests drive both the synchronous snapshot path and the full tasks.Engine-driven approval lifecycle (approve / reject / decline) via drainToTerminal, so every helper (runApproval, buildTerminal, decodeReply, summarise, marshalCallToolResult, decodeCreatedTaskID) is exercised."
+    },
+    "github.com/hurtener/dockyard/examples/prompts-demo/internal/handlers": {
+      "min": 75,
+      "band": "cli-tooling",
+      "reason": "Phase 28 worked example (D-151) — MCP Prompts handlers. Tests cover every prompt's default-fallback path + the tool's input validation. The `splitSentences` regex edge cases are exercised through the public Handler surface."
     }
   },
   "exempt": [
@@ -144,6 +159,12 @@
     "github.com/hurtener/dockyard/internal/clidocs/cmd/clidocs",
     "github.com/hurtener/dockyard/internal/skillcheck/cmd/skillcheck",
     "github.com/hurtener/dockyard/test/integration",
-    "github.com/hurtener/dockyard/test/conformance"
+    "github.com/hurtener/dockyard/test/conformance",
+    "github.com/hurtener/dockyard/examples/backend-tools-only/cmd/server",
+    "github.com/hurtener/dockyard/examples/backend-tools-only/internal/contracts",
+    "github.com/hurtener/dockyard/examples/combined-patterns/cmd/server",
+    "github.com/hurtener/dockyard/examples/combined-patterns/internal/contracts",
+    "github.com/hurtener/dockyard/examples/prompts-demo/cmd/server",
+    "github.com/hurtener/dockyard/examples/prompts-demo/internal/contracts"
   ]
 }
