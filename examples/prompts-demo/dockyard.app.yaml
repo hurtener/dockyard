@@ -1,0 +1,46 @@
+# Example manifest for `prompts-demo` (Phase 28, D-151).
+#
+# This example demonstrates the Phase 28 prompts API (runtime/server.AddPrompt)
+# by registering three MCP Prompts that a host pulls via prompts/list +
+# prompts/get. It also ships ONE tool — `summarize_text` — so the
+# manifest stays valid (the validate engine requires at least one tool).
+#
+# Why MCP Prompts? MCP separates two primitives:
+#   - Tools: things the model PUSHES (typed input → action / answer).
+#   - Prompts: templates the host PULLS (named slot-in prompts that
+#     seed a chat or a sub-agent).
+#
+# Dockyard's contract-first pattern (typed Go struct → JSON Schema) does
+# not extend naturally to prompts (D-152 — MCP prompt arguments are a
+# flat string-keyed map, not a structured object). AddPrompt is a thin
+# pass-through to the SDK with the obs/v1 + panic-recovery guarantees
+# every Dockyard handler gets.
+name: prompts-demo
+title: Prompts Demo
+version: 0.1.0
+
+runtime:
+  transports: [stdio, http]
+  # No `ui:` block — prompts are server-side template responses; they do
+  # not render in an MCP App.
+
+tools:
+  - name: summarize_text
+    description: Quick local summarisation — a one-liner over an input passage. Pairs with the `summarize_for_review` prompt.
+    input: internal/contracts.SummarizeTextInput
+    output: internal/contracts.SummarizeTextOutput
+    task_support: forbidden
+
+# Prompts are registered IN CODE via runtime/server.AddPrompt — there is
+# no `prompts:` block in the manifest (Phase 28 / D-152). The validate
+# engine + the codegen pipeline are tool-shaped; prompts ride alongside
+# them through the runtime API.
+
+quality:
+  require_loading_state: false
+  require_empty_state: false
+  require_error_state: false
+  require_permission_state: false
+  require_fixtures: true
+  require_contract_tests: true
+  require_spec_compliance: true
