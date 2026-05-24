@@ -195,14 +195,30 @@ func New(opts Options) (*Inspector, error) {
 // empty or unspecified host (":0", ":8080") is rejected: the inspector must
 // bind an explicit loopback interface, never a wildcard reachable off-localhost.
 // A malformed address is rejected too. This is the mechanical enforcement of
-// the inspector's localhost-only property (RFC §12).
+// the inspector's localhost-only property (RFC §12, Phase 27 re-audit).
+//
+// Phase 27 hardening: the gate also validates the port is a clean numeric
+// value (no whitespace, no non-digit characters). The pre-Phase-27 gate
+// accepted "127.0.0.1:0 " — a trailing-whitespace address — because
+// net.SplitHostPort tolerates whitespace inside the port component; the
+// subsequent net.Listen call then failed with an opaque tcp lookup error
+// instead of the well-typed ErrNonLoopbackBind, which made the operator's
+// error message inconsistent across malformed-address shapes. The
+// Phase-27 audit normalises every malformed-address rejection through the
+// same typed error.
 func requireLoopback(addr string) error {
-	host, _, err := net.SplitHostPort(addr)
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return fmt.Errorf("%w: %q", ErrNonLoopbackBind, addr)
 	}
 	if host == "" {
 		// ":0" / ":port" binds every interface — not loopback-only.
+		return fmt.Errorf("%w: %q", ErrNonLoopbackBind, addr)
+	}
+	if !isCleanPort(port) {
+		// A whitespace-padded or non-numeric port is malformed. Surface it
+		// as the typed bind-rejection so the operator gets a consistent
+		// error class regardless of the malformed-address shape.
 		return fmt.Errorf("%w: %q", ErrNonLoopbackBind, addr)
 	}
 	if host == "localhost" {
@@ -213,6 +229,18 @@ func requireLoopback(addr string) error {
 		return fmt.Errorf("%w: %q", ErrNonLoopbackBind, addr)
 	}
 	return nil
+}
+
+// isCleanPort reports whether port is a clean numeric port (no whitespace,
+// no non-digit characters). An empty port is accepted — net.Listen treats
+// it as "OS-assigned port" and the SplitHostPort path is unchanged.
+func isCleanPort(port string) bool {
+	for _, r := range port {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // Addr returns the inspector's resolved listen address, including the
