@@ -257,7 +257,17 @@ func runCapability(projectDir string, m *manifest.Manifest) Result {
 					fmt.Sprintf("host profile %q did not resolve for app %q: %v", id, a.ID, err))
 				continue
 			}
-			if _, err := profile.DeriveDomain(label, ""); err != nil {
+			// A signing host profile (e.g. Claude — D-063, D-064) refuses to derive
+			// a stable signed origin when the App declares a non-empty domain label
+			// but the runtime is given an empty serverURL — by design: an empty URL
+			// would yield a forgeable origin. The capability category proves the
+			// SEAM resolves for every host, not that a real binding is correctly
+			// configured; a synthetic placeholder URL satisfies the host profile's
+			// derivation invariant so we exercise the seam, not the absence of a
+			// server URL. The actual signed-origin binding is a runtime concern
+			// proven by `runtime/apps`'s own tests (D-064).
+			const syntheticServerURL = "https://capability-test.example/mcp"
+			if _, err := profile.DeriveDomain(label, syntheticServerURL); err != nil {
 				problems = append(problems, fmt.Sprintf(
 					"app %q does not degrade for host %q — DeriveDomain failed: %v",
 					a.ID, id, err))
