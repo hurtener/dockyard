@@ -1,0 +1,215 @@
+---
+name: attach-a-ui-resource
+description: Attach a Svelte MCP App (`ui://` resource) to a Dockyard MCP server, so a tool's structured output renders inline in the host's chat surface. Use when adding a UI to a blank-scaffold server, or adapting a template's App. Covers manifest wiring, the //go:embed bundle, the bridge handshake, host-theme propagation, and the deny-by-default CSP.
+license: Apache-2.0
+metadata:
+  framework: dockyard
+  surface: apps
+  verbs: "generate validate build"
+---
+
+# Attach a Svelte UI resource to a Dockyard tool
+
+A Dockyard tool's structured output (`tool.Result[Out].Structured`) can
+render inline in the host's chat surface by attaching an **MCP App**: a
+`ui://<server>/<app>` resource served with MIME
+`text/html;profile=mcp-app`. The App is a Svelte page bundled by Vite into
+a single HTML file, embedded into the Go binary at build time, and
+served via the runtime's `runtime/apps` registration helper. The bridge
+shell library (`web/bridge`) handles the `ui/` postMessage handshake;
+inside the iframe you read the tool's structured payload as a typed value
+and render it.
+
+This skill walks through the parts. The two shipped V1 templates are the
+canonical examples — start from one when you can.
+
+## The five parts
+
+1. **Declare the app in `dockyard.app.yaml`** — id, URI, entry file,
+   display modes, CSP, visibility.
+2. **Wire the tool to the app** — set `ui: <app-id>` on the tool entry
+   (manifest) and `.UI(appName)` on the builder (`main.go`).
+3. **Embed the bundle** — `//go:embed all:web/dist` in the server, and
+   register the bundle via `apps.Register` in `main` (or `registerApp`).
+4. **Author the Svelte App** — uses the in-repo `@dockyard/bridge`
+   helpers to receive the typed tool result and render.
+5. **Build** — `dockyard build` runs Vite then `go build`, embedding the
+   freshly built HTML.
+
+## 1. Manifest declaration
+
+In `dockyard.app.yaml`:
+
+```yaml
+apps:
+  - id: widgets
+    uri: ui://__PROJECT_NAME__/widgets
+    entry: web/src/App.svelte
+    # Inline only (D-126). The host renders the App in the chat surface.
+    display_modes: [inline]
+    csp:
+      # Empty lists mean: the bundle is single-file, no external origins.
+      # The deny-by-default CSP just works (RFC §7.4).
+      connect: []
+      resource: []
+    visibility: [model, app]
+
+quality:
+  require_loading_state: true
+  require_empty_state: true
+  require_error_state: true
+  require_permission_state: true
+  require_fixtures: true
+```
+
+The `quality` block turns on the §20 four-state page rule —
+loading/empty/error/permission states are mandatory and `dockyard
+validate` will fail your build if any tool fixture is missing.
+
+## 2. Wire the tool
+
+In the manifest, set `ui: <app-id>` on each tool that drives the App:
+
+```yaml
+tools:
+  - name: create_chart
+    description: Render a chart inline in the host.
+    input: internal/contracts.CreateChartInput
+    output: internal/contracts.CreateChartOutput
+    ui: widgets
+    task_support: forbidden
+```
+
+In `main.go`'s `registerTools`, add `.UI(appName)` to the builder:
+
+```go
+return tool.New[contracts.CreateChartInput, contracts.CreateChartOutput]("create_chart").
+    Describe("Render a chart inline in the host.").
+    UI(appName).                       // <- attaches the tool to the App
+    Handler(handlers.CreateChart).
+    Register(srv)
+```
+
+`appName` is the same id you declared in the manifest (`widgets` above).
+
+## 3. Embed the bundle + register
+
+The Svelte App's built bundle lives under `web/dist/index.html` after
+`dockyard build` runs Vite. Embed it and register at server startup:
+
+```go
+//go:embed all:web/dist
+var uiBundle embed.FS
+
+const (
+    appURI  = "ui://__PROJECT_NAME__/widgets"
+    appName = "widgets"
+)
+
+func registerApp(srv *server.Server) error {
+    html, err := fs.ReadFile(uiBundle, "web/dist/index.html")
+    if err != nil {
+        return err
+    }
+    return apps.Register(srv, apps.App{
+        URI:   appURI,
+        Name:  appName,
+        Title: "__PROJECT_TITLE__ — widgets",
+        HTML:  html,
+    })
+}
+```
+
+The `all:` prefix is required — empty `_` and `.` files are skipped
+otherwise (RFC §14, brief 06 §2.2).
+
+## 4. The Svelte App
+
+The App receives the tool's `structuredContent` payload via the bridge.
+A minimal dispatcher:
+
+```svelte
+<script lang="ts">
+  import { hostContext, onToolResult } from '@dockyard/bridge';
+  import Chart from './widgets/Chart.svelte';
+  import Table from './widgets/Table.svelte';
+  import MetricCardWidget from './widgets/MetricCardWidget.svelte';
+  import type {
+    CreateChartOutput,
+    CreateTableOutput,
+    CreateMetricCardOutput,
+  } from './generated/contracts';
+
+  let result: CreateChartOutput | CreateTableOutput | CreateMetricCardOutput | undefined;
+
+  onToolResult((payload) => {
+    result = payload;
+  });
+</script>
+
+{#if !result}
+  <p>Waiting for tool result…</p>
+{:else if result.kind === 'chart'}
+  <Chart data={result.data} type={result.type} theme={result.theme} />
+{:else if result.kind === 'table'}
+  <Table columns={result.columns} rows={result.rows} theme={result.theme} />
+{:else if result.kind === 'metric_card'}
+  <MetricCardWidget data={result} />
+{/if}
+```
+
+The `Kind` discriminator on each output is the dispatcher's switch — the
+`analytics-widgets` template uses this exact pattern.
+
+### Host theme propagation
+
+Read the host's theme from `hostContext.styles.variables`. The bridge
+auto-propagates it on the handshake; no per-call wiring needed. If your
+tool's contract has an explicit `theme` field (analytics-widgets does),
+let the handler resolve `"auto"` against `hostContext` and pass the
+resolved value forward.
+
+### The four UI states
+
+Every page renders through the `PageState` four-state pattern
+(loading / empty / error / permission / ready — AGENTS.md §20). Make sure
+each fixture exercises one state, and the host theme is honoured in each.
+
+## 5. Build and verify
+
+```bash
+dockyard build           # Vite then go build; embeds web/dist/index.html
+dockyard validate        # checks the app↔tool wiring, CSP, MIME, four-state
+dockyard inspect --url <server>   # open the app preview, fire the tool
+```
+
+The inspector's App preview reads the live `ui://` resource read-only
+(D-103). You should see your App render the tool result with realistic
+synthetic data from the fixture switcher (D-130).
+
+## Common pitfalls
+
+- **App and tool out of sync.** A tool with `ui: widgets` but no `apps[]`
+  entry named `widgets` is a `dockyard validate` blocker — fix the
+  manifest.
+- **Missing `//go:embed all:web/dist`.** Without it, the server
+  cannot find `web/dist/index.html` at runtime — `apps.Register` returns
+  an error. Run `dockyard build` (or `npm run build` in `web/`) before
+  `go build` so the bundle exists.
+- **CSP too tight or too loose.** Empty `connect: []` / `resource: []`
+  for a single-file bundle is the deny-by-default sweet spot. Add an
+  origin only when your App genuinely needs to fetch from it.
+- **Forgetting `.UI(appName)` on the tool builder.** The manifest's
+  `ui: <id>` is half the wiring; the runtime needs the builder call too
+  so the `_meta.ui` block on the tool result points at the right
+  resource.
+
+## What to do next
+
+- Define more contracts that drive the App ⇒ `define-contracts` skill.
+- Live-edit + see HMR-style reload in the inspector ⇒
+  `run-the-dev-loop` skill.
+- Add task-augmented tools (e.g. approvals) ⇒ start from the
+  `approval-flows` template; the bridge ships the
+  `ui/elicitation-response` notification (D-134).
+- Ship the binary ⇒ `package` skill.

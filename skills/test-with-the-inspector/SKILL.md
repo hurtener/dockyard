@@ -1,0 +1,171 @@
+---
+name: test-with-the-inspector
+description: Drive and debug a Dockyard MCP server through Dockyard's local inspector (`dockyard inspect`). Use to invoke tools by hand, switch fixtures across UI states (happy/empty/error/permission/slow/large), watch the live `obs/v1` stream, render Apps in a sandboxed iframe, and walk a task's lifecycle in the Tasks panel. Dev-mode-gated, localhost-only, read-only.
+license: Apache-2.0
+metadata:
+  framework: dockyard
+  surface: inspector
+  verbs: "inspect"
+---
+
+# Test a Dockyard server with the local inspector
+
+The inspector is Dockyard's local **test + debug** surface. It is:
+
+- **Dev-mode-gated, localhost-only, read-only.** Never a production
+  client; never reachable off-localhost (RFC §12, P4 in §1).
+- **A pure `obs/v1` consumer.** It reads no runtime internals; every
+  signal it shows is an emitted `obs/v1` event (P2).
+- **Wired to your project.** Verdicts re-run `dockyard validate`; the
+  Fixtures switcher derives from the project's generated tool contracts
+  (D-130); the App preview reads the running server's `ui://`
+  resources read-only (D-103).
+
+## Attach to a running server
+
+In one terminal, run the server on HTTP (the inspector relays via HTTP):
+
+```bash
+DOCKYARD_TRANSPORT=http dockyard run
+```
+
+In a second terminal, attach the inspector:
+
+```bash
+dockyard inspect --url http://127.0.0.1:8080
+```
+
+Or attach to a project directory and let `inspect` print the URL it
+chose:
+
+```bash
+dockyard inspect --url http://127.0.0.1:8080 --dir path/to/project
+```
+
+`inspect`'s flags:
+
+| Flag        | What it does                                                          |
+| ----------- | --------------------------------------------------------------------- |
+| `--url`     | the running MCP server's base URL; required to attach                 |
+| `--dir`     | the Dockyard project directory (default: cwd); powers Verdicts + Fixtures |
+| `--port`    | the inspector's own loopback port (default: OS-assigned)              |
+| `--no-open` | do not open a browser — for CI and headless use                       |
+
+A non-loopback `--port` host is refused before the listener opens —
+mechanical enforcement of RFC §12 (the CVE-2025-49596 lesson).
+
+## The rail tabs
+
+| Tab        | What it shows / does                                                       |
+| ---------- | -------------------------------------------------------------------------- |
+| Tools      | All registered tools; click one to fire it (the Operator-Invoke surface — D-131) |
+| Apps       | Each `ui://` resource rendered in a sandboxed iframe (D-103)               |
+| Tasks      | The active and recent tasks, rendered as a lifecycle Timeline               |
+| Events     | The live `obs/v1` stream — every tool/resource/app/task event             |
+| Analytics  | Per-tool latency + counts derived from `obs/v1`                           |
+| Fixtures   | The fixture switcher — pick a UI state for the App preview                 |
+| Verdicts   | Re-runs `dockyard validate`; renders blockers + warnings                  |
+| RPC        | The raw JSON-RPC log between the inspector and the attached server         |
+
+## The Operator-Invoke flow
+
+For any tool, the Tools tab has:
+
+- A schema-derived form with one field per input property.
+- A fixture switcher (the same six fixtures the App preview uses).
+- An "Invoke" button — clicking it sends a real `tools/call` to the
+  attached server and renders the structured result in the App preview
+  if the tool has a `_meta.ui` block, or as raw JSON otherwise.
+
+Use Invoke to:
+
+- Confirm a new tool you just added (`add-a-tool` skill) actually
+  registers and returns a sensible payload.
+- Drive a tool with each of its fixtures, exercising every UI state.
+- Reproduce a host-side bug by firing the same call the host would
+  make.
+
+## The Fixtures switcher
+
+Each tool ships six default fixtures (D-130):
+
+| Fixture       | What it drives                                              |
+| ------------- | ----------------------------------------------------------- |
+| `happy`       | the "ready" state — realistic synthetic payload             |
+| `empty`       | the "empty" state — empty arrays / nil branches             |
+| `error`       | the "error" state — a handler-returned error path           |
+| `permission`  | the "permission" state — a permission-denied stub           |
+| `slow`        | the "slow" state — a deliberately delayed response          |
+| `large`       | the "large" state — a stress-sized payload                  |
+
+On-disk project fixtures (`<dir>/fixtures/<tool>/<kind>.json`) are
+preferred over the schema-derived synthetic fixtures (D-130). The
+`analytics-widgets` template ships all six per tool — open one as a
+reference when authoring your own.
+
+## App preview
+
+Each `ui://` resource renders in a sandboxed iframe with the
+deny-by-default CSP the manifest declares. The bridge handshake
+completes on render; once the App is up, fire its tool from the Tools
+tab and the App receives the structured result through the bridge
+exactly as a real host would deliver it.
+
+## Capability emulation
+
+The inspector can flip host capabilities on/off — Apps, Tasks, the
+`logging` capability — to verify your server degrades gracefully on a
+host that does not negotiate that capability (RFC §7.5, the
+capability-driven rule from AGENTS.md §6). If your App is mandatory in
+the workflow, emulating "no Apps" should produce a working text-only
+response from your tool, not a crash.
+
+## Task lifecycle
+
+For task-augmented tools (the `approval-flows` template's two tools
+are the canonical examples), the Tasks tab renders the lifecycle as a
+Timeline:
+
+```text
+created → working → input_required → working → completed
+```
+
+You can:
+
+- Watch the `input_required` round-trip happen in real time as you
+  interact with the App.
+- Cancel a running task — the handler's `ctx.Done()` /
+  `TaskHandle.Cancelled()` should fire, and the task moves to
+  `cancelled` with the App rendering its "withdrawn" empty state.
+
+## Why this matters
+
+mcp-use's inspector is interactive but **not a test harness** (brief 04
+§2.5): no fixture system, no scripted state-switch, no contract drift
+catcher, no host-compatibility matrix. Dockyard's inspector is wired
+to the project — the Verdicts tab re-runs `dockyard validate`, the
+Fixtures switcher derives from the generated contracts, capability
+emulation is one toggle, the App preview honours the CSP. You can
+encode "this is correct" and have CI enforce it; the inspector is the
+interactive face of the same checks.
+
+## Common pitfalls
+
+- **"Refusing non-loopback bind"** — the inspector refused a `--port`
+  whose host is not loopback. Use 127.0.0.1 or omit `--port`.
+- **App preview is blank.** The bridge handshake didn't complete —
+  check the JSON-RPC log (RPC tab) for the first `ui/` notification;
+  a missing or malformed `_meta.ui` block on the tool result is the
+  usual cause.
+- **No Tasks tab activity.** The attached server is not task-augmented
+  (the manifest's tools all declare `task_support: forbidden` or
+  `optional`). Set `task_support: required` for the tools you want to
+  observe through the lifecycle, or use the `approval-flows` template.
+- **The Operator-Invoke button is greyed out.** The attached server is
+  not reachable; check the URL and that the server is running.
+
+## What to do next
+
+- Build a fresh tool ⇒ `add-a-tool` skill.
+- Attach a UI to a tool ⇒ `attach-a-ui-resource` skill.
+- Iterate live with the inspector open ⇒ `run-the-dev-loop` skill.
