@@ -109,6 +109,12 @@ and `docs/design/CONVENTIONS.md` §3 in the same PR. AGENTS.md §20. D-066.
 **Conformance suite** — the shared `runtime/store/storetest` test battery every
 `Store` driver must pass. A new persistence guarantee is added to the suite once and
 proven against every driver, never bolted onto one driver. RFC §13. D-025, D-026.
+Dockyard also ships an **MCP spec-compliance conformance suite** under
+`test/conformance/` (Phase 27) that round-trips every Apps + Tasks wire shape
+through `internal/protocolcodec` against fixtures derived from the vendored spec
+snapshots — the suite is the framework-side proof that Dockyard's wire shapes
+conform to the spec. RFC §16. D-143.
+
 **Codec** — a `protocolcodec` encoder/decoder pair for one negotiated MCP
 `protocolVersion`. A codec encodes Dockyard domain types into MCP extension wire
 formats and decodes wire formats back; it is obtained with `CodecFor` /
@@ -537,6 +543,15 @@ inspector's read-only `resources/read` for App rendering (D-103);
 both stay within P4 because the inspector remains the lone
 client-shaped component, dev-mode-gated and localhost-bound. RFC §12.
 D-131.
+
+**Operator-initiated only** — the precise framing of the inspector's
+mutating-call boundary, replacing the older "read-only" wording. Every
+client-shaped operation the inspector performs has (a) a named
+operator UI trigger, (b) a short-lived per-request MCP client session,
+(c) a documented decision (D-099 / D-103 / D-131 / D-134) explaining
+why it stays within P4. The framing is mechanically guarded by
+`test/integration/phase27_inspector_security_test.go`'s
+`mcp.NewClient` audit. RFC §12. D-144.
 
 **`obs/v1`** — Dockyard's canonical, versioned, public observability event protocol.
 The headless runtime emits it; the inspector and the post-V1 console are pure
