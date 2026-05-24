@@ -69,13 +69,32 @@ test:
 # exits non-zero on any shortfall. CI runs `make coverage`, so a coverage
 # regression fails the build. CGO_ENABLED=1 keeps the run consistent with
 # `make test`; -covermode=atomic is required when the race detector is on.
+#
+# The `go test` output is captured to a temporary log so a clean run stays
+# quiet but a failing run surfaces the offending test name + assertion
+# (Phase 27 — CI diagnostic hygiene). The pre-Phase-27 recipe redirected
+# unconditionally to /dev/null, which left a CI flake undiagnosable from the
+# run log alone — the same diagnostic hygiene fix the R4 `make web` pattern
+# applied. The log file is removed on a successful run; on failure, it is
+# preserved at coverage-test.log AND printed inline so a CI step's log
+# surfaces the failure without requiring artifact upload.
 coverage:
 	@if [ -n "$(GO_SOURCES)" ]; then \
-		CGO_ENABLED=1 go test -race -covermode=atomic \
-			-coverprofile=coverage.out ./... >/dev/null && \
-		go run ./internal/coveragecheck/cmd/coveragecheck \
-			-profile coverage.out \
-			-config internal/coveragecheck/coverage.json; \
+		log=$$(mktemp -t dockyard-coverage.XXXXXX) ; \
+		if CGO_ENABLED=1 go test -race -covermode=atomic \
+				-coverprofile=coverage.out ./... >"$$log" 2>&1 ; then \
+			rm -f "$$log" ; \
+			go run ./internal/coveragecheck/cmd/coveragecheck \
+				-profile coverage.out \
+				-config internal/coveragecheck/coverage.json ; \
+		else \
+			status=$$? ; \
+			echo "FAIL: go test failed during coverage run (status $$status); log:" ; \
+			cp "$$log" coverage-test.log ; \
+			cat "$$log" ; \
+			rm -f "$$log" ; \
+			exit $$status ; \
+		fi ; \
 	else \
 		echo "skip coverage: no Go sources yet"; \
 	fi
