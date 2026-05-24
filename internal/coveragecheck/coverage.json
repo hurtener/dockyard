@@ -143,6 +143,7 @@
     "github.com/hurtener/dockyard/internal/coveragecheck/cmd/coveragecheck",
     "github.com/hurtener/dockyard/internal/clidocs/cmd/clidocs",
     "github.com/hurtener/dockyard/internal/skillcheck/cmd/skillcheck",
-    "github.com/hurtener/dockyard/test/integration"
+    "github.com/hurtener/dockyard/test/integration",
+    "github.com/hurtener/dockyard/test/conformance"
   ]
 }

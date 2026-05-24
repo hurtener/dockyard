@@ -1,0 +1,4 @@
+{
+  "_cite": "docs/specifications/mcp-tasks-experimental.mdx, section 'Listing Tasks' — an empty ListTasksResult MUST emit an empty array, never JSON null.",
+  "tasks": []
+}

@@ -1,0 +1,8 @@
+{
+  "_cite": "docs/specifications/mcp-tasks-experimental.mdx, section 'Task object' — a completed task with unlimited TTL (ttl=null is the wire-canonical 'unlimited retention').",
+  "taskId": "task_0",
+  "status": "completed",
+  "createdAt": "2026-01-01T00:00:00Z",
+  "lastUpdatedAt": "2026-01-01T00:00:00Z",
+  "ttl": null
+}

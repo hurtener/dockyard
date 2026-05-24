@@ -1,0 +1,6 @@
+{
+  "_cite": "docs/specifications/mcp-tasks-experimental.mdx, section 'Associating Task-Related Messages' — the _meta[io.modelcontextprotocol/related-task] association key (Tasks experimental, pinned SHA 0b65dc6188d9a35c83b064c3d1517931f311cd67).",
+  "io.modelcontextprotocol/related-task": {
+    "taskId": "task_7f3a"
+  }
+}

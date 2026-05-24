@@ -1,0 +1,10 @@
+{
+  "_cite": "docs/specifications/mcp-tasks-experimental.mdx, section 'Capability Negotiation' — capabilities.tasks block (Tasks experimental, pinned SHA 0b65dc6188d9a35c83b064c3d1517931f311cd67).",
+  "list": {},
+  "cancel": {},
+  "requests": {
+    "tools": {
+      "call": {}
+    }
+  }
+}

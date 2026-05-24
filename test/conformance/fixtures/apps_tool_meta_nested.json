@@ -1,0 +1,7 @@
+{
+  "_cite": "docs/specifications/mcp-apps-2026-01-26.mdx, section 'Linking a Tool to a UI Resource' — the nested `_meta.ui` form is the canonical shape (Apps spec 2026-01-26, pinned SHA 298e884ec3f02daba085acdb02042d73bd00b355).",
+  "ui": {
+    "resourceUri": "ui://weather-server/dashboard-template",
+    "visibility": ["app"]
+  }
+}
