@@ -57,7 +57,7 @@ done-definition, dependency declarations, and coverage discipline.
 | 25 | `approval-flows` template                     | templates              | §10, §8.6        | 02, 01    | 24, 14        | 75%  | Shipped |
 | 26 | `inspector` template                          | templates              | §10              | 05, 01    | 24            | 75%  | Deferred — D-136 |
 | 27 | Security pass + spec-compliance conformance   | runtime/*, test        | §15, §16         | 01,02,03  | 09, 13, 14    | 90%  | Pending |
-| 28 | Examples, godoc, docs hygiene                 | docs / examples        | §2               | —         | 01–27         | n/a  | Pending |
+| 28 | Examples, godoc, docs hygiene                 | docs / examples        | §2, §6, §11      | 04        | 01–27         | n/a  | Done    |
 | 29 | Agent skills & published tech-docs site       | skills / docs          | §1, §2           | 04        | 21, 25        | n/a  | Pending |
 | 30 | V1 release engineering + cut                  | release                | §1, §14          | —         | 27, 28, 29    | n/a  | Pending |
 
@@ -435,13 +435,20 @@ spec-compliance conformance suite run against the vendored specs.
 binding, HTTP security options, and inspector localhost-binding all verified.
 **Briefs.** 01, 02, 03. **Deps.** 09, 13, 14.
 
-#### 28 — Examples, godoc, docs hygiene (RFC §2)
+#### 28 — Examples, godoc, docs hygiene (RFC §2, §6, §11)
 
-**Goal.** Worked examples in `examples/`; godoc on every public package; a docs
-pass for drift.
-**Acceptance.** Examples build and run; godoc complete on exported surface;
-`drift-audit` clean.
-**Deps.** 01–27.
+**Goal.** Three worked examples in `examples/` (`backend-tools-only`,
+`combined-patterns`, `prompts-demo`); the minimal `runtime/server.AddPrompt`
+API powering the prompts example with obs/v1 + panic recovery; godoc Example
+functions on the highest-leverage runtime APIs; a docs-site hygiene pass that
+re-casts the inspector's "read-only" framing to D-144's "operator-initiated
+only" and threads D-139's pre-publish workflow into the templates' READMEs;
+a §19 drift-audit extension to `examples/` (D-153).
+**Acceptance.** Examples build, validate, and run; godoc complete on the
+runtime/* exported surface with Example test coverage; D-144 / D-139 honored
+across docs + skills + the CLI source; the examples hygiene hook fires; the
+full preflight gate is green.
+**Briefs.** 04 (DX). **Deps.** 01–27.
 
 #### 29 — Agent skills & published tech-docs site (RFC §1, §2)
 
