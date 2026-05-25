@@ -151,6 +151,16 @@
       "min": 75,
       "band": "cli-tooling",
       "reason": "Phase 28 worked example (D-151) — MCP Prompts handlers. Tests cover every prompt's default-fallback path + the tool's input validation. The `splitSentences` regex edge cases are exercised through the public Handler surface."
+    },
+    "github.com/hurtener/dockyard/internal/changelogx": {
+      "min": 80,
+      "band": "new-package",
+      "reason": "Phase 30 — Keep-a-Changelog section extractor (D-157). Pure-fn / read-only; held to the new-package band."
+    },
+    "github.com/hurtener/dockyard/internal/releasebuild": {
+      "min": 70,
+      "band": "subprocess-override",
+      "reason": "Phase 30 — release-pipeline cross-compile driver (D-156). Orchestrates `go build` subprocesses across the RFC §14 matrix; the per-target compile branches are driven hermetically by a fixture project but the matrix iteration's failure-collection branch and the `go env` host-target fallback are not. Held to the CLI-tooling band, mirroring internal/buildpkg's posture."
     }
   },
   "exempt": [
@@ -158,6 +168,8 @@
     "github.com/hurtener/dockyard/internal/coveragecheck/cmd/coveragecheck",
     "github.com/hurtener/dockyard/internal/clidocs/cmd/clidocs",
     "github.com/hurtener/dockyard/internal/skillcheck/cmd/skillcheck",
+    "github.com/hurtener/dockyard/internal/changelogx/cmd/changelogx",
+    "github.com/hurtener/dockyard/internal/releasebuild/cmd/releasebuild",
     "github.com/hurtener/dockyard/test/integration",
     "github.com/hurtener/dockyard/test/conformance",
     "github.com/hurtener/dockyard/examples/backend-tools-only/cmd/server",
