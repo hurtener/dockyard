@@ -29,7 +29,22 @@ dockyard --help        # verify the CLI is on PATH
 dockyard new --help    # confirm the flags below
 ```
 
-If `dockyard` is not on PATH, build it from the Dockyard checkout:
+If `dockyard` is not on PATH, install the latest release via `go install`
+(the recommended post-v1.0.0 path):
+
+```bash
+go install github.com/hurtener/dockyard/cmd/dockyard@v1.0.0
+export PATH="$(go env GOPATH)/bin:$PATH"   # if it isn't already
+```
+
+`go install` resolves the tag against the Go module proxy and produces a
+working `dockyard` binary at `$(go env GOPATH)/bin/dockyard` — the same
+CGo-free artifact the release pipeline cross-compiles for darwin, linux,
+and windows × amd64 and arm64. Verify against the `.sha256` sidecar on
+the GitHub Releases page if you need to.
+
+Alternatively, build from source if you're hacking on Dockyard itself or
+want to run against `main`:
 
 ```bash
 cd /path/to/dockyard

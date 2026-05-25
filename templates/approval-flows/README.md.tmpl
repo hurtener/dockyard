@@ -1,9 +1,8 @@
 # __PROJECT_TITLE__
 
-Scaffolded from the Dockyard `approval-flows` template (Phase 25,
-RFC §10, §8.6). The Tasks × Apps showcase: two task-augmented tools
-and one App that drives the human-in-the-loop round-trip in the host's
-chat surface.
+Scaffolded from the Dockyard `approval-flows` template. The Tasks ×
+Apps showcase: two task-augmented tools and one App that drives the
+human-in-the-loop round-trip in the host's chat surface.
 
 ## What ships
 
@@ -15,16 +14,16 @@ chat surface.
 
 Both tools always run as MCP Tasks; the App reads the prompt out of the
 first `tool-result` push, renders the card or form, and posts the
-user's decision back through the bridge's
-`sendElicitationResponse` View helper (Phase 25 / D-134). The
-inspector's host-half delivers the reply to the attached server's
-`tasks/result` endpoint and the suspended task resumes.
+user's decision back through the bridge's `sendElicitationResponse`
+View helper. The inspector's host-half delivers the reply to the
+attached server's `tasks/result` endpoint and the suspended task
+resumes.
 
 ## Try it
 
-**Pre-publish first step (D-139).** Until Dockyard is released to a
-module registry, a scaffold's `go.mod` carries a `replace` directive
-but no `go.sum`. Run `go mod tidy` once, plus `dockyard generate` to
+**Pre-publish first step.** Until Dockyard is released to a module
+registry, a scaffold's `go.mod` carries a `replace` directive but no
+`go.sum`. Run `go mod tidy` once, plus `dockyard generate` to
 materialise the JSON Schema + TypeScript sidecars (the template ships
 the Go contracts; the generated sidecars are not checked in):
 
@@ -36,7 +35,7 @@ dockyard generate
 Then:
 
 ```bash
-# 1) Local dev loop — the inspector renders the App, the obs/v1 stream
+# 1) Local dev loop — the inspector renders the App, the Logbook stream
 #    shows task progress events, the Tasks panel shows the lifecycle.
 dockyard dev
 
@@ -49,13 +48,12 @@ dockyard run --transport http         # streamable-HTTP on 127.0.0.1:8080
 
 The scaffolded `cmd/server/main.go` constructs a real `tasks.Engine`
 over an in-memory `TaskStore` and attaches it via
-`server.Options.Tasks` (RFC §8.4; remediation R2 / D-108). The
-template ships the stdio posture: `RequestorIdentifiable=false`, so
-`tasks/list` is not advertised (brief 02 §4.5). For HTTP with real
-authentication, pass an `AuthContextFunc` to `WithTasks` that
-derives the requestor's identity from the bearer token; the engine
-then binds tasks to that auth context and serves `tasks/list` scoped
-to it.
+`server.Options.Tasks`. The template ships the stdio posture:
+`RequestorIdentifiable=false`, so `tasks/list` is not advertised
+(unauthenticated single-user mode). For HTTP with real authentication,
+pass an `AuthContextFunc` to `WithTasks` that derives the requestor's
+identity from the bearer token; the engine then binds tasks to that
+auth context and serves `tasks/list` scoped to it.
 
 ## Swap to a real decision store
 

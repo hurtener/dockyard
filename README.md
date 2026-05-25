@@ -1,190 +1,297 @@
 <p align="center">
-  <img src="docs/design/logo-svg.svg" alt="Dockyard" width="220" />
+  <img src="./docs/design/logo.png" alt="Dockyard" width="180" />
 </p>
 
 <h1 align="center">Dockyard</h1>
 
 <p align="center">
-  <em>The paved road for production-grade MCP Apps.</em>
+  <strong>Build production MCP Servers and MCP Apps in Go.</strong>
 </p>
 
 <p align="center">
-  Portico connects · Harbor reasons · <strong>Dockyard presents</strong>.
+  Typed tools. Embedded UI. Local inspection. Observable by default. One static binary.
+</p>
+
+<p align="center">
+  <a href="https://hurtener.github.io/dockyard/">Docs</a>
+  ·
+  <a href="#quickstart">Quickstart</a>
+  ·
+  <a href="#templates">Templates</a>
+  ·
+  <a href="#the-dockyard-loop">The Dockyard loop</a>
+  ·
+  <a href="#contributing">Contributing</a>
 </p>
 
 ---
 
-Dockyard is a Go-native framework for building **MCP servers and MCP Apps** —
-the side an agent's user actually sees. You write typed Go tool handlers. The
-toolchain generates the JSON Schema, the TypeScript types, the fixtures, and a
-local inspector that renders your App against a real running server. One
-command produces a CGo-free static binary with the UI embedded.
+Dockyard is a Go-native framework for building MCP servers with rich, interactive
+MCP Apps. It is for the moment when a tool stops being a demo and starts becoming
+software: it needs typed contracts, UI states, fixtures, validation, observability,
+packaging, and a way to debug the whole thing locally before a host ever renders it.
 
-It's opinionated on purpose. Every MCP App project gets the same set of paved
-roads — contract-first codegen, an observability protocol the runtime emits
-natively, a sandboxed-iframe App bridge with explicit CSP, MCP Tasks with
-`input_required` elicitation, a dev loop with one process tree — so the
-interesting work is the App, not the plumbing.
+You write Go handlers and Svelte views. Dockyard generates the protocol contracts,
+TypeScript types, fixtures, embedded UI resources, and local inspection surface
+around them.
 
-## What it looks like
+<p align="center">
+  <img src="./docs/screenshots/analytics-widgets/chart.png" alt="Dockyard inspector previewing an analytics-widgets chart against a live MCP server" width="850" />
+</p>
 
-The two V1 templates ship as real, runnable proofs: `analytics-widgets` (a
-chart + table + metric-card pack) and `approval-flows` (human-in-the-loop
-approve/edit with MCP Tasks). Both render in the local inspector against a
-scaffolded server:
+<p align="center">
+  <sub>The local inspector rendering a real <code>create_chart</code> call against a scaffolded MCP server.</sub>
+</p>
+
+## A Dockyard tool, in full
+
+```go
+type GetWeatherInput struct {
+    City string `json:"city" jsonschema:"required"`
+}
+
+type GetWeatherOutput struct {
+    Temperature float64 `json:"temperature"`
+    Conditions  string  `json:"conditions"`
+}
+
+func GetWeather(ctx context.Context, in GetWeatherInput) (tool.Result[GetWeatherOutput], error) {
+    // ...your code...
+}
+```
+
+That struct pair is the source of truth. `dockyard generate` produces the JSON
+Schema the host validates against, the TypeScript types the App consumes, and
+the fixture scaffolds the inspector renders. `dockyard validate` fails if any of
+them drift. You never hand-maintain a schema or a TypeScript shadow contract;
+the toolchain does.
+
+## Why Dockyard exists
+
+MCP makes tools available to agents. MCP Apps make those tools visible to users.
+That second part changes the job.
+
+A useful App is not just a tool result with some HTML attached. It needs a
+contract between the server and the UI. It needs loading, empty, error,
+permission, slow, and large-data states. It needs fixtures so the App is
+testable before the backend is finished. It needs safe iframe boundaries. It
+needs host-compatibility. It needs a way to see what the server emitted and why
+the UI rendered what it rendered.
+
+Without a framework, every team rebuilds that plumbing differently — and most
+teams ship the happy path first and learn the edge cases in production.
+
+So Dockyard handles it for you:
+
+- Go structs are the source of truth.
+- JSON Schema and TypeScript types are generated.
+- UI resources are embedded into the server binary.
+- Apps render through a sandboxed bridge with deny-by-default CSP.
+- Tasks and human-in-the-loop flows are first-class.
+- The runtime emits **Logbook** — a native observability stream the inspector
+  reads directly.
+- The inspector debugs tools, fixtures, JSON-RPC, Tasks, and UI in one place.
+- `dockyard validate` catches drift before users do.
+
+The protocol is the foundation. Dockyard is the product layer above it.
+
+## What you can build
+
+```text
+MCP server = tools + resources + prompts
+MCP App    = server + ui:// views the host renders
+MCP Tasks  = task-augmented tools, human-in-the-loop  (experimental spec)
+```
+
+Start with a server. Add a UI when the tool deserves one. Pause for user input
+when a tool needs approval — Tasks is a first-class extension Dockyard already
+supports end to end, with the caveat that the spec itself is still experimental
+upstream. Ship all three shapes as the same single binary. Good fits include
+analytics widgets, approval and review flows, internal business apps exposed
+through MCP, dashboards inside chat, and any agent-facing tool that needs a
+user-facing surface.
+
+## Templates
+
+Two ready-to-fork starting points covering both halves of MCP Apps — scaffold
+one, run it, remix it into your own project:
 
 <table>
 <tr>
-  <td align="center" width="50%">
-    <img src="docs/screenshots/analytics-widgets/chart.png"
-         alt="Analytics-widgets chart rendered in the inspector"
-         width="100%" />
-    <sub><code>create_chart</code> — happy fixture, rendered live</sub>
+  <td width="50%" valign="top">
+    <p align="center">
+      <img src="./docs/screenshots/analytics-widgets/chart.png" alt="analytics-widgets" width="100%" />
+    </p>
+    <h3 align="center"><code>analytics-widgets</code></h3>
+    <p>The read-side template: charts, tables, and metric cards rendered
+    inline in the host's chat. Exercises the contract-first path end to end —
+    Go output → JSON Schema → TypeScript → fixtures → Svelte App → embedded
+    <code>ui://</code> resource → inspector preview.</p>
+    <p><em>Reach for it when the App is data-first.</em></p>
   </td>
-  <td align="center" width="50%">
-    <img src="docs/screenshots/phase-25/tasks-panel-live.png"
-         alt="Approval-flows Tasks panel showing the input_required lifecycle"
-         width="100%" />
-    <sub><code>request_approval</code> — full input_required lifecycle</sub>
+  <td width="50%" valign="top">
+    <p align="center">
+      <img src="./docs/screenshots/phase-25/tasks-panel-live.png" alt="approval-flows" width="100%" />
+    </p>
+    <h3 align="center"><code>approval-flows</code></h3>
+    <p>The write-side template: human-in-the-loop approve / reject / edit
+    flows over MCP Tasks. Demonstrates the <code>input_required</code>
+    lifecycle, editable proposals, and the task timeline rendered live in
+    the inspector.</p>
+    <p><em>Reach for it when a tool needs the user's go-ahead before acting.</em></p>
   </td>
 </tr>
 </table>
 
-The inspector isn't a separate tool you run alongside development — it's the
-debug surface: rail tabs for the live `obs/v1` stream, the JSON-RPC log,
-fixtures wired to the generated contracts (so the App's six UI states are
-exercisable before a backend exists), per-tool latency / error analytics,
-contract-drift verdicts, the task lifecycle as a Timeline. Operator
-parameter-driven tool invocation is one click away.
+```bash
+dockyard new --template analytics-widgets ~/my-widgets
+dockyard new --template approval-flows    ~/my-approvals
+```
 
-## Try it
+## The Dockyard loop
 
-Dockyard isn't published yet. Until then you build the CLI from this repo and
-point a new project at it via `--dockyard-path`:
+**Scaffold + generate.** `dockyard new --template <name>` materialises a real
+project with typed contracts, generated JSON Schema + TypeScript, fixtures, and
+an embedded App. `dockyard generate` keeps the generated artifacts in sync as
+the contracts evolve.
 
-```sh
-git clone https://github.com/hurtener/dockyard
-cd dockyard
-make build                            # produces ./bin/dockyard, CGo-free
+**Develop with the inspector.** `dockyard dev` runs the live-reload loop and
+opens the local inspector. The inspector renders your App against the real
+running server — not a mock viewer. Switch between fixture states, invoke tools
+with operator-provided parameters, watch the Logbook stream, step through a
+Task's `input_required` round-trip, and verify the App in its sandboxed iframe
+before any host sees it.
 
-# scaffold + run a real, working example
-./bin/dockyard new --template analytics-widgets ~/widgets-demo \
-    --dockyard-path "$(pwd)"
+**Validate + package.** `dockyard validate` catches contract drift, stale
+generated files, missing UI states, unsafe App settings, and spec-compliance
+issues — the failures users would otherwise hit. `dockyard build` produces a
+single CGo-free Go binary with the UI embedded. The same artifact runs over
+stdio, over HTTP, or wherever your transport story lands; the choice is at
+runtime, not baked into the build.
+
+## Quickstart
+
+> Replace `@main` with `@v1.0.0` after the first release tag is published.
+
+```bash
+go install github.com/hurtener/dockyard/cmd/dockyard@main
+dockyard --help
+```
+
+Scaffold and run the analytics template:
+
+```bash
+dockyard new --template analytics-widgets ~/widgets-demo
 cd ~/widgets-demo
-go mod tidy                           # one-time, pre-publish workflow (D-139)
-"$(pwd | sed 's|/widgets-demo||')/dockyard/bin/dockyard" generate
-"$(pwd | sed 's|/widgets-demo||')/dockyard/bin/dockyard" build
-
-# in one terminal: serve over HTTP
-DOCKYARD_TRANSPORT=http DOCKYARD_HTTP_ADDR=127.0.0.1:8080 ./bin/widgets-demo
-
-# in another terminal: attach the inspector
-"$(pwd | sed 's|/widgets-demo||')/dockyard/bin/dockyard" inspect \
-    --url http://127.0.0.1:8080/mcp --dir .
+go mod tidy
+dockyard generate
+dockyard build
 ```
 
-The full walkthrough — with the second template, the dev loop, contract-first
-authoring, and the inspector's deeper features — lives in the docs site (see
-below). The `scaffold-a-server` agent skill in [`skills/`](skills/) covers the
-same ground for AI coding agents.
+Serve the generated MCP server over HTTP and attach the inspector:
 
-## What's shipped
+```bash
+DOCKYARD_TRANSPORT=http \
+DOCKYARD_HTTP_ADDR=127.0.0.1:8080 \
+./bin/widgets-demo &
 
-| | Status |
-| --- | --- |
-| **MCP server core** — transports (stdio + streamable HTTP), the explicit `HTTPSecurity` posture, the typed handler runtime with panic guards | ✅ |
-| **Contract-first codegen** — Go struct → JSON Schema + TypeScript; `dockyard validate` fails on drift | ✅ |
-| **MCP Apps extension** — `ui://` resources, `//go:embed` pipeline, host profiles (Claude signed-origin derivation), Svelte bridge | ✅ |
-| **MCP Tasks extension** — five-state lifecycle, durable `TaskStore`, `TaskHandle` API, `input_required` elicitation, real transport mount | ✅ |
-| **Observability protocol** (`obs/v1`) — non-blocking emitter, ring buffer, out-of-band SSE sink, optional OTel adapter, log bridge | ✅ |
-| **`dockyard` CLI** — `new`, `generate`, `validate`, `build`, `run`, `install`, `dev`, `test`, `inspect` | ✅ |
-| **Local inspector** — App preview, live obs stream, JSON-RPC log, fixtures, operator tool invocation, capability emulation, task lifecycle | ✅ |
-| **Two V1 templates** — `analytics-widgets`, `approval-flows` | ✅ |
-| **Shared design system** (`web/ui/`) — typed Svelte component inventory, design tokens, four-state PageState rule | ✅ |
-| **Agent skills + published docs site** — `SKILL.md`-format onboarding, VitePress site deployed by CI | ✅ |
-| **Security pass + spec-compliance conformance** | 🟡 in progress (Phase 27) |
-| **V1 cut** | ⏳ Phase 30 |
-
-The full phase plan is in [`docs/plans/README.md`](docs/plans/README.md);
-settled architectural decisions are append-only in
-[`docs/decisions.md`](docs/decisions.md).
-
-## The four properties
-
-Four things are non-negotiable across the build. They're enforced in code, not
-just claimed in prose:
-
-1. **Contract-first.** A tool's input and output are typed Go structs. JSON
-   Schema, TypeScript types, and fixtures are *generated*. `dockyard validate`
-   fails on stale or drifted generated output. There is no hand-written
-   contract schema anywhere in the repo and no PR that introduces one will
-   merge.
-2. **Observability is a protocol.** The runtime emits the canonical `obs/v1`
-   event stream. The inspector is a pure client of that contract; no component
-   reads runtime internals to observe. OpenTelemetry export is an optional
-   adapter, off by default — never a prerequisite to see what your server is
-   doing.
-3. **Forward-compatibility by isolation.** MCP extension wire formats live in
-   exactly one package (`internal/protocolcodec`). A spec bump is a vendored-
-   snapshot update + a regenerate-and-diff in that package; handler-facing and
-   manifest-facing APIs never see a raw protocol struct. A boundary test walks
-   the whole module to enforce it.
-4. **Server-side only.** Dockyard builds MCP *servers* and Apps. Harbor owns
-   the MCP client. The one client-shaped component — the inspector — is a
-   local, dev-mode-gated, localhost-bound test surface; it refuses any non-
-   loopback bind before the listener opens. There is no production MCP client
-   in the shipped artifact.
-
-## The ecosystem
-
-Dockyard is the third product in a three-part agent platform:
-
-```text
-Portico  — the MCP gateway        (connects and governs tools)
-Harbor   — the agent framework    (builds and runs agents; owns the MCP client)
-Dockyard — the MCP Apps framework (builds the MCP servers and apps users touch)
+dockyard inspect \
+  --url http://127.0.0.1:8080/mcp \
+  --dir .
 ```
 
-The split keeps responsibilities sharp: Portico is the network seam, Harbor
-owns the agent loop, Dockyard owns the experience your users actually touch.
-Each one is usable independently; together they're the paved-road production
-stack.
+## Core ideas
 
-## Repository map
+**Contract-first.** A Dockyard tool starts with typed Go structs. Those structs
+generate the JSON Schema the MCP host sees and the TypeScript types the App
+uses. The UI does not hand-maintain a shadow contract. If generated output is
+stale or drifted, validation fails before a build can ship.
 
-| Path | What lives here |
-| --- | --- |
-| `RFC-001-Dockyard.md` | The design source of truth — re-read it before you propose a structural change. |
-| `cmd/dockyard/` | The `dockyard` CLI binary entrypoint. |
-| `internal/` | CLI and generator internals (cobra tree, scaffold, codegen, validate, devloop, inspector, build/run/install pipelines, the `protocolcodec` extension seam). |
-| `runtime/` | The runtime library a generated server imports (server core, tool handler runtime, Apps, Tasks, obs, store). |
-| `web/` | The shared frontend: `ui/` (the design system), `bridge/` (the `ui/` postMessage View half), `inspector/` (the inspector's Svelte app). |
-| `templates/` | The two V1 templates, embedded into the CLI. |
-| `skills/` | Agent skills in the `SKILL.md` format — onboarding for AI coding agents. |
-| `docs/site/` | The VitePress docs site sources (built and deployed to GitHub Pages by CI). |
-| `docs/plans/`, `docs/research/`, `docs/decisions.md`, `docs/glossary.md` | The doc-driven build artifacts — phase plans, research briefs, the append-only decision log, the vocabulary. |
-| `AGENTS.md` / `CLAUDE.md` | Contributor & agent normatives (binding, kept verbatim-identical). |
+**Apps are server resources.** Dockyard treats an MCP App as an MCP server with
+one or more `ui://` resources. The UI is built, bundled, embedded, served
+through `resources/read`, and linked to tools through App metadata. The App
+runs in a sandboxed iframe behind a deny-by-default CSP and talks to the host
+through the Dockyard bridge.
+
+**Logbook — observability built in.** Every Dockyard server emits Logbook, a
+canonical, versioned event stream covering tool calls, resource reads, App
+lifecycle, Tasks transitions, prompt invocations, and server diagnostics. The
+inspector is a Logbook client; the optional OpenTelemetry adapter is another
+Logbook client. Understanding what your server is doing is not a separate tier
+of the stack — it ships in the box, on by default, with W3C trace propagation
+already wired so a calling agent's trace context flows through.
+
+**Tasks are first-class.** Dockyard supports task-augmented tools and the
+`input_required` lifecycle used by human-in-the-loop Apps. A tool can pause
+for user input, render a form, resume from the iframe, and expose the whole
+lifecycle to the inspector — without the developer hand-rolling the
+elicitation choreography.
+
+**One artifact.** A Dockyard project builds to a single static Go binary with
+the UI embedded. No separate Node server. No runtime web-asset folder. No CGo
+requirement. No separate frontend deploy just to render an MCP App.
+
+## Where Dockyard fits
+
+Dockyard is the server side of MCP. Not the agent loop, not the production
+client, not a gateway, not a hosted cloud — those are different jobs, and
+trying to do all of them would mean doing none of them well. The local
+inspector is the one place Dockyard talks like a client, and it stays on your
+laptop: it refuses any non-loopback bind before its listener opens, and it
+only fires a state-changing call when you click one.
+
+For the agent side, look at Harbor — Dockyard's sibling framework in the same
+family.
 
 ## Documentation
 
-- **Docs site** — getting started, the CLI reference (auto-rendered from the
-  cobra command tree), the agent skills index, the RFC, the decisions log:
-  https://hurtener.github.io/dockyard/ *(deploys on `main` push)*
-- **Agent skills** — `skills/` ships eight `SKILL.md` files (`scaffold-a-server`,
-  `add-a-tool`, `attach-a-ui-resource`, `define-contracts`, `run-the-dev-loop`,
-  `validate`, `package`, `test-with-the-inspector`) so an AI coding agent is
-  productive with Dockyard from day one.
+The published documentation site covers getting started, the CLI reference
+(auto-generated from the command tree), template walkthroughs, design
+conventions, the agent skills, the RFC, the decisions log, and the glossary.
+
+**Start here:** https://hurtener.github.io/dockyard/
+
+## Build from source
+
+To work from a local checkout (and to scaffold projects that reference your
+working tree before the first published tag):
+
+```bash
+git clone https://github.com/hurtener/dockyard
+cd dockyard
+make build
+./bin/dockyard --help
+```
+
+Use the local CLI to scaffold a project against your checkout:
+
+```bash
+./bin/dockyard new --template analytics-widgets ~/widgets-demo \
+  --dockyard-path "$(pwd)"
+cd ~/widgets-demo
+go mod tidy
+dockyard generate
+dockyard build
+```
 
 ## Contributing
 
-[`AGENTS.md`](AGENTS.md) is binding for anyone — human or AI — modifying this
-repository. Build, test, and lint via the `Makefile` (`make help`); the
-`make preflight` gate runs in CI and as a pre-commit hook
-(`make install-hooks`).
+Dockyard is built doc-first. Research briefs, RFCs, plans, and architectural
+decisions live in the repository — if you change the framework shape, update
+the design record with the code.
 
-The project uses a doc-driven methodology — research briefs → RFC → master
-phase plan → phased implementation. Every architectural decision lands in
-`docs/decisions.md` with a number; that log is the institutional memory.
+Before opening a PR:
+
+```bash
+make preflight
+```
+
+Human and AI contributors should read:
+
+- [`AGENTS.md`](AGENTS.md)
+- [`CLAUDE.md`](CLAUDE.md)
+- [`RFC-001-Dockyard.md`](RFC-001-Dockyard.md)
+- [`docs/decisions.md`](docs/decisions.md)
 
 ## License
 

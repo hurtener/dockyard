@@ -135,6 +135,72 @@ if [ -d skills ] && [ -d docs/site ]; then
       fi
     done
   fi
+
+  # 6e. User-facing surfaces must not carry Dockyard's internal phase
+  #     vocabulary. "Phase N" prose ("Phase 24 shipped X", "added in
+  #     Phase 28") refers to Dockyard's internal build methodology and
+  #     tells a user nothing about what the framework does. The check
+  #     scans every user-facing surface for the prose pattern and fails
+  #     on a hit. Contributor-facing paths (RFC, plans, decisions,
+  #     glossary, design-spec, CONVENTIONS, AGENTS.md/CLAUDE.md,
+  #     Makefile, workflows, internal/) are intentionally excluded —
+  #     phase wording is the right vocabulary there.
+  #
+  #     The regex matches capital-P prose only ('\bPhase [0-9]+\b').
+  #     The lowercase `phase-NN` form is path-shaped (screenshot
+  #     directories, smoke-script filenames) and is filesystem
+  #     metadata, not user-facing prose — those are intentionally not
+  #     flagged.
+  user_facing_md=(README.md CHANGELOG.md)
+  for d in docs/site examples templates; do
+    [ -d "$d" ] || continue
+  done
+  # Build the user-facing file set explicitly; do not glob the build
+  # artefact tree (docs/site/.vitepress/dist/) or config files.
+  user_facing_files=()
+  [ -f README.md ] && user_facing_files+=(README.md)
+  [ -f CHANGELOG.md ] && user_facing_files+=(CHANGELOG.md)
+  if [ -d docs/site ]; then
+    while IFS= read -r f; do
+      user_facing_files+=("$f")
+    done < <(find docs/site -type f -name '*.md' \
+      -not -path 'docs/site/.vitepress/dist/*' \
+      -not -path 'docs/site/node_modules/*' \
+      | sort)
+  fi
+  if [ -d examples ]; then
+    while IFS= read -r f; do
+      user_facing_files+=("$f")
+    done < <(find examples -mindepth 2 -maxdepth 2 -type f -name 'README.md' | sort)
+  fi
+  if [ -d templates ]; then
+    while IFS= read -r f; do
+      user_facing_files+=("$f")
+    done < <(find templates -mindepth 2 -maxdepth 2 -type f -name 'README.md.tmpl' | sort)
+  fi
+  for f in "${user_facing_files[@]}"; do
+    if grep -nE '\bPhase [0-9]+\b' "$f" >/dev/null 2>&1; then
+      while IFS= read -r hit; do
+        note "AGENTS.md §19 (user-facing vocabulary): ${f}: ${hit}"
+      done < <(grep -nE '\bPhase [0-9]+\b' "$f")
+    fi
+  done
+
+  # 6f. Template README.md.tmpl files scaffold into user projects.
+  #     A scaffolded user's project README should be 100% about that
+  #     project, not Dockyard's internal decision numbering. D-NNN
+  #     citations are acceptable in docs/site/ and examples/ (they
+  #     cross-link the public decisions reference page); they are not
+  #     acceptable in templates/*/README.md.tmpl.
+  if [ -d templates ]; then
+    while IFS= read -r f; do
+      if grep -nE 'D-[0-9]{3}' "$f" >/dev/null 2>&1; then
+        while IFS= read -r hit; do
+          note "AGENTS.md §19 (template-README D-NNN): ${f}: ${hit}"
+        done < <(grep -nE 'D-[0-9]{3}' "$f")
+      fi
+    done < <(find templates -mindepth 2 -maxdepth 2 -type f -name 'README.md.tmpl' | sort)
+  fi
 elif [ -d skills ] && [ ! -d docs/site ]; then
   note "skills/ exists but docs/site/ does not — §19 requires both"
 elif [ ! -d skills ] && [ -d docs/site ]; then

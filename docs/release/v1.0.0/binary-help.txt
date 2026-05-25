@@ -1,0 +1,31 @@
+Dockyard is a Go-native framework for building production-grade
+MCP Servers and MCP Apps. It ships as one static, CGo-free binary: scaffold a
+server, write typed Go tool handlers, and get generated contracts, a local
+inspector, quality gates, and one-command packaging.
+
+Phase 17 shipped the command tree and 'dockyard new'; Phase 18 added 'generate'
+and 'validate'; Phase 19 added 'dev'; Phase 20 added 'build', 'run' and
+'install'; Phase 21 adds 'test' — completing the command tree.
+
+Usage:
+  dockyard [flags]
+  dockyard [command]
+
+Available Commands:
+  build       Build the project into a CGo-free static binary with the UI embedded
+  completion  Generate the autocompletion script for the specified shell
+  dev         Run the project's dev loop — watch, regenerate, restart
+  generate    Regenerate JSON Schema and TypeScript from Go contracts
+  help        Help about any command
+  inspect     Attach the local inspector to a running MCP server
+  install     Register the built server with an MCP host (Claude, Cursor)
+  new         Scaffold a new MCP server project
+  run         Build and run the project's MCP server on a transport
+  test        Run the contract + compliance gate (go test, contracts, spec, capability)
+  validate    Run the project quality gates (manifest, schemas, mappings, spec)
+
+Flags:
+  -h, --help      help for dockyard
+  -v, --version   version for dockyard
+
+Use "dockyard [command] --help" for more information about a command.

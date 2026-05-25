@@ -1,0 +1,199 @@
+name: release
+
+# Dockyard V1 release pipeline (Phase 30).
+#
+# Triggered by a `v*` tag push (the user-facing release moment, per
+# docs/RELEASING.md) and by `workflow_dispatch` (the dry-run path a
+# maintainer uses to verify the pipeline without publishing).
+#
+# Pipeline shape, in order:
+#
+#   1. preflight  — runs `make preflight`, the same gate the pre-commit
+#                   hook and the CI workflow enforce. A failed preflight
+#                   stops the release before any artifact is built; a
+#                   failed release is no release, not a partial one
+#                   (the acceptance bar).
+#   2. build      — drives `internal/releasebuild` to cross-compile the
+#                   RFC §14 matrix (darwin/linux/windows × amd64/arm64),
+#                   write per-artifact SHA-256 sidecars, and emit the
+#                   aggregate `checksums.txt`. On a `workflow_dispatch`
+#                   run the `-host-only` flag narrows the matrix to the
+#                   runner's GOOS/GOARCH so dry-runs stay fast and
+#                   CGo-free.
+#   3. release    — extracts the CHANGELOG section for the tag's version
+#                   (via `internal/changelogx`) and creates / updates a
+#                   GitHub Release with every artifact attached. The
+#                   action's update-on-existing behaviour is what makes
+#                   the workflow idempotent against re-runs.
+#
+# The workflow only creates a GitHub Release when the trigger is a tag
+# push — `workflow_dispatch` runs stop after building artifacts and
+# uploading them as a workflow run artifact (a maintainer downloads them
+# from the run page to audit).
+#
+# Pinned versions match .github/workflows/ci.yml so the release and the
+# rest of the toolchain age together.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry-run-version:
+        description: 'Version to compile under (workflow_dispatch only; "vX.Y.Z" — no GitHub Release is created).'
+        required: false
+        default: 'v0.0.0-dryrun'
+
+# Pre-Phase-30 CI runs without elevated permissions; the release workflow
+# needs `contents: write` on the release job to create the GitHub Release.
+# `actions/upload-artifact` only needs read.
+permissions:
+  contents: read
+
+concurrency:
+  # One release run per tag at a time; a second `git push` of the same
+  # tag (or a re-run from the UI) supersedes a previous in-flight build.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: preflight gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/bridge/package-lock.json
+            web/ui/package-lock.json
+            web/inspector/package-lock.json
+      # `make preflight` builds, runs every per-phase smoke, and runs
+      # drift-audit. It is the project's canonical release gate (CLAUDE.md
+      # §4.1); a release that did not pass it would silently ship.
+      - run: make preflight
+
+  build:
+    name: build cross-compile matrix
+    needs: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+      # Compute the release version once, from the tag (push) or the
+      # workflow input (dispatch). Every downstream step reads this.
+      - id: version
+        name: compute release version
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            v="${GITHUB_REF##refs/tags/}"
+          else
+            v="${{ github.event.inputs.dry-run-version }}"
+          fi
+          echo "version=${v}" >> "$GITHUB_OUTPUT"
+          echo "release version: ${v}"
+      # The build step is the same `internal/releasebuild` driver that
+      # is unit-tested in-tree. We narrow to the host target on a
+      # `workflow_dispatch` so a dry-run completes quickly; the real
+      # tag-push runs the full RFC §14 matrix.
+      - name: build cross-compile matrix
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          if [ "${{ github.event_name }}" = "push" ]; then
+            go run ./internal/releasebuild/cmd/releasebuild \
+              -version "${{ steps.version.outputs.version }}" \
+              -output dist/release
+          else
+            go run ./internal/releasebuild/cmd/releasebuild \
+              -version "${{ steps.version.outputs.version }}" \
+              -output dist/release \
+              -host-only
+          fi
+      # Verify the aggregate checksums against the published binaries;
+      # this is the same `sha256sum -c checksums.txt` step a downloader
+      # runs, so a release that fails it must not publish.
+      - name: verify checksums
+        run: |
+          set -euo pipefail
+          cd dist/release
+          sha256sum -c checksums.txt
+          ls -la
+      # Extract the CHANGELOG section for the tag's version. On a
+      # workflow_dispatch dry-run, we look up the Unreleased section
+      # instead — the dispatch version usually has no corresponding
+      # entry yet.
+      - name: extract release notes
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            go run ./internal/changelogx/cmd/changelogx \
+              -version "${{ steps.version.outputs.version }}" \
+              -out dist/release/RELEASE_NOTES.md
+          else
+            go run ./internal/changelogx/cmd/changelogx \
+              -version "Unreleased" \
+              -out dist/release/RELEASE_NOTES.md
+          fi
+          head -30 dist/release/RELEASE_NOTES.md
+      - name: upload artifacts (workflow run artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dockyard-${{ steps.version.outputs.version }}
+          path: dist/release/
+          retention-days: 14
+
+  release:
+    name: create / update GitHub Release
+    needs: build
+    # Only a real tag push creates a GitHub Release. workflow_dispatch
+    # runs stop after the build step uploaded the artifacts.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dockyard-${{ needs.build.outputs.version }}
+          path: dist/release/
+      # Recompute the per-artifact checksums against the downloaded
+      # files as a belt-and-braces — the in-build verify step already
+      # passed, but a corrupt artifact-download path is a known failure
+      # mode in long-running GitHub Actions and re-verification is
+      # cheap.
+      - name: re-verify checksums
+        run: |
+          set -euo pipefail
+          cd dist/release
+          sha256sum -c checksums.txt
+      # softprops/action-gh-release is the upstream-recommended action
+      # for this. `make_latest` makes the v1.0.0 tag the "Latest"
+      # release in the GitHub UI. The action updates an existing
+      # release when the tag already has one (idempotence on re-run).
+      - name: create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.version }}
+          name: ${{ needs.build.outputs.version }}
+          body_path: dist/release/RELEASE_NOTES.md
+          files: |
+            dist/release/dockyard-*
+            dist/release/checksums.txt
+          fail_on_unmatched_files: true
+          make_latest: true
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -59,7 +59,7 @@ done-definition, dependency declarations, and coverage discipline.
 | 27 | Security pass + spec-compliance conformance   | runtime/*, test        | §15, §16         | 01,02,03  | 09, 13, 14    | 90%  | Pending |
 | 28 | Examples, godoc, docs hygiene                 | docs / examples        | §2, §6, §11      | 04        | 01–27         | n/a  | Done    |
 | 29 | Agent skills & published tech-docs site       | skills / docs          | §1, §2           | 04        | 21, 25        | n/a  | Pending |
-| 30 | V1 release engineering + cut                  | release                | §1, §14          | —         | 27, 28, 29    | n/a  | Pending |
+| 30 | V1 release engineering + cut                  | release                | §1, §14          | —         | 27, 28, 29    | n/a  | Shipped |
 
 **V1 critical path:** phases 01–30 plus 10a and 21.5 (32 phases beyond the skeleton),
 grouped into ten waves. Lettered/dotted phases (`10a`, `21.5`) insert work into a band

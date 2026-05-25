@@ -11,8 +11,8 @@ The inspector is Dockyard's local **test + debug** surface
   short-lived per-request MCP client session, and has a documented
   decision entry (D-099 / D-103 / D-131 / D-134) explaining why it stays
   within P4.
-- **A pure `obs/v1` consumer.** It reads no runtime internals — every
-  signal it shows is an emitted `obs/v1` event (P2).
+- **A pure Logbook consumer.** It reads no runtime internals — every
+  signal it shows is an emitted Logbook event (P2).
 - **Wired to your project.** Verdicts re-run `dockyard validate`; the
   Fixtures switcher derives from the project's generated tool
   contracts; the App preview reads the running server's `ui://`
@@ -53,7 +53,7 @@ A non-loopback `--port` host is refused before the listener opens
 | Tools      | All registered tools; fire one (the Operator-Invoke surface, [D-131](/reference/decisions)) |
 | Apps       | Each `ui://` resource rendered in a sandboxed iframe                       |
 | Tasks      | Active + recent tasks rendered as a lifecycle Timeline                     |
-| Events     | The live `obs/v1` stream                                                  |
+| Events     | The live Logbook stream                                                   |
 | Analytics  | Per-tool latency + counts                                                  |
 | Fixtures   | Pick a UI state for the App preview                                        |
 | Verdicts   | Re-runs `dockyard validate`                                                |
@@ -104,7 +104,7 @@ mcp-use's inspector is interactive but **not a test harness** (brief
 no fixture system, no scripted state-switch, no contract drift
 catcher, no host-compatibility matrix. Dockyard's inspector is wired
 to the project — the same checks `dockyard validate` runs, the same
-fixtures `dockyard test` exercises, the same `obs/v1` stream the
+fixtures `dockyard test` exercises, the same Logbook stream the
 runtime emits. The inspector is the interactive face of the same
 quality gates.
 

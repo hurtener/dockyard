@@ -93,11 +93,12 @@ When a phase plan and the RFC drift, the RFC wins. File a follow-up to fix the p
 .
 ├── RFC-001-Dockyard.md          # design RFC — source of truth
 ├── README.md
+├── CHANGELOG.md                 # release notes (Keep a Changelog; D-154)
 ├── AGENTS.md / CLAUDE.md        # this file (verbatim copies)
 ├── LICENSE                      # Apache-2.0
 ├── Makefile                     # canonical build / test / lint commands
 ├── go.mod / go.sum
-├── .github/                     # CI, PR template, codeowners, dependabot
+├── .github/                     # CI, PR template, codeowners, dependabot, release (Phase 30)
 ├── .golangci.yml / .markdownlint.yaml / .editorconfig / .gitignore
 ├── cmd/
 │   └── dockyard/                # the `dockyard` CLI binary entrypoint
@@ -108,7 +109,9 @@ When a phase plan and the RFC drift, the RFC wins. File a follow-up to fix the p
 │   ├── manifest/                # dockyard.app.yaml schema + loader (RFC §4.2)
 │   ├── devloop/                 # `dockyard dev` fsnotify orchestrator (RFC §9.2)
 │   ├── inspector/               # the local inspector (RFC §12)
-│   └── protocolcodec/           # MCP extension wire-format isolation seam (RFC §5.4)
+│   ├── protocolcodec/           # MCP extension wire-format isolation seam (RFC §5.4)
+│   ├── changelogx/              # CHANGELOG.md section extractor (Phase 30; D-157)
+│   └── releasebuild/            # release-pipeline cross-compile driver (Phase 30; D-156)
 ├── runtime/                     # the Dockyard app runtime — a LIBRARY imported by apps
 │   ├── server/                  # MCP server core over go-sdk (RFC §5)
 │   ├── apps/                    # MCP Apps extension layer (RFC §7)
@@ -135,6 +138,9 @@ When a phase plan and the RFC drift, the RFC wins. File a follow-up to fix the p
     ├── design/                  # design system: CONVENTIONS.md, tokens, mockups (§20)
     ├── site/                    # published tech-docs site — VitePress (§19, Phase 29; D-137)
     ├── screenshots/             # in-repo screenshots referenced by docs + PR bodies
+    ├── release/                 # in-tree release dry-run transcripts (Phase 30; D-160)
+    ├── V2-BACKLOG.md            # consolidated post-V1 deferrals (Phase 30; D-158)
+    ├── RELEASING.md             # release procedure for maintainers (Phase 30; D-159)
     ├── decisions.md             # append-only D-NNN log
     └── glossary.md
 ```
@@ -479,6 +485,21 @@ a manifest field, a template, the generated-project shape, a public runtime API 
 **updates the affected skill(s) and the docs in the same PR.** A phase plan whose
 work touches user-facing surface lists the skill/doc updates in its `Files added or
 changed` section. The §14 pre-merge checklist enforces it.
+
+**User-facing vocabulary.** Dockyard's internal phase-by-phase build methodology
+is contributor vocabulary. It lives in `docs/plans/`, `docs/decisions.md`,
+`docs/research/`, the RFC, `AGENTS.md`/`CLAUDE.md`, the glossary, the design-spec,
+CONVENTIONS, Makefile/workflow comments, and internal code. It **must not** bleed
+into user-facing surfaces — the root `README.md`, `CHANGELOG.md`,
+`docs/site/**/*.md`, `examples/*/README.md`, or `templates/*/README.md.tmpl`. User-
+facing surfaces describe what the framework *does* and *is*, not when it was
+built. "Phase N", "phase-N", and similar wording is forbidden on those paths.
+`D-NNN` decision-log citations are acceptable in `docs/site/**/*.md` and
+`examples/*/README.md` (they cross-link the public decisions reference page); they
+are **not** acceptable in `templates/*/README.md.tmpl` (a scaffolded user's project
+README should be 100% about that project, not Dockyard's institutional memory). The
+`drift-audit` script's §19 hook enforces this mechanically; a future regression
+fails CI before merge.
 
 Before Phase 29 lands, `skills/` and the docs site do not yet exist and the rule is
 inert; Phase 29 establishes both and turns the rule on.

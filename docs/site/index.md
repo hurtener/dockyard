@@ -16,8 +16,8 @@ hero:
 features:
   - title: Contract-first
     details: "Typed Go structs are the single source of truth. JSON Schema, TypeScript types, and fixtures are generated — server↔UI drift is caught by the toolchain, not by production users."
-  - title: Observability is a protocol
-    details: "Every server emits a canonical `obs/v1` event stream. The inspector and any future console are pure clients of it. OpenTelemetry export is an optional adapter, never a prerequisite."
+  - title: Observability built in
+    details: "Every server emits Logbook — Dockyard's canonical event stream (wire identifier `obs/v1`). The inspector and any future console are pure clients of it. OpenTelemetry export is an optional adapter, never a prerequisite."
   - title: Server-side only
     details: "Harbor owns the MCP client. Dockyard ships no production client. The lone client-shaped component is the local inspector — dev-mode-gated, localhost-only, read-only."
   - title: Forward-compatible by isolation
@@ -27,6 +27,18 @@ features:
   - title: A real inspector
     details: "Drive your tools by hand, switch fixtures across UI states (happy/empty/error/permission/slow/large), render Apps in a sandboxed iframe, walk a task's lifecycle as a Timeline."
 ---
+
+## Released: v1.0.0
+
+Dockyard is now stable. Install the latest release with one command:
+
+```bash
+go install github.com/hurtener/dockyard/cmd/dockyard@v1.0.0
+```
+
+Full release notes are in [`CHANGELOG.md`](https://github.com/hurtener/dockyard/blob/main/CHANGELOG.md);
+the post-V1 backlog (what comes next) lives in
+[`docs/V2-BACKLOG.md`](https://github.com/hurtener/dockyard/blob/main/docs/V2-BACKLOG.md).
 
 ## Why Dockyard
 

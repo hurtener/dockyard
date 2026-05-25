@@ -4536,3 +4536,366 @@ adds the page under `docs/site/getting-started/<slug>.md` and the
 sidebar entry in the VitePress config — same shape the templates'
 walkthroughs use. The hook continues to require only the index-page
 reference; the walkthrough is additive.
+
+---
+
+## D-154 — `CHANGELOG.md` follows Keep a Changelog and frames every release by the four binding properties
+
+**Date:** 2026-05-25
+**Status:** Settled (Phase 30 — V1 release engineering + cut)
+**Where it lives:** `CHANGELOG.md` (the file itself + its preamble),
+`docs/RELEASING.md` (the "pre-flight" + "post-release verification"
+sections that depend on the format), `internal/changelogx`
+(the parser + extractor — the workflow contract that depends on the
+file's heading shape).
+
+**Why a hand-authored Keep-a-Changelog file, not a generated one.**
+The natural alternatives were:
+
+- A Conventional-Commits-generated changelog (parse PR titles since
+  the previous tag, emit a `### Changed` / `### Fixed` block).
+- A phase-by-phase log (one section per Phase NN).
+
+Both are wrong for the v1.0.0 cut. A generated CC log is a phase-by-
+phase diary in another shape — it lists what landed, not what the
+release means. A phase log is the institutional memory the project
+already has in `docs/plans/` and `docs/decisions.md` — duplicating it
+adds noise without adding signal. The v1.0.0 entry is the
+developer-meets-V1 story; the right frame is the four binding
+properties (P1 contract-first, P2 obs as a protocol, P3
+forward-compatibility by isolation, P4 server-side only — RFC §1).
+
+**The decision.** `CHANGELOG.md` follows
+[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/): a
+top-level title + preamble, an `## [Unreleased]` section, then one
+`## [<version>] - <YYYY-MM-DD>` section per release in
+reverse-chronological order, with a reference-link footer block at
+the bottom. The v1.0.0 entry is framed by P1–P4 as the headline; the
+rest of the entry (runtime, CLI, inspector, templates, DX, quality,
+deferred, acknowledgements) is the supporting structure. Pre-v1.0.0
+history is **not** reconstructed — the phase log is the canonical
+record of how the framework got here.
+
+From v1.1.0 onward the format is open to augmentation: a maintainer
+may prepend a Conventional-Commits-generated PR list under the
+hand-authored prose, but the canonical narrative is hand-authored.
+A future workflow extension that auto-appends the CC list is a
+recorded V2 follow-up (`docs/V2-BACKLOG.md` —
+"Conventional-Commits-generated changelog supplement").
+
+**The heading shape is load-bearing.** The release workflow's
+"extract release notes" step calls `internal/changelogx` against
+`CHANGELOG.md` and the tag's version; the extractor finds the
+matching `## [<version>]` heading and returns the section body. A
+malformed heading is a release-time failure (the workflow blocks
+the GitHub Release creation), so the parser is golden-tested
+against the in-repo `CHANGELOG.md` directly to make a future
+authoring change a unit-test failure instead of a release-time
+failure.
+
+---
+
+## D-155 — The release pipeline is a tag-triggered GitHub Actions workflow with a `workflow_dispatch` dry-run trigger
+
+**Date:** 2026-05-25
+**Status:** Settled (Phase 30 — V1 release engineering + cut)
+**Where it lives:** `.github/workflows/release.yml`,
+`internal/releasebuild` (the workflow's cross-compile driver),
+`internal/changelogx` (the workflow's release-notes source),
+`docs/RELEASING.md` (the operational manual the workflow implements).
+
+**The release pipeline shape.** A push of a tag matching `v*` to
+the repository triggers the `release` workflow:
+
+1. **preflight** — `make preflight`. The same gate the pre-commit
+   hook and CI enforce. A failed preflight stops the release before
+   any artifact is built; a failed release is no release, not a
+   partial one. (The acceptance bar — CLAUDE.md §4.1.)
+2. **build** — drives `internal/releasebuild` against the
+   `cmd/dockyard` main package over the RFC §14 cross-compile matrix
+   (darwin / linux / windows × amd64 / arm64). Each artifact is a
+   CGo-free, statically-linked binary with a per-artifact `.sha256`
+   sidecar; an aggregate `checksums.txt` lets a downloader verify
+   every artifact in one `sha256sum -c` invocation.
+3. **release** — extracts the matching CHANGELOG section via
+   `internal/changelogx` and creates / updates the GitHub Release
+   via `softprops/action-gh-release`. The action is idempotent on
+   re-run; the upstream-recommended path for a release that needs
+   re-uploading or a body fix.
+
+**Why also `workflow_dispatch`.** A maintainer needs to verify the
+pipeline end-to-end without publishing — a real test of "does the
+workflow actually run, does it produce the right shape, does the
+gate fire" before pressing the tag-push button. The dispatch path
+narrows the matrix to the runner's host target (via the
+`releasebuild -host-only` flag) so a dry-run completes in 2–3
+minutes; it stops at artifact upload (the artifacts land as a
+workflow-run artifact, no GitHub Release is created); the body
+extractor looks up the `Unreleased` section instead of the
+nominal version. This is the dry-run sub-goal F of the Phase 30
+spec.
+
+**Why split the build into preflight / build / release jobs.** Three
+isolating reasons:
+
+1. **Caching.** The preflight job's Node + Go cache hits do not
+   need to redo themselves in the release job (which only needs
+   the artifacts). Splitting keeps each job tight.
+2. **Idempotence on re-run.** A failure in the release job can be
+   re-run alone (Re-run failed jobs); the build artifacts are
+   already uploaded. A monolithic job would re-cross-compile.
+3. **Permission scoping.** Only the release job needs
+   `contents: write`; preflight + build run as read-only. A
+   compromised dependency in the (large) build step cannot escalate
+   to write the repo.
+
+**Why `softprops/action-gh-release`.** It is the upstream-
+recommended action for this. The release-update-in-place behaviour
+is what makes the workflow idempotent against re-runs without
+custom logic; the `make_latest` flag does the "tag this as the
+'Latest' release in the UI" step; `fail_on_unmatched_files: true`
+catches a missed-artifact bug at workflow time.
+
+**Knock-on.** Cosign signing + SLSA-provenance attestation are
+deliberate V2 hardening surfaces (`docs/V2-BACKLOG.md` —
+"Signed releases + SLSA provenance"). When they land, they slot
+into the existing release job rather than reshaping the pipeline.
+
+---
+
+## D-156 — `internal/releasebuild` is a thin driver wrapping `go build` for the cross-compile matrix, separate from `internal/buildpkg`
+
+**Date:** 2026-05-25
+**Status:** Settled (Phase 30 — V1 release engineering + cut)
+**Where it lives:** `internal/releasebuild/` (the package + its
+small CLI under `cmd/releasebuild/`).
+
+**Why a new package, not a new `buildpkg` knob.** `internal/buildpkg`
+is the per-project `dockyard build` pipeline: it expects a
+`dockyard.app.yaml` at the project root, runs the codegen +
+validate + Vite stages, then drives `go build` against a Dockyard
+project. The Dockyard repository itself is NOT a Dockyard project
+(there is no `dockyard.app.yaml` at the root); it is the CLI's
+source tree. Folding the release driver into `buildpkg` would
+either pollute the per-project pipeline with a tag-shaped
+artifact-naming branch, or make every per-project Build call
+optionally drive the release flow. Both shapes are worse than two
+small packages with one job each.
+
+**The decision.** `internal/releasebuild` is a small, internal Go
+package + CLI that:
+
+- runs its own per-target `go build` of `./cmd/dockyard` (NOT
+  `buildpkg.Build`), with `CGO_ENABLED=0` and `GOOS`/`GOARCH` set,
+  using the same `-ldflags='-s -w'` flags `make build` uses for
+  the dockyard CLI itself;
+- names each artifact under the release-publish shape
+  (`dockyard-<version>-<os>-<arch>[.exe]`) so the published
+  filename carries the version a user is auditing;
+- writes a per-artifact `.sha256` sidecar in the
+  `sha256sum -c`-compatible line shape (the same convention
+  `buildpkg.writeChecksum` uses, so a release artifact and a
+  developer-built `dockyard build` artifact verify the same way);
+- writes an aggregate `checksums.txt` next to the artifacts, sorted
+  by basename for byte-determinism on a re-run.
+
+**What it re-exports.** `releasebuild.Target` and
+`releasebuild.DefaultMatrix` are aliases for `buildpkg.Target` and
+`buildpkg.DefaultMatrix` — the RFC §14 matrix is one piece of truth;
+the release driver consumes it rather than re-inventing it. This is
+the same principle behind the existing `runtime/server` /
+`runtime/apps` / `runtime/tasks` split: package boundaries by job,
+not by data type.
+
+**Why a separate `cmd/releasebuild/` CLI.** The release workflow
+needs a callable binary, not a Go API; same shape as `cmd/clidocs`
+and `cmd/skillcheck`. The CLI is a thin flag-parser over
+`Release(ctx, opts)` — the testable seam lives in the package,
+not the CLI.
+
+---
+
+## D-157 — `internal/changelogx` parses Keep-a-Changelog with a stdlib-only parser pinned to the in-repo CHANGELOG
+
+**Date:** 2026-05-25
+**Status:** Settled (Phase 30 — V1 release engineering + cut)
+**Where it lives:** `internal/changelogx/` (the package, its tests,
+its CLI under `cmd/changelogx/`).
+
+**Why a stdlib-only parser, not a third-party CommonMark library.**
+The release pipeline's release-body source is the matching
+CHANGELOG section. The parsing surface is tiny — find the `## [v]`
+heading, return the body between it and the next H2, exclude the
+reference-link footer block. A CommonMark library would solve this
+plus a hundred problems we do not have; it would also become a
+transitive-update silent-behaviour risk against a load-bearing
+release-pipeline gate. A small in-tree parser pinned by golden
+tests against the in-repo CHANGELOG turns a future authoring change
+into a unit-test failure (loud, in PR) rather than a release-time
+failure (quiet, at tag push).
+
+**The decision.** `internal/changelogx.ExtractSection(content, version)`
+is a pure-functional, read-only stdlib-only parser. It accepts both
+`v1.0.0` and `1.0.0` on input (canonicalises the trial set
+internally); it returns the body without the H2 heading and without
+the reference-link footer; it returns `ErrSectionNotFound` for a
+missing version and `ErrMalformed` for a structurally-broken file.
+A unit test runs the parser against the actual in-repo
+`CHANGELOG.md` to catch a future authoring change before the
+release workflow does.
+
+**The CLI is exit-code-aware.** The release workflow branches on
+the CLI's exit status: `ErrSectionNotFound` is exit 2 (the most
+likely cause is a forgotten CHANGELOG entry — fail the release
+cleanly), other errors are exit 1 (a broken CHANGELOG or an IO
+fault — investigate before tagging again). This is the same
+exit-code-discipline `dockyard validate` follows for its three
+diagnostic classes.
+
+---
+
+## D-158 — `docs/V2-BACKLOG.md` is the consolidated post-V1 deferral list; new deferrals land here in the same PR
+
+**Date:** 2026-05-25
+**Status:** Settled (Phase 30 — V1 release engineering + cut)
+**Where it lives:** `docs/V2-BACKLOG.md`, `docs/RELEASING.md`
+(the "What the release workflow does NOT do" section that points
+at V2-BACKLOG), `CHANGELOG.md` (the v1.0.0 "Deferred to V2" section
+that cross-references it).
+
+**Why one document, not a label / issue tracker / decision-log
+walk.** Before Phase 30 the post-V1 backlog was scattered across:
+
+- the master plan's "post-V1 follow-ups" paragraph (RFC §19 + the
+  prose at the bottom of `docs/plans/README.md`);
+- individual D-NNN entries documenting deferrals (D-088, D-101,
+  D-108, D-136, D-139, the analytics-widgets / Claude
+  signed-origin synthetic-URL workaround);
+- in-code TODO-shaped notes (`internal/testgate/categories.go`'s
+  syntheticServerURL block).
+
+A developer asking "what comes next" had no single page to read.
+GitHub issues / labels are a credible option but they leave the
+repository's documentation incomplete — and the project's
+methodology is doc-driven (RFC > plans > AGENTS.md > briefs >
+comments). The backlog belongs in the repository's documentation,
+keyed off the decisions log.
+
+**The decision.** `docs/V2-BACKLOG.md` is the canonical post-V1
+backlog. Every recorded post-V1 deferral lives there with: a
+short title; the originating D-NNN (and any related ones); the
+deferral rationale; the criteria a future phase / PR would need to
+meet to claim it (the "definition of done"). New deferrals land
+in V2-BACKLOG in the same PR that records them in
+`docs/decisions.md`. A future phase that wants to ship one of the
+items cites the V2-BACKLOG line in its plan's
+`Files added or changed` section.
+
+**The backlog is themed, not phase-numbered.** Phase numbers close
+at 30 (the V1 critical path). A V2 item that ships post-V1 gets
+its phase number at planning time; the backlog entry then carries
+the assigned phase number so the line stays navigable.
+
+**Knock-on.** The §19 hook is not extended to V2-BACKLOG: the
+backlog is not a user-facing surface (no CLI verb, no manifest
+field, no template, no public runtime API). It is documentation
+hygiene rather than mechanical hygiene; a stale backlog entry is a
+reviewer's catch in the next deferral PR.
+
+---
+
+## D-159 — Semver policy post-v1.0.0: major = breaking, minor = additive, patch = fix; obs/v1 shape bump rides with a major
+
+**Date:** 2026-05-25
+**Status:** Settled (Phase 30 — V1 release engineering + cut)
+**Where it lives:** `docs/RELEASING.md` (the "Semver policy"
+section), `CHANGELOG.md` (the preamble that anchors to
+`docs/RELEASING.md`).
+
+**The decision.** Dockyard follows
+[Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
+Concretely from v1.0.0 onward:
+
+- **Major** — a breaking change to: a public runtime API
+  (`runtime/server`, `runtime/tool`, `runtime/apps`,
+  `runtime/tasks`, `runtime/obs`, `runtime/store`); the
+  `dockyard.app.yaml` manifest schema; a CLI verb (removed or
+  fundamentally reshaped); the `obs/v1` event shape (a structural
+  change requires bumping the `obs/v1` schema version per
+  AGENTS.md §8, and that bump rides with a Dockyard major); or
+  one of the four binding properties (P1–P4) — a P-level change
+  is governed by an RFC PR, not just a major release.
+- **Minor** — an additive feature: a new CLI verb, a new runtime
+  API, a new manifest field with a sensible default, a new
+  template, a new agent skill. Existing users see no behaviour
+  change.
+- **Patch** — a bug fix, a documentation fix, a security fix, a
+  dependency bump that does not change Dockyard's behaviour.
+  Existing users see no API or wire change.
+
+Pre-releases follow semver's pre-release form (`v1.1.0-rc.1`,
+`v2.0.0-beta.1`); the release pipeline accepts them and marks the
+GitHub Release as pre-release (not "Latest").
+
+**Why "lean breaking" in doubt.** A surprise breakage in a minor
+release is worse than a major version bump a user accepts cleanly.
+The "lean breaking" rule sidesteps the temptation to slip a
+mild-looking incompatibility into a minor because "few users will
+notice"; few-users-notice breakages are still breakages.
+
+**Why `obs/v1` shape bump rides with a major.** AGENTS.md §8
+already requires that an `obs/v1` event-shape change is a
+versioned, documented `schema_version` bump (D-074). The wire
+shape is part of Dockyard's public contract; bumping it without a
+Dockyard major would surprise an `obs/v1` consumer (the inspector,
+the post-V1 multi-server console, an OTel exporter that reads the
+event shape). The rule pairs the two bumps so a consumer can rely
+on the Dockyard version to communicate the `obs/v1` shape.
+
+---
+
+## D-160 — The release-pipeline dry-run is captured under `docs/release/v1.0.0/` as the v1.0.0 release artifact
+
+**Date:** 2026-05-25
+**Status:** Settled (Phase 30 — V1 release engineering + cut)
+**Where it lives:** `docs/release/v1.0.0/` (the captured
+transcripts), `docs/plans/phase-30-v1-cut.md` (the acceptance
+criterion that requires them), `scripts/smoke/phase-30.sh` (the
+smoke check that asserts they exist + are non-empty).
+
+**Why capture the dry-run in-tree.** The release pipeline cannot
+be exercised end-to-end against the actual `v1.0.0` tag before
+that tag is pushed (a chicken-and-egg condition); the workflow's
+correctness has to be proven another way. The Phase 30 spec's
+sub-goal F requires a dry-run: building the cross-compile matrix
+locally, confirming the binaries boot, running `make preflight`
+clean from a fresh worktree. The natural way to make that proof
+durable + auditable is to capture the transcripts as part of the
+release artifact set.
+
+**The decision.** Three transcripts + an index land under
+`docs/release/v1.0.0/`:
+
+- `cross-compile-matrix.txt` — the output of the local
+  cross-compile dry-run (the same matrix the workflow drives,
+  produced by the same `internal/releasebuild` driver).
+- `binary-help.txt` — the `--help` output of one of the
+  cross-compiled artifacts, confirming the binary boots.
+- `preflight.txt` — the `make preflight` output from a clean
+  checkout (the release-gate the workflow runs).
+- `README.md` — a one-paragraph index explaining what the captures
+  are + when they were produced.
+
+The smoke script asserts each file is present and non-empty; a
+future release-engineering pass that supersedes Phase 30's
+dry-run posture (a real release-pipeline run against a tag the
+first time) replaces these artifacts with the actual run's
+transcripts — same shape, real source.
+
+**Why not a workflow-side step that writes the transcripts.** A
+workflow-side `gh release upload …` of the workflow's own log is
+plausible, but the workflow's log is already publicly visible on
+the run page; duplicating it is noise. The in-tree captures are
+the V1-cut artifact — proof produced by the maintainer that the
+pipeline really works, durable + audit-friendly in the same
+repository the framework ships in.

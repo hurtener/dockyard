@@ -76,6 +76,21 @@ inspector. RFC §7.2, §7.3. D-016, D-059, D-060, D-061.
 
 ## C
 
+**CHANGELOG** — the top-level `CHANGELOG.md` (Keep a Changelog format,
+Phase 30) recording every Dockyard release. Each version's
+`## [<version>] - <YYYY-MM-DD>` section is the body of the matching
+GitHub Release the `release` workflow creates. The v1.0.0 entry frames
+the V1 story around the four binding properties (P1–P4). The heading
+shape is load-bearing — `internal/changelogx` parses it directly.
+D-154, D-157.
+
+**`changelogx`** — `internal/changelogx`, the in-repo Keep-a-Changelog
+parser + small CLI (`cmd/changelogx`) the release workflow consumes to
+extract one version's section from `CHANGELOG.md` as the GitHub Release
+body. Stdlib-only, pure-functional, golden-tested against the in-repo
+`CHANGELOG.md` directly. Returns `ErrSectionNotFound` (exit 2 in the
+CLI) for a missing version. Phase 30. D-157.
+
 **Capability negotiation** — the MCP `initialize` handshake in which a host
 advertises the extensions and capabilities it supports. Dockyard reads this at run
 time and adapts; it never hardcodes a per-host capability matrix. RFC §7.5. D-011.
@@ -389,7 +404,7 @@ docstring instruction. AGENTS.md §5, §13. D-053.
 
 **Handler span** — the `obs/v1` `tool.call` `SpanContext` that `runtime/server`
 threads onto a tool handler's `context.Context` (via `obs.WithSpan`) so an
-`obs/v1` event emitted from *inside* the handler — most notably a
+Logbook event emitted from *inside* the handler — most notably a
 handler-emitted `log` event through the MCP-logging bridge — derives a child
 span of the enclosing `tool.call` rather than minting an unrelated trace.
 RFC §11.2. D-079.
@@ -418,7 +433,7 @@ AGENTS.md §7. D-040, D-041.
 
 **Inspector** — Dockyard's local, test-only debug surface; the lone client-shaped
 component. It implements the host half of the `ui/` bridge to render Apps locally,
-surfaces the `obs/v1` stream, fixtures, latency analytics, drift verdicts, and
+surfaces the Logbook stream, fixtures, latency analytics, drift verdicts, and
 capability-set emulation. Dev-mode-gated, localhost-only, read-only. RFC §12.
 
 **Inspector backend** — the Go side of the inspector (`internal/inspector`,
@@ -429,9 +444,9 @@ mechanical enforcement of the inspector's localhost-only property (RFC §12, the
 CVE-2025-49596 lesson). D-096.
 
 **Inspector relay** — the `internal/inspector` component that, read-only,
-relays the `obs/v1` SSE stream and a bounded JSON-RPC log to the inspector UI.
+relays the Logbook SSE stream and a bounded JSON-RPC log to the inspector UI.
 It is a pure SSE *client* of `runtime/obs`'s SSE sink (P2 — it consumes the
-public `obs/v1` contract, never runtime internals) and fans the stream to many
+public Logbook contract, never runtime internals) and fans the stream to many
 inspector UI clients without blocking on a slow one. RFC §11, §12. D-096.
 
 **Inspector verdict** — one row of the inspector's Verdicts DetailRail panel: a
@@ -487,7 +502,7 @@ span shape). Dockyard's Phase 16 `OTelEmitter` emits them as the OTel *export
 vocabulary* — `mcp.method.name`, `gen_ai.tool.name`,
 `gen_ai.operation.name=execute_tool`, `mcp.session.id`, `mcp.resource.uri`,
 `network.transport`, `error.type`. The conventions are still "Development"
-upstream, so they are contained in `runtime/obs/otel`; `obs/v1` stays the
+upstream, so they are contained in `runtime/obs/otel`; Logbook stays the
 stable contract. RFC §11.3. brief 05 §3.4. D-076.
 
 **`MigrationSet`** — an explicit, caller-owned, ordered collection of Store
@@ -501,7 +516,7 @@ sub-store exposes its migrations as a fresh set per call (e.g.
 **MCP server core** — the `runtime/server` package: the part of the app runtime
 that wraps the official Go MCP SDK and exposes Dockyard's server construction,
 typed tool registration, and transport serve loop. The settled foundation
-(RFC §5.1, D-002); Dockyard layers Apps, Tasks, and `obs/v1` on top and never
+(RFC §5.1, D-002); Dockyard layers Apps, Tasks, and Logbook on top and never
 forks the SDK. RFC §5. D-019, D-020.
 
 **MCP App** — at the protocol level, an MCP tool carrying `_meta.ui` metadata that
@@ -553,12 +568,21 @@ why it stays within P4. The framing is mechanically guarded by
 `test/integration/phase27_inspector_security_test.go`'s
 `mcp.NewClient` audit. RFC §12. D-144.
 
-**`obs/v1`** — Dockyard's canonical, versioned, public observability event protocol.
-The headless runtime emits it; the inspector and the post-V1 console are pure
-clients. The wire shape of `obs.Event` is pinned by golden tests — a change is a
-versioned, documented `schema_version` bump. RFC §11. D-008, D-074.
+**Logbook** — the public-facing brand for Dockyard's observability protocol.
+A canonical, versioned event stream every Dockyard server emits; the inspector
+reads it directly, the optional OpenTelemetry adapter is another consumer,
+and any third-party tool can subscribe. The wire format identifier is
+`obs/v1` — a media-type-style version string used in code, packages, and on
+the wire (e.g. `runtime/obs`, `obs.Event`); the user-facing name in the
+README, docs site, and CHANGELOG is *Logbook*. The wire shape of `obs.Event`
+is pinned by golden tests — a change is a versioned, documented
+`schema_version` bump. RFC §11. D-008, D-074.
 
-**`obs.Event`** — the one canonical obs/v1 event type (`runtime/obs`): a
+**`obs/v1`** — the wire format identifier for Logbook (the previous entry).
+Kept as a separate glossary entry so a contributor searching for the wire
+string lands on the same definition.
+
+**`obs.Event`** — the one canonical Logbook event type (`runtime/obs`): a
 `schema_version`, an event id, a timestamp, server/session identity, W3C
 trace/span IDs, a `kind`, a `phase`, a typed per-kind `payload`, an optional
 `duration_ms`, and an optional `ErrorInfo`. The only type the inspector and the
@@ -570,7 +594,7 @@ D-074.
 `host.compat`, `log`, `server.lifecycle`, `task.progress`. The set is closed for
 obs/v1; a new kind is a versioned addition. RFC §11.2. D-074.
 
-**Emitter seam** — the obs/v1 interface + factory + driver seam (`obs.Emitter`,
+**Emitter seam** — the Logbook interface + factory + driver seam (`obs.Emitter`,
 `obs.RegisterDriver`, `obs.Open`). The runtime depends only on `obs.Emitter`;
 drivers register a factory in an `init()` block. Phase 15 ships the ring-buffer
 driver; Phase 16's SSE sink and OTel adapter plug in behind the same seam.
@@ -631,6 +655,33 @@ block; the gates are *enforced* by `dockyard validate`. RFC §4.2, §9.4. D-035.
 
 ## R
 
+**Release pipeline** — the `.github/workflows/release.yml` GitHub Actions
+workflow (Phase 30) that turns a `v*` tag push into a published GitHub
+Release. Three jobs: preflight (`make preflight`), build (the RFC §14
+cross-compile matrix via `internal/releasebuild` + per-artifact + aggregate
+SHA-256 checksums), and release (CHANGELOG section extraction via
+`internal/changelogx` + GitHub Release creation via
+`softprops/action-gh-release`). Idempotent on re-run; also triggered by
+`workflow_dispatch` for dry-runs (host-only matrix, no GitHub Release
+created). D-155.
+
+**`releasebuild`** — `internal/releasebuild`, the in-repo cross-compile
+driver the release workflow consumes. Wraps `go build ./cmd/dockyard`
+with `CGO_ENABLED=0` + `GOOS`/`GOARCH` set across the RFC §14 matrix,
+names each artifact under the release-publish shape
+(`dockyard-<version>-<os>-<arch>[.exe]`), writes per-artifact `.sha256`
+sidecars + an aggregate `checksums.txt`. Separate from
+`internal/buildpkg` (which is the per-Dockyard-project build pipeline).
+Phase 30. D-156.
+
+**Release dry-run** — the captured cross-compile-matrix + binary-help +
+`make preflight` transcripts under `docs/release/v1.0.0/`, produced
+locally by the maintainer before pushing the `v1.0.0` tag. Stand-in
+proof the release pipeline works end to end before it can be exercised
+against a real tag. The smoke script asserts the transcripts exist + are
+non-empty; a future release-engineering pass replaces them with the
+actual run's transcripts. Phase 30. D-160.
+
 **Recorder** — the headless obs/v1 emit helper (`obs.Recorder`) a subsystem
 uses to record events without hand-assembling an `obs.Event`. It binds a server
 identity and an `obs.Emitter` once; each event it builds carries the schema
@@ -664,6 +715,14 @@ in the model-facing `Text`). A flag never fails the tool call; it is recorded on
 the tool's `Builder` and read through `Builder.Flags()`. RFC §6.3. D-045.
 
 ## S
+
+**Semver policy** — Dockyard's post-v1.0.0 versioning rule: major =
+breaking (a public runtime API, the manifest schema, a CLI verb, the
+`obs/v1` event shape, a P1–P4 binding property); minor = additive (a
+new CLI verb, a new runtime API, a new manifest field with a sensible
+default, a new template); patch = bug / docs / security fix. The
+`obs/v1` `schema_version` bump rides with a Dockyard major. Documented
+in `docs/RELEASING.md`. D-159.
 
 **Scaffold** — the project tree `dockyard new` generates: the manifest, the
 example contract-first tool, the generated contract artifacts, a runnable
@@ -862,6 +921,13 @@ D-056.
 `text/html;profile=mcp-app`, containing the App's HTML bundle. RFC §7.1.
 
 ## V
+
+**V2 backlog** — `docs/V2-BACKLOG.md`, the consolidated post-V1 deferral
+list (Phase 30). Every recorded post-V1 deferral lives there with: a
+short title, its originating decision number(s), the deferral rationale,
+and the criteria a future phase or PR would need to meet to claim it
+(the "definition of done"). A new deferral lands in V2-BACKLOG in the
+same PR that records it in `docs/decisions.md`. D-158.
 
 **Vendored spec** — an external MCP specification mirrored into
 `docs/specifications/`, pinned by upstream commit SHA + date, so Dockyard's

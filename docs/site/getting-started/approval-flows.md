@@ -1,7 +1,7 @@
 # `approval-flows` — write-side walkthrough
 
 The `approval-flows` template is the canonical Tasks × Apps Dockyard
-example (Phase 25). Two contract-first task-augmented tools driving a
+example. Two contract-first task-augmented tools driving a
 human-in-the-loop round-trip from inside an iframe. The write-side
 counterpart to [`analytics-widgets`](analytics-widgets).
 

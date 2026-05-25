@@ -1,8 +1,7 @@
 # __PROJECT_TITLE__
 
 An MCP server scaffolded from the **`analytics-widgets`** template — Dockyard's
-V1 template that demonstrates inline UI widgets backed by contract-first tools
-(RFC §10, Phase 24).
+template that demonstrates inline UI widgets backed by contract-first tools.
 
 ## What this template ships
 
@@ -10,12 +9,12 @@ One MCP App that exposes three widget tools, each rendered inline in the host's
 chat surface:
 
 - **`create_chart`** — bar / line / area / pie / scatter / radar, rendered with
-  Apache ECharts (decision D-125).
+  Apache ECharts.
 - **`create_table`** — a sortable, paged data table.
 - **`create_metric_card`** — a KPI card with an optional `Sparkline` and
   breakdown rows.
 
-The App declares `display_modes: [inline]` only (decision D-126) and routes
+The App declares `display_modes: [inline]` only and routes
 every widget through the four-state `PageState` (CLAUDE.md §20 —
 loading / empty / error / ready). Each tool's input accepts a `theme?`
 override (`light` / `dark` / `auto`); the default `auto` honours the host's
@@ -38,18 +37,18 @@ theme via `hostContext.styles.variables`.
   typed contract is the integration surface.
 - `web/` — the Svelte App (one file `App.svelte` dispatches on
   `structuredContent.kind`), the per-widget renderers, and the template-local
-  `ChartFrame` that wraps Apache ECharts (decision D-127 — wrappers around
-  third-party fat libs stay template-local, the shared `web/ui` inventory
-  carries only primitives).
+  `ChartFrame` that wraps Apache ECharts (wrappers around third-party fat
+  libs stay template-local; the shared `web/ui` inventory carries only
+  primitives).
 - `fixtures/` — six fixtures per tool (`happy`, `empty`, `error`,
-  `permission`, `slow`, `large`) the inspector's switcher (Phase 23) uses
-  to walk every UI state.
+  `permission`, `slow`, `large`) that the inspector's switcher uses to walk
+  every UI state.
 
 ## Run
 
-**Pre-publish first step (D-139).** Until Dockyard is released to a
-module registry, a scaffold's `go.mod` carries a `replace` directive
-but no `go.sum`. Run `go mod tidy` once, plus `dockyard generate` to
+**Pre-publish first step.** Until Dockyard is released to a module
+registry, a scaffold's `go.mod` carries a `replace` directive but no
+`go.sum`. Run `go mod tidy` once, plus `dockyard generate` to
 materialise the JSON Schema + TypeScript sidecars (the template ships
 the Go contracts; the generated sidecars are not checked in):
 
