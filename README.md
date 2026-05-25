@@ -81,7 +81,7 @@ the UI rendered what it rendered.
 Without a framework, every team rebuilds that plumbing differently — and most
 teams ship the happy path first and learn the edge cases in production.
 
-Dockyard turns those decisions into a paved road:
+So Dockyard handles it for you:
 
 - Go structs are the source of truth.
 - JSON Schema and TypeScript types are generated.
@@ -98,18 +98,23 @@ The protocol is the foundation. Dockyard is the product layer above it.
 ## What you can build
 
 ```text
-MCP server = tools + resources
-MCP App    = tools + resources + ui:// views rendered by the host
+MCP server = tools + resources + prompts
+MCP App    = server + ui:// views the host renders
+MCP Tasks  = task-augmented tools, human-in-the-loop  (experimental spec)
 ```
 
-Start with a server. Add a UI when the tool deserves one. Ship both as the same
-artifact. Good fits include analytics widgets, approval and review flows,
-internal business apps exposed through MCP, dashboards inside chat, and any
-agent-facing tool that needs a user-facing surface.
+Start with a server. Add a UI when the tool deserves one. Pause for user input
+when a tool needs approval — Tasks is a first-class extension Dockyard already
+supports end to end, with the caveat that the spec itself is still experimental
+upstream. Ship all three shapes as the same single binary. Good fits include
+analytics widgets, approval and review flows, internal business apps exposed
+through MCP, dashboards inside chat, and any agent-facing tool that needs a
+user-facing surface.
 
 ## Templates
 
-Dockyard ships two runnable templates as the canonical patterns:
+Two ready-to-fork starting points covering both halves of MCP Apps — scaffold
+one, run it, remix it into your own project:
 
 <table>
 <tr>
@@ -226,18 +231,17 @@ elicitation choreography.
 the UI embedded. No separate Node server. No runtime web-asset folder. No CGo
 requirement. No separate frontend deploy just to render an MCP App.
 
-## Server-side only
+## Where Dockyard fits
 
-Dockyard builds MCP servers and MCP Apps. It does not ship a production MCP
-client, agent runtime, planner, gateway, or hosted cloud. The inspector is the
-only client-shaped component — local-development tooling that refuses any
-non-loopback bind before its listener opens, and that only initiates a
-state-changing call when an operator clicks one.
+Dockyard is the server side of MCP. Not the agent loop, not the production
+client, not a gateway, not a hosted cloud — those are different jobs, and
+trying to do all of them would mean doing none of them well. The local
+inspector is the one place Dockyard talks like a client, and it stays on your
+laptop: it refuses any non-loopback bind before its listener opens, and it
+only fires a state-changing call when you click one.
 
-This boundary is intentional: Dockyard owns the visible software layer of MCP.
-The agent loop and the production MCP client are separate concerns served by
-other tools — including Harbor, the agent framework in the same family — so
-each piece stays focused.
+For the agent side, look at Harbor — Dockyard's sibling framework in the same
+family.
 
 ## Documentation
 
