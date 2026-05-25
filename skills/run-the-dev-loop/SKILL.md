@@ -75,7 +75,7 @@ dockyard inspect --url http://127.0.0.1:8080
 
 (Set `DOCKYARD_TRANSPORT=http` for the HTTP transport if your server
 defaults to stdio.) The inspector renders your App in a sandboxed iframe,
-shows the live `obs/v1` stream, and lets you fire tools from the
+shows the live Logbook stream, and lets you fire tools from the
 Operator-Invoke surface. When the dev loop restarts the server, the
 inspector reconnects automatically.
 

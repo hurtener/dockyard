@@ -16,8 +16,8 @@ hero:
 features:
   - title: Contract-first
     details: "Typed Go structs are the single source of truth. JSON Schema, TypeScript types, and fixtures are generated — server↔UI drift is caught by the toolchain, not by production users."
-  - title: Observability is a protocol
-    details: "Every server emits a canonical `obs/v1` event stream. The inspector and any future console are pure clients of it. OpenTelemetry export is an optional adapter, never a prerequisite."
+  - title: Observability built in
+    details: "Every server emits Logbook — Dockyard's canonical event stream (wire identifier `obs/v1`). The inspector and any future console are pure clients of it. OpenTelemetry export is an optional adapter, never a prerequisite."
   - title: Server-side only
     details: "Harbor owns the MCP client. Dockyard ships no production client. The lone client-shaped component is the local inspector — dev-mode-gated, localhost-only, read-only."
   - title: Forward-compatible by isolation

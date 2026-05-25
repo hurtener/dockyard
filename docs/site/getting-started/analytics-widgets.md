@@ -89,7 +89,7 @@ result through the bridge:
 
 ![operator invoke](/screenshots/phase-24-finish/tools-invoke.png)
 
-The Events tab shows the live `obs/v1` stream — every tool call lands
+The Events tab shows the live Logbook stream — every tool call lands
 as a `tool.completed` event:
 
 ![events](/screenshots/phase-24-finish/events.png)
@@ -99,7 +99,7 @@ is clean:
 
 ![verdicts](/screenshots/phase-24-finish/verdicts.png)
 
-The Analytics tab plots per-tool latency derived from `obs/v1`:
+The Analytics tab plots per-tool latency derived from Logbook:
 
 ![analytics](/screenshots/phase-24-finish/analytics.png)
 

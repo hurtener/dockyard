@@ -52,12 +52,12 @@ change that would weaken any of them is rejected.
   by the toolchain before it reaches a user. No hand-written
   contract schema lives anywhere in the repo and no PR that
   introduces one will merge.
-- **P2 — Observability is a protocol.** The runtime emits the
-  canonical `obs/v1` event stream. The inspector and any future
-  multi-server console are pure clients of that contract; no
-  component reads runtime internals to observe. OpenTelemetry
-  export is an *optional* adapter, off by default — never a
-  prerequisite to see what your server is doing locally.
+- **P2 — Observability is a protocol.** The runtime emits **Logbook**,
+  Dockyard's canonical event stream (wire format identifier: `obs/v1`).
+  The inspector and any future multi-server console are pure clients of
+  that contract; no component reads runtime internals to observe.
+  OpenTelemetry export is an *optional* adapter, off by default — never
+  a prerequisite to see what your server is doing locally.
 - **P3 — Forward-compatibility by isolation.** Every MCP extension
   wire format lives in exactly one package
   (`internal/protocolcodec`). A spec bump is a vendored-snapshot
@@ -88,7 +88,7 @@ carries the weight.
   typed error result, never a server crash. W3C TraceContext
   extraction on inbound HTTP so a Dockyard handler's span nests
   natively under a calling Harbor agent's `execute_tool` span.
-  Prompts support via `AddPrompt` with obs/v1 carrier events.
+  Prompts support via `AddPrompt` with Logbook carrier events.
 - **`runtime/apps`** — the MCP Apps extension server-side
   (`io.modelcontextprotocol/ui`, spec revision 2026-01-26).
   `ui://` resource registration with the
@@ -113,17 +113,17 @@ carries the weight.
   per-requestor concurrency caps; a TTL purge sweep. The
   `tasks/*` transport mount joins onto `runtime/server` via the
   `server.Options.Tasks` engine attachment.
-- **`runtime/obs`** — `obs/v1`, Dockyard's canonical, versioned
-  observability event protocol. A non-blocking headless emitter
-  (a slow consumer never stalls the runtime); the in-memory ring
-  buffer; the out-of-band localhost SSE sink the inspector
-  consumes; the optional OTel adapter (MCP semconv:
-  `mcp.*` / `gen_ai.*` attributes) for export to an external
-  observability stack; the MCP `logging` → `obs/v1` `log`-event
-  bridge so a Dockyard server still speaks standard MCP logging
-  to any client. Shape + size capture by default — secrets and
-  PII never leak into the event stream; full-content capture is
-  opt-in and redaction-aware.
+- **`runtime/obs`** — the Logbook implementation (wire format
+  identifier: `obs/v1`), Dockyard's canonical, versioned observability
+  event protocol. A non-blocking headless emitter (a slow consumer
+  never stalls the runtime); the in-memory ring buffer; the
+  out-of-band localhost SSE sink the inspector consumes; the optional
+  OTel adapter (MCP semconv: `mcp.*` / `gen_ai.*` attributes) for
+  export to an external observability stack; the MCP `logging` →
+  Logbook `log`-event bridge so a Dockyard server still speaks
+  standard MCP logging to any client. Shape + size capture by default
+  — secrets and PII never leak into the event stream; full-content
+  capture is opt-in and redaction-aware.
 - **`runtime/store`** — the persistence seam. V1 driver:
   `modernc.org/sqlite` (pure-Go, CGo-free); an in-memory driver
   for stdio single-user apps. Forward-only migrations applied
@@ -198,7 +198,7 @@ bind before the listener opens), and operator-initiated only.
   through the same `ui/` postMessage host bridge a production host
   would use — the dialect is imported verbatim from
   `@dockyard/bridge`, never forked.
-- **Live `obs/v1` stream.** A read-only fan-out subscriber to the
+- **Live Logbook stream.** A read-only fan-out subscriber to the
   out-of-band SSE sink. The full event stream — `tool.call`,
   `resource.read`, `prompt.get`, `app.load`, `app.bridge`,
   `host.compat`, `log`, `server.lifecycle`, `task.progress` — in
@@ -384,7 +384,7 @@ review checklist.
 - The inspector is dev-mode-gated, localhost-only,
   operator-initiated only; never a production client and never an
   arbitrary-execution proxy.
-- `obs/v1` tool input/output capture defaults to shape+size;
+- Logbook tool input/output capture defaults to shape+size;
   full-content capture is opt-in and redaction-aware.
 - No hardcoded secrets, including in generated code and tests.
 
@@ -411,7 +411,7 @@ future phase or PR would need to meet to claim it.
   `internal/testgate` (D-145); the underlying improvement — manifest
   `_meta.ui.domain`, or a different host-profile API — is open.
 - The **ChatGPT Apps SDK** as a second host protocol.
-- The **multi-server fleet console** (a post-V1 pure `obs/v1`
+- The **multi-server fleet console** (a post-V1 pure Logbook
   client fan-in).
 - The remaining templates: `document-review`, `task-runner`,
   `artifact-viewer`, `form-tool`, `agent-console`.

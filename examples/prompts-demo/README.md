@@ -8,7 +8,7 @@ A worked example showing **MCP Prompts** via Dockyard's prompts API —
 MCP separates two model-facing primitives:
 
 - **Tools** — things the model PUSHES: a typed input becomes a typed
-  output, the host validates, the runtime emits an `obs/v1` event.
+  output, the host validates, the runtime emits a Logbook event.
 - **Prompts** — templates the host PULLS: a named template a chat host
   surfaces to the user (a `/` slash-command, a quick-action button) so
   the user can seed a chat with a curated message set.
@@ -45,7 +45,7 @@ naturally to prompts** (D-152). `AddPrompt` is a thin pass-through:
 - A typed `PromptRequest` / `PromptResult` so the handler signature
   never exposes the raw SDK `*GetPromptRequest` / `*GetPromptResult`
   (RFC §5.4, P3 — runtime/server keeps the protocol struct out).
-- The same `obs/v1` `prompt.get` lifecycle event every other Dockyard
+- The same Logbook `prompt.get` lifecycle event every other Dockyard
   handler gets (the `KindPromptGet` event + `Recorder.PromptGet` API).
 - The same panic recovery — a panicking handler becomes a typed
   Dockyard error, not a process crash (AGENTS.md §5, §13).

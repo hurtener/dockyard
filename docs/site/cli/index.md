@@ -101,9 +101,9 @@ byte-identical result and reports nothing changed.
 Attach Dockyard's local inspector to a running MCP server (RFC §12).
 
 'dockyard inspect' serves the inspector — Dockyard's local test/debug surface —
-on a loopback port and relays the obs/v1 event stream of the MCP server named
+on a loopback port and relays the Logbook event stream of the MCP server named
 by --url to it. The inspector renders the server's Apps in a sandboxed iframe,
-shows the live obs/v1 stream and the JSON-RPC log, switches fixtures, runs
+shows the live Logbook stream and the JSON-RPC log, switches fixtures, runs
 contract/spec verdicts, and emulates host capability sets.
 
   --url      the running MCP server's base URL (e.g. http://127.0.0.1:8080);

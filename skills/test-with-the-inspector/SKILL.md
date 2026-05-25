@@ -1,6 +1,6 @@
 ---
 name: test-with-the-inspector
-description: Drive and debug a Dockyard MCP server through Dockyard's local inspector (`dockyard inspect`). Use to invoke tools by hand, switch fixtures across UI states (happy/empty/error/permission/slow/large), watch the live `obs/v1` stream, render Apps in a sandboxed iframe, and walk a task's lifecycle in the Tasks panel. Dev-mode-gated, localhost-only, operator-initiated only (D-144).
+description: Drive and debug a Dockyard MCP server through Dockyard's local inspector (`dockyard inspect`). Use to invoke tools by hand, switch fixtures across UI states (happy/empty/error/permission/slow/large), watch the live Logbook stream, render Apps in a sandboxed iframe, and walk a task's lifecycle in the Tasks panel. Dev-mode-gated, localhost-only, operator-initiated only (D-144).
 license: Apache-2.0
 metadata:
   framework: dockyard
@@ -19,8 +19,8 @@ The inspector is Dockyard's local **test + debug** surface. It is:
   explicit UI action (a button click), runs in a short-lived per-request
   MCP client session, and has a documented decision entry (D-099, D-103,
   D-131, D-134) explaining why it stays within P4.
-- **A pure `obs/v1` consumer.** It reads no runtime internals; every
-  signal it shows is an emitted `obs/v1` event (P2).
+- **A pure Logbook consumer.** It reads no runtime internals; every
+  signal it shows is an emitted Logbook event (P2).
 - **Wired to your project.** Verdicts re-run `dockyard validate`; the
   Fixtures switcher derives from the project's generated tool contracts
   (D-130); the App preview reads the running server's `ui://`
@@ -66,8 +66,8 @@ mechanical enforcement of RFC §12 (the CVE-2025-49596 lesson).
 | Tools      | All registered tools; click one to fire it (the Operator-Invoke surface — D-131) |
 | Apps       | Each `ui://` resource rendered in a sandboxed iframe (D-103)               |
 | Tasks      | The active and recent tasks, rendered as a lifecycle Timeline               |
-| Events     | The live `obs/v1` stream — every tool/resource/app/task event             |
-| Analytics  | Per-tool latency + counts derived from `obs/v1`                           |
+| Events     | The live Logbook stream — every tool/resource/app/task event              |
+| Analytics  | Per-tool latency + counts derived from Logbook                            |
 | Fixtures   | The fixture switcher — pick a UI state for the App preview                 |
 | Verdicts   | Re-runs `dockyard validate`; renders blockers + warnings                  |
 | RPC        | The raw JSON-RPC log between the inspector and the attached server         |

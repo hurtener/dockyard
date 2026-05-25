@@ -404,7 +404,7 @@ docstring instruction. AGENTS.md §5, §13. D-053.
 
 **Handler span** — the `obs/v1` `tool.call` `SpanContext` that `runtime/server`
 threads onto a tool handler's `context.Context` (via `obs.WithSpan`) so an
-`obs/v1` event emitted from *inside* the handler — most notably a
+Logbook event emitted from *inside* the handler — most notably a
 handler-emitted `log` event through the MCP-logging bridge — derives a child
 span of the enclosing `tool.call` rather than minting an unrelated trace.
 RFC §11.2. D-079.
@@ -433,7 +433,7 @@ AGENTS.md §7. D-040, D-041.
 
 **Inspector** — Dockyard's local, test-only debug surface; the lone client-shaped
 component. It implements the host half of the `ui/` bridge to render Apps locally,
-surfaces the `obs/v1` stream, fixtures, latency analytics, drift verdicts, and
+surfaces the Logbook stream, fixtures, latency analytics, drift verdicts, and
 capability-set emulation. Dev-mode-gated, localhost-only, read-only. RFC §12.
 
 **Inspector backend** — the Go side of the inspector (`internal/inspector`,
@@ -444,9 +444,9 @@ mechanical enforcement of the inspector's localhost-only property (RFC §12, the
 CVE-2025-49596 lesson). D-096.
 
 **Inspector relay** — the `internal/inspector` component that, read-only,
-relays the `obs/v1` SSE stream and a bounded JSON-RPC log to the inspector UI.
+relays the Logbook SSE stream and a bounded JSON-RPC log to the inspector UI.
 It is a pure SSE *client* of `runtime/obs`'s SSE sink (P2 — it consumes the
-public `obs/v1` contract, never runtime internals) and fans the stream to many
+public Logbook contract, never runtime internals) and fans the stream to many
 inspector UI clients without blocking on a slow one. RFC §11, §12. D-096.
 
 **Inspector verdict** — one row of the inspector's Verdicts DetailRail panel: a
@@ -502,7 +502,7 @@ span shape). Dockyard's Phase 16 `OTelEmitter` emits them as the OTel *export
 vocabulary* — `mcp.method.name`, `gen_ai.tool.name`,
 `gen_ai.operation.name=execute_tool`, `mcp.session.id`, `mcp.resource.uri`,
 `network.transport`, `error.type`. The conventions are still "Development"
-upstream, so they are contained in `runtime/obs/otel`; `obs/v1` stays the
+upstream, so they are contained in `runtime/obs/otel`; Logbook stays the
 stable contract. RFC §11.3. brief 05 §3.4. D-076.
 
 **`MigrationSet`** — an explicit, caller-owned, ordered collection of Store
@@ -516,7 +516,7 @@ sub-store exposes its migrations as a fresh set per call (e.g.
 **MCP server core** — the `runtime/server` package: the part of the app runtime
 that wraps the official Go MCP SDK and exposes Dockyard's server construction,
 typed tool registration, and transport serve loop. The settled foundation
-(RFC §5.1, D-002); Dockyard layers Apps, Tasks, and `obs/v1` on top and never
+(RFC §5.1, D-002); Dockyard layers Apps, Tasks, and Logbook on top and never
 forks the SDK. RFC §5. D-019, D-020.
 
 **MCP App** — at the protocol level, an MCP tool carrying `_meta.ui` metadata that
@@ -568,12 +568,21 @@ why it stays within P4. The framing is mechanically guarded by
 `test/integration/phase27_inspector_security_test.go`'s
 `mcp.NewClient` audit. RFC §12. D-144.
 
-**`obs/v1`** — Dockyard's canonical, versioned, public observability event protocol.
-The headless runtime emits it; the inspector and the post-V1 console are pure
-clients. The wire shape of `obs.Event` is pinned by golden tests — a change is a
-versioned, documented `schema_version` bump. RFC §11. D-008, D-074.
+**Logbook** — the public-facing brand for Dockyard's observability protocol.
+A canonical, versioned event stream every Dockyard server emits; the inspector
+reads it directly, the optional OpenTelemetry adapter is another consumer,
+and any third-party tool can subscribe. The wire format identifier is
+`obs/v1` — a media-type-style version string used in code, packages, and on
+the wire (e.g. `runtime/obs`, `obs.Event`); the user-facing name in the
+README, docs site, and CHANGELOG is *Logbook*. The wire shape of `obs.Event`
+is pinned by golden tests — a change is a versioned, documented
+`schema_version` bump. RFC §11. D-008, D-074.
 
-**`obs.Event`** — the one canonical obs/v1 event type (`runtime/obs`): a
+**`obs/v1`** — the wire format identifier for Logbook (the previous entry).
+Kept as a separate glossary entry so a contributor searching for the wire
+string lands on the same definition.
+
+**`obs.Event`** — the one canonical Logbook event type (`runtime/obs`): a
 `schema_version`, an event id, a timestamp, server/session identity, W3C
 trace/span IDs, a `kind`, a `phase`, a typed per-kind `payload`, an optional
 `duration_ms`, and an optional `ErrorInfo`. The only type the inspector and the
@@ -585,7 +594,7 @@ D-074.
 `host.compat`, `log`, `server.lifecycle`, `task.progress`. The set is closed for
 obs/v1; a new kind is a versioned addition. RFC §11.2. D-074.
 
-**Emitter seam** — the obs/v1 interface + factory + driver seam (`obs.Emitter`,
+**Emitter seam** — the Logbook interface + factory + driver seam (`obs.Emitter`,
 `obs.RegisterDriver`, `obs.Open`). The runtime depends only on `obs.Emitter`;
 drivers register a factory in an `init()` block. Phase 15 ships the ring-buffer
 driver; Phase 16's SSE sink and OTel adapter plug in behind the same seam.
