@@ -76,6 +76,21 @@ inspector. RFC §7.2, §7.3. D-016, D-059, D-060, D-061.
 
 ## C
 
+**CHANGELOG** — the top-level `CHANGELOG.md` (Keep a Changelog format,
+Phase 30) recording every Dockyard release. Each version's
+`## [<version>] - <YYYY-MM-DD>` section is the body of the matching
+GitHub Release the `release` workflow creates. The v1.0.0 entry frames
+the V1 story around the four binding properties (P1–P4). The heading
+shape is load-bearing — `internal/changelogx` parses it directly.
+D-154, D-157.
+
+**`changelogx`** — `internal/changelogx`, the in-repo Keep-a-Changelog
+parser + small CLI (`cmd/changelogx`) the release workflow consumes to
+extract one version's section from `CHANGELOG.md` as the GitHub Release
+body. Stdlib-only, pure-functional, golden-tested against the in-repo
+`CHANGELOG.md` directly. Returns `ErrSectionNotFound` (exit 2 in the
+CLI) for a missing version. Phase 30. D-157.
+
 **Capability negotiation** — the MCP `initialize` handshake in which a host
 advertises the extensions and capabilities it supports. Dockyard reads this at run
 time and adapts; it never hardcodes a per-host capability matrix. RFC §7.5. D-011.
@@ -631,6 +646,33 @@ block; the gates are *enforced* by `dockyard validate`. RFC §4.2, §9.4. D-035.
 
 ## R
 
+**Release pipeline** — the `.github/workflows/release.yml` GitHub Actions
+workflow (Phase 30) that turns a `v*` tag push into a published GitHub
+Release. Three jobs: preflight (`make preflight`), build (the RFC §14
+cross-compile matrix via `internal/releasebuild` + per-artifact + aggregate
+SHA-256 checksums), and release (CHANGELOG section extraction via
+`internal/changelogx` + GitHub Release creation via
+`softprops/action-gh-release`). Idempotent on re-run; also triggered by
+`workflow_dispatch` for dry-runs (host-only matrix, no GitHub Release
+created). D-155.
+
+**`releasebuild`** — `internal/releasebuild`, the in-repo cross-compile
+driver the release workflow consumes. Wraps `go build ./cmd/dockyard`
+with `CGO_ENABLED=0` + `GOOS`/`GOARCH` set across the RFC §14 matrix,
+names each artifact under the release-publish shape
+(`dockyard-<version>-<os>-<arch>[.exe]`), writes per-artifact `.sha256`
+sidecars + an aggregate `checksums.txt`. Separate from
+`internal/buildpkg` (which is the per-Dockyard-project build pipeline).
+Phase 30. D-156.
+
+**Release dry-run** — the captured cross-compile-matrix + binary-help +
+`make preflight` transcripts under `docs/release/v1.0.0/`, produced
+locally by the maintainer before pushing the `v1.0.0` tag. Stand-in
+proof the release pipeline works end to end before it can be exercised
+against a real tag. The smoke script asserts the transcripts exist + are
+non-empty; a future release-engineering pass replaces them with the
+actual run's transcripts. Phase 30. D-160.
+
 **Recorder** — the headless obs/v1 emit helper (`obs.Recorder`) a subsystem
 uses to record events without hand-assembling an `obs.Event`. It binds a server
 identity and an `obs.Emitter` once; each event it builds carries the schema
@@ -664,6 +706,14 @@ in the model-facing `Text`). A flag never fails the tool call; it is recorded on
 the tool's `Builder` and read through `Builder.Flags()`. RFC §6.3. D-045.
 
 ## S
+
+**Semver policy** — Dockyard's post-v1.0.0 versioning rule: major =
+breaking (a public runtime API, the manifest schema, a CLI verb, the
+`obs/v1` event shape, a P1–P4 binding property); minor = additive (a
+new CLI verb, a new runtime API, a new manifest field with a sensible
+default, a new template); patch = bug / docs / security fix. The
+`obs/v1` `schema_version` bump rides with a Dockyard major. Documented
+in `docs/RELEASING.md`. D-159.
 
 **Scaffold** — the project tree `dockyard new` generates: the manifest, the
 example contract-first tool, the generated contract artifacts, a runnable
@@ -862,6 +912,13 @@ D-056.
 `text/html;profile=mcp-app`, containing the App's HTML bundle. RFC §7.1.
 
 ## V
+
+**V2 backlog** — `docs/V2-BACKLOG.md`, the consolidated post-V1 deferral
+list (Phase 30). Every recorded post-V1 deferral lives there with: a
+short title, its originating decision number(s), the deferral rationale,
+and the criteria a future phase or PR would need to meet to claim it
+(the "definition of done"). A new deferral lands in V2-BACKLOG in the
+same PR that records it in `docs/decisions.md`. D-158.
 
 **Vendored spec** — an external MCP specification mirrored into
 `docs/specifications/`, pinned by upstream commit SHA + date, so Dockyard's
