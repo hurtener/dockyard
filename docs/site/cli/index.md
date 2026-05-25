@@ -12,9 +12,12 @@ MCP Servers and MCP Apps. It ships as one static, CGo-free binary: scaffold a
 server, write typed Go tool handlers, and get generated contracts, a local
 inspector, quality gates, and one-command packaging.
 
-Phase 17 shipped the command tree and 'dockyard new'; Phase 18 added 'generate'
-and 'validate'; Phase 19 added 'dev'; Phase 20 added 'build', 'run' and
-'install'; Phase 21 adds 'test' — completing the command tree.
+The command tree covers the full developer workflow: 'new' scaffolds a server,
+'generate' regenerates contracts from typed Go structs, 'validate' enforces
+the contract-first quality gate, 'dev' runs the live-reload loop, 'build'
+produces the shippable binary, 'run' serves it, 'install' registers it with
+a host, 'test' runs the contract + compliance gate, and 'inspect' opens the
+local debug surface.
 ```
 
 ## `dockyard build`

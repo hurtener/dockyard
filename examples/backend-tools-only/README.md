@@ -4,9 +4,10 @@ A worked example showing **Dockyard as a pure-tools MCP server** — three
 typed Go tool handlers, no MCP App, no UI, no Tasks. The common case for a
 developer who just wants to expose tools to an agent host.
 
-Phase 28 ships this example (D-150) alongside the two interactive
-templates so a developer sees both shapes: `dockyard new --template
-analytics-widgets` (UI-bearing widgets) vs this example (pure backend).
+This example sits alongside the two interactive templates
+([D-150](../../docs/decisions.md)) so a developer sees both shapes:
+`dockyard new --template analytics-widgets` (UI-bearing widgets) vs this
+example (pure backend).
 
 ## What it does
 
@@ -103,6 +104,6 @@ the root `go.mod`, so no extra step is needed.
 - [`examples/combined-patterns`](../combined-patterns) — composition of
   a widget tool and an approval-flow tool on one App.
 - [`examples/prompts-demo`](../prompts-demo) — registering an MCP
-  Prompt via the Phase 28 prompts API (D-151).
+  Prompt via Dockyard's prompts API ([D-151](../../docs/decisions.md)).
 - [Templates](../../templates) — the scaffolded entry points (`dockyard
   new --template …`).

@@ -1,8 +1,8 @@
 # `analytics-widgets` — read-side walkthrough
 
 The `analytics-widgets` template is the canonical read-side Dockyard
-example (Phase 24, [D-124](/reference/decisions)). Three contract-first
-widget tools rendered inline by one Svelte App.
+example ([D-124](/reference/decisions)). Three contract-first widget
+tools rendered inline by one Svelte App.
 
 ## Scaffold
 

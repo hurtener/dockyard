@@ -406,10 +406,10 @@ future phase or PR would need to meet to claim it.
 - **D-139** — pre-publish `--dockyard-path` workflow. v1.0.0 makes
   `go install …@v1.0.0` the recommended path; `--dockyard-path`
   stays as the "build from source" alternative.
-- The **analytics-widgets / Claude signed-origin** follow-up
-  (Phase 29 worked around it via the synthetic-URL fix in
-  `internal/testgate`; the underlying improvement — manifest
-  `_meta.ui.domain`, or a different host-profile API — is open).
+- The **analytics-widgets / Claude signed-origin** follow-up. The
+  capability test uses a synthetic `serverURL` workaround in
+  `internal/testgate` (D-145); the underlying improvement — manifest
+  `_meta.ui.domain`, or a different host-profile API — is open.
 - The **ChatGPT Apps SDK** as a second host protocol.
 - The **multi-server fleet console** (a post-V1 pure `obs/v1`
   client fan-in).

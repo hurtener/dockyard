@@ -1,7 +1,7 @@
 # prompts-demo
 
-A worked example showing **MCP Prompts** via Dockyard's Phase 28 prompts
-API — `runtime/server.AddPrompt` (D-151).
+A worked example showing **MCP Prompts** via Dockyard's prompts API —
+`runtime/server.AddPrompt` ([D-151](../../docs/decisions.md)).
 
 ## What MCP Prompts are
 
@@ -46,7 +46,7 @@ naturally to prompts** (D-152). `AddPrompt` is a thin pass-through:
   never exposes the raw SDK `*GetPromptRequest` / `*GetPromptResult`
   (RFC §5.4, P3 — runtime/server keeps the protocol struct out).
 - The same `obs/v1` `prompt.get` lifecycle event every other Dockyard
-  handler gets (Phase 28 added `obs.KindPromptGet` + `Recorder.PromptGet`).
+  handler gets (the `KindPromptGet` event + `Recorder.PromptGet` API).
 - The same panic recovery — a panicking handler becomes a typed
   Dockyard error, not a process crash (AGENTS.md §5, §13).
 
@@ -83,8 +83,8 @@ go run ./cmd/server
 # 4) Or, run it over streamable-HTTP on 127.0.0.1:8080:
 DOCKYARD_TRANSPORT=http go run ./cmd/server
 
-# 5) The inspector renders Tools but not Prompts (Phase 23 scope was
-#    tools / resources / Tasks); to drive prompts/list + prompts/get
+# 5) The inspector currently renders Tools / Resources / Tasks but not
+#    Prompts; to drive prompts/list + prompts/get
 #    use a host that surfaces prompts (Claude, an MCP CLI), or call the
 #    JSON-RPC frames directly. See the screenshot under
 #    docs/screenshots/phase-28/ for the inspect-side view.

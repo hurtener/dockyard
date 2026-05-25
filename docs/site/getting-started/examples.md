@@ -1,9 +1,9 @@
 # Worked examples
 
 The two shipped templates (`analytics-widgets`, `approval-flows`) cover
-the common "scaffold a new server" path. Phase 28 ships three worked
-**examples** that complement them — reference implementations for
-patterns developers reach for once they're past the scaffold step.
+the common "scaffold a new server" path. Three worked **examples**
+complement them — reference implementations for patterns developers
+reach for once they're past the scaffold step.
 
 Examples live under [`examples/`](https://github.com/hurtener/dockyard/tree/main/examples)
 in the repo. Unlike templates, they are not scaffolded by `dockyard new`
@@ -39,7 +39,7 @@ ramp (approval-flows pattern). Both renderers dispatch on
 
 ### [`prompts-demo`](https://github.com/hurtener/dockyard/tree/main/examples/prompts-demo)
 
-**Three MCP Prompts via the Phase 28 prompts API**
+**Three MCP Prompts via Dockyard's prompts API**
 (`runtime/server.AddPrompt`; decision [D-151](/reference/decisions)).
 Demonstrates the tool / prompt distinction MCP makes:
 
@@ -94,4 +94,4 @@ swap-to-a-real-backend notes.
 - [approval-flows walkthrough](approval-flows) — the write-side
   template walkthrough.
 - [Decisions log: D-150, D-151, D-152](/reference/decisions) — the
-  Phase 28 example + prompts decisions.
+  examples + prompts decisions.

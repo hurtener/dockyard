@@ -2,9 +2,9 @@
 
 A worked example showing the **analytics-widgets** and **approval-flows**
 patterns COMPOSED in one Dockyard server, sharing one bundle and one
-dispatcher across two MCP App resources (Phase 28, D-150). The two
-shipped templates aren't isolated — they combine into a real product
-flow: *insight → action*.
+dispatcher across two MCP App resources
+([D-150](../../docs/decisions.md)). The two shipped templates aren't
+isolated — they combine into a real product flow: *insight → action*.
 
 The domain is a **feature-flag rollout reviewer**: the agent surfaces
 the current rollout's health (analytics widget), then proposes the next
@@ -149,8 +149,8 @@ needed.
 
 - [`examples/backend-tools-only`](../backend-tools-only) — pure-tools
   pattern (no UI).
-- [`examples/prompts-demo`](../prompts-demo) — MCP Prompts via the
-  Phase 28 prompts API (D-151).
+- [`examples/prompts-demo`](../prompts-demo) — MCP Prompts via
+  Dockyard's prompts API ([D-151](../../docs/decisions.md)).
 - [`templates/analytics-widgets`](../../templates/analytics-widgets) —
   the read-side template the analytics half of this example
   generalises.
