@@ -1,0 +1,34 @@
+time=2026-05-25T00:48:59.838-03:00 level=INFO msg="release: starting" version=v1.0.0-dryrun project_dir=/Users/santiagobenvenuto/Repos/dockyard-phase-30 output_dir=/tmp/dockyard-release-fullmatrix cmd_path=./cmd/dockyard targets=6
+time=2026-05-25T00:48:59.838-03:00 level=INFO msg="release: compiling" target=darwin/amd64 artifact=dockyard-v1.0.0-dryrun-darwin-amd64
+time=2026-05-25T00:49:01.619-03:00 level=INFO msg="release: published" target=darwin/amd64 path=/tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-darwin-amd64 sha256=5e61235c8fd303ff8098f0f39d9bc9f7a3ab57a9c4fbff3753bc0530aabd3c08
+time=2026-05-25T00:49:01.619-03:00 level=INFO msg="release: compiling" target=darwin/arm64 artifact=dockyard-v1.0.0-dryrun-darwin-arm64
+time=2026-05-25T00:49:02.616-03:00 level=INFO msg="release: published" target=darwin/arm64 path=/tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-darwin-arm64 sha256=caa08752f0cfcf719ac98f743afad4d04354e3499694e1e3abc8c1ac7685bbdf
+time=2026-05-25T00:49:02.616-03:00 level=INFO msg="release: compiling" target=linux/amd64 artifact=dockyard-v1.0.0-dryrun-linux-amd64
+time=2026-05-25T00:49:04.264-03:00 level=INFO msg="release: published" target=linux/amd64 path=/tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-linux-amd64 sha256=4b2514da33b4d8c2ca758072378526aafb3711268deba1ee4d49aa2bd7eed3b9
+time=2026-05-25T00:49:04.264-03:00 level=INFO msg="release: compiling" target=linux/arm64 artifact=dockyard-v1.0.0-dryrun-linux-arm64
+time=2026-05-25T00:49:12.628-03:00 level=INFO msg="release: published" target=linux/arm64 path=/tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-linux-arm64 sha256=aa31cf36b654a3ddcfb6a5e675eebf7d68e51d2c6cfaf7ab85043fbd30418efc
+time=2026-05-25T00:49:12.628-03:00 level=INFO msg="release: compiling" target=windows/amd64 artifact=dockyard-v1.0.0-dryrun-windows-amd64.exe
+time=2026-05-25T00:49:21.074-03:00 level=INFO msg="release: published" target=windows/amd64 path=/tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-windows-amd64.exe sha256=9bbf44ea4f70b75fc64a5d6b93369788d9f16cdb98669ba3899b416768271326
+time=2026-05-25T00:49:21.074-03:00 level=INFO msg="release: compiling" target=windows/arm64 artifact=dockyard-v1.0.0-dryrun-windows-arm64.exe
+time=2026-05-25T00:49:29.712-03:00 level=INFO msg="release: published" target=windows/arm64 path=/tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-windows-arm64.exe sha256=82f5fadcd744f0e7329ec0dbbf44159366ef2919864afaed49fd26fed88e3bf7
+time=2026-05-25T00:49:29.720-03:00 level=INFO msg="release: complete" artifacts=6 checksums=/tmp/dockyard-release-fullmatrix/checksums.txt
+RELEASE OK
+  version:   v1.0.0-dryrun
+  output:    /tmp/dockyard-release-fullmatrix
+  artifacts: 6
+  checksums: /tmp/dockyard-release-fullmatrix/checksums.txt
+  - 5e61235c8fd303ff8098f0f39d9bc9f7a3ab57a9c4fbff3753bc0530aabd3c08  /tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-darwin-amd64
+  - caa08752f0cfcf719ac98f743afad4d04354e3499694e1e3abc8c1ac7685bbdf  /tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-darwin-arm64
+  - 4b2514da33b4d8c2ca758072378526aafb3711268deba1ee4d49aa2bd7eed3b9  /tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-linux-amd64
+  - aa31cf36b654a3ddcfb6a5e675eebf7d68e51d2c6cfaf7ab85043fbd30418efc  /tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-linux-arm64
+  - 9bbf44ea4f70b75fc64a5d6b93369788d9f16cdb98669ba3899b416768271326  /tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-windows-amd64.exe
+  - 82f5fadcd744f0e7329ec0dbbf44159366ef2919864afaed49fd26fed88e3bf7  /tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-windows-arm64.exe
+dockyard-v1.0.0-dryrun-darwin-amd64: OK
+dockyard-v1.0.0-dryrun-darwin-arm64: OK
+dockyard-v1.0.0-dryrun-linux-amd64: OK
+dockyard-v1.0.0-dryrun-linux-arm64: OK
+dockyard-v1.0.0-dryrun-windows-amd64.exe: OK
+dockyard-v1.0.0-dryrun-windows-arm64.exe: OK
+/tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-linux-amd64:       ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, Go BuildID=DATpz0fBU9-ckWbk0P1p/NtwxkPuUctlhe-DFNDok/3XwV3B_d_SPCVVkHwLqb/VBDDwpVg0P0WL1XUmbpQ, BuildID[sha1]=1c436b302f883eaee83ab5f5b2b1aa1a2dde8caf, stripped
+/tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-windows-amd64.exe: PE32+ executable (console) x86-64, for MS Windows
+/tmp/dockyard-release-fullmatrix/dockyard-v1.0.0-dryrun-darwin-arm64:      Mach-O 64-bit executable arm64

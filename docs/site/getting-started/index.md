@@ -2,9 +2,28 @@
 
 Build a working MCP server with Dockyard in five minutes.
 
-## 1. Build the CLI
+## 1. Install the CLI
 
-Dockyard ships one binary, `dockyard`. Pre-publish, build from source:
+Dockyard ships one binary, `dockyard`. The recommended path post-v1.0.0
+is one command:
+
+```bash
+go install github.com/hurtener/dockyard/cmd/dockyard@v1.0.0
+export PATH="$(go env GOPATH)/bin:$PATH"   # if it isn't already
+dockyard --help
+```
+
+`go install` resolves the tag against the Go module proxy and produces
+a working `dockyard` binary at `$(go env GOPATH)/bin/dockyard` — the
+same CGo-free artifact the release pipeline cross-compiles for
+darwin, linux, and windows × amd64 and arm64. Verify the binary's
+`.sha256` checksum against the
+[Releases page](https://github.com/hurtener/dockyard/releases) if
+your environment needs it.
+
+### Alternative: build from source
+
+For hacking on Dockyard itself, or to run against `main`:
 
 ```bash
 git clone https://github.com/hurtener/dockyard
@@ -43,15 +62,17 @@ The two shipped V1 templates exercise the framework end-to-end:
   example. [Walkthrough →](approval-flows)
 
 ```bash
-dockyard new my-widgets \
-  --template analytics-widgets \
-  --dockyard-path /path/to/dockyard   # pre-publish; not needed once Dockyard is on a registry
+dockyard new my-widgets --template analytics-widgets
 cd my-widgets
 ```
 
-The `--dockyard-path` flag wires the local Dockyard checkout into the
-generated `go.mod` and `web/package.json` (decision
-[D-080](/reference/decisions)). Once Dockyard is published, omit it.
+If you installed Dockyard via `go install …@v1.0.0`, `dockyard new`
+resolves dependencies against the published module — no extra flag.
+
+If you built from source, add `--dockyard-path /path/to/dockyard` to
+the `dockyard new` invocation: the flag wires the local Dockyard
+checkout into the generated `go.mod` and `web/package.json` (decision
+[D-080](/reference/decisions)).
 
 ## 3. Run the dev loop
 

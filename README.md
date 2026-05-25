@@ -59,28 +59,53 @@ parameter-driven tool invocation is one click away.
 
 ## Try it
 
-Dockyard isn't published yet. Until then you build the CLI from this repo and
-point a new project at it via `--dockyard-path`:
+The recommended path post-v1.0.0 is one command:
+
+```sh
+go install github.com/hurtener/dockyard/cmd/dockyard@v1.0.0
+dockyard --help
+```
+
+`go install` resolves the tag against the Go module proxy and produces
+a working `dockyard` binary at `"$(go env GOPATH)/bin/dockyard"` (add
+that to `PATH` if it isn't already). The build is CGo-free; the binary
+is the same artifact the release pipeline cross-compiles for darwin,
+linux, and windows × amd64 and arm64. Verify with the `.sha256` sidecar
+on the [Releases page](https://github.com/hurtener/dockyard/releases).
+
+Then scaffold + run a real, working example:
+
+```sh
+dockyard new --template analytics-widgets ~/widgets-demo
+cd ~/widgets-demo
+go mod tidy                                   # one-time, populates go.sum
+dockyard generate
+dockyard build
+
+# in one terminal: serve over HTTP
+DOCKYARD_TRANSPORT=http DOCKYARD_HTTP_ADDR=127.0.0.1:8080 ./bin/widgets-demo
+
+# in another terminal: attach the inspector
+dockyard inspect --url http://127.0.0.1:8080/mcp --dir .
+```
+
+### Build from source
+
+You can also build the CLI from this repo and point a new project at it
+via `--dockyard-path`. Useful if you're hacking on Dockyard itself or
+want to run against `main`:
 
 ```sh
 git clone https://github.com/hurtener/dockyard
 cd dockyard
 make build                            # produces ./bin/dockyard, CGo-free
 
-# scaffold + run a real, working example
 ./bin/dockyard new --template analytics-widgets ~/widgets-demo \
     --dockyard-path "$(pwd)"
 cd ~/widgets-demo
 go mod tidy                           # one-time, pre-publish workflow (D-139)
 "$(pwd | sed 's|/widgets-demo||')/dockyard/bin/dockyard" generate
 "$(pwd | sed 's|/widgets-demo||')/dockyard/bin/dockyard" build
-
-# in one terminal: serve over HTTP
-DOCKYARD_TRANSPORT=http DOCKYARD_HTTP_ADDR=127.0.0.1:8080 ./bin/widgets-demo
-
-# in another terminal: attach the inspector
-"$(pwd | sed 's|/widgets-demo||')/dockyard/bin/dockyard" inspect \
-    --url http://127.0.0.1:8080/mcp --dir .
 ```
 
 The full walkthrough — with the second template, the dev loop, contract-first
@@ -102,12 +127,14 @@ same ground for AI coding agents.
 | **Two V1 templates** — `analytics-widgets`, `approval-flows` | ✅ |
 | **Shared design system** (`web/ui/`) — typed Svelte component inventory, design tokens, four-state PageState rule | ✅ |
 | **Agent skills + published docs site** — `SKILL.md`-format onboarding, VitePress site deployed by CI | ✅ |
-| **Security pass + spec-compliance conformance** | 🟡 in progress (Phase 27) |
-| **V1 cut** | ⏳ Phase 30 |
+| **Security pass + spec-compliance conformance** | ✅ |
+| **V1 cut** — `CHANGELOG.md`, release pipeline, V2 backlog, RELEASING.md | ✅ |
 
 The full phase plan is in [`docs/plans/README.md`](docs/plans/README.md);
 settled architectural decisions are append-only in
-[`docs/decisions.md`](docs/decisions.md).
+[`docs/decisions.md`](docs/decisions.md); the post-V1 backlog
+(what's deferred, what comes next) is consolidated in
+[`docs/V2-BACKLOG.md`](docs/V2-BACKLOG.md).
 
 ## The four properties
 
@@ -174,6 +201,10 @@ stack.
   `add-a-tool`, `attach-a-ui-resource`, `define-contracts`, `run-the-dev-loop`,
   `validate`, `package`, `test-with-the-inspector`) so an AI coding agent is
   productive with Dockyard from day one.
+- **Release notes** — every release's notes are in
+  [`CHANGELOG.md`](CHANGELOG.md) and on the
+  [Releases page](https://github.com/hurtener/dockyard/releases). The release
+  procedure for maintainers is in [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## Contributing
 

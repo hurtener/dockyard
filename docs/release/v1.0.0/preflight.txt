@@ -1,0 +1,493 @@
+== preflight: build ==
+== inspector-bundle: vite build + stage into internal/inspector/dist ==
+
+> @dockyard/inspector@0.1.0 build
+> vite build
+
+vite v6.4.2 building for production...
+transforming...
+✓ 194 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                           0.84 kB │ gzip:  0.50 kB
+dist/assets/dockyard-logo-_ih39suH.png  638.67 kB
+dist/assets/index-DNBb368_.css           25.42 kB │ gzip:  4.28 kB
+dist/assets/index-BftW7Zdy.js           109.24 kB │ gzip: 36.56 kB
+✓ built in 542ms
+== preflight: smoke ==
+-- scripts/smoke/phase-01.sh
+smoke: phase-01 runtime-skeleton
+  OK   - runtime/server package exists
+  OK   - cmd/dockyard/main.go exists
+  OK   - go-sdk pinned to a v1.x release in go.mod
+  OK   - CGO_ENABLED=0 go build ./... succeeds
+  OK   - runtime/server tests pass (serve + tool call + stdio + concurrency)
+  OK   - the dockyard binary runs and reports a version
+  -- OK=6 FAIL=0 SKIP=0
+-- scripts/smoke/phase-02.sh
+smoke: phase-02 protocolcodec-seam
+  OK   - internal/protocolcodec package exists
+  OK   - vendored MCP Apps spec present and pinned by SHA
+  OK   - vendored MCP Tasks schema present and pinned by SHA
+  OK   - extension _meta key literals confined to internal/protocolcodec
+  OK   - internal/protocolcodec test suite passes
+  -- OK=5 FAIL=0 SKIP=0
+-- scripts/smoke/phase-03.sh
+smoke: phase-03 store-seam
+  OK   - runtime/store seam package exists
+  OK   - in-memory driver exists
+  OK   - modernc.org/sqlite driver exists
+  OK   - shared conformance suite exists
+  OK   - CGO_ENABLED=0 go build ./runtime/store/... succeeds
+  OK   - CGO_ENABLED=0 go test ./runtime/store/... passes
+  OK   - modernc.org/sqlite declared in go.mod
+  -- OK=7 FAIL=0 SKIP=0
+-- scripts/smoke/phase-04.sh
+smoke: phase-04 codegen
+  OK   - internal/codegen package exists
+  OK   - runtime/tool builder package exists
+  OK   - codegen golden fixtures exist
+  OK   - google/jsonschema-go is a direct dependency
+  OK   - codegen + builder build CGo-free
+  OK   - codegen + builder tests pass
+  OK   - phase-04 codegen-to-server integration test passes
+  -- OK=7 FAIL=0 SKIP=0
+-- scripts/smoke/phase-05.sh
+smoke: phase-05 typescript-codegen
+  OK   - typescript generator + drift cross-check exist
+  OK   - gzuidhof/tygo is a direct dependency
+  OK   - TypeScript golden fixtures exist with the generated header
+  OK   - codegen builds CGo-free
+  OK   - codegen tests pass (TS generation + drift cross-check + golden)
+  OK   - phase-05 drift cross-check integration test passes
+  -- OK=6 FAIL=0 SKIP=0
+-- scripts/smoke/phase-06.sh
+smoke: phase-06 manifest
+  OK   - internal/manifest package exists
+  OK   - example manifest exists and is non-empty
+  OK   - gopkg.in/yaml.v3 is a direct dependency
+  OK   - internal/manifest builds CGo-free
+  OK   - manifest loader + validation + resolver tests pass
+  OK   - valid manifest round-trips; invalid manifests fail source-located
+  OK   - tool input/output contract references resolve through the codegen seam
+  OK   - manifest CSP/orphan/task_support coherence checks present (D-055)
+  -- OK=8 FAIL=0 SKIP=0
+-- scripts/smoke/phase-07.sh
+smoke: phase-07 server-core
+  OK   - runtime/server streamable-HTTP transport exists
+  OK   - runtime/server resource registration exists
+  OK   - runtime/server builds CGo-free
+  OK   - runtime/server tests pass
+  OK   - explicit HTTP security options present (incl. Content-Type verification)
+  OK   - getServer per-request seam (ServerForRequest) exposed
+  OK   - InMemoryTransport entrypoint (ServeInMemory) wired
+  OK   - Server.MCP() retired — D-021 resolved
+  OK   - handler panic recovery wired on tool + resource paths (D-053)
+  OK   - AddResourceTemplate typed surface exposed (D-054)
+  -- OK=10 FAIL=0 SKIP=0
+-- scripts/smoke/phase-08.sh
+smoke: phase-08 handler-runtime
+  OK   - runtime/tool handler runtime exists
+  OK   - routing flags (oversize + misroute) defined
+  OK   - empty-TextContent quirk fixed — content block is conditional (D-043)
+  OK   - typed edge-validation error (ErrInvalidArguments / ArgumentError) present
+  OK   - Builder.Flags() accessor present
+  OK   - runtime/tool builds CGo-free
+  OK   - runtime/tool and runtime/server tests pass
+  OK   - phase-08 integration test present
+  -- OK=8 FAIL=0 SKIP=0
+-- scripts/smoke/phase-09.sh
+smoke: phase-09 apps-extension
+  OK   - runtime/apps package exists
+  OK   - runtime/apps builds CGo-free
+  OK   - runtime/apps routes wire shapes through protocolcodec — no raw keys (P3)
+  OK   - runtime/apps never emits the deprecated flat ui/resourceUri form
+  OK   - Apps MIME type + extension id surface defined
+  OK   - runtime/server exposes the _meta + extension-capability seams
+  OK   - runtime/apps and runtime/server tests pass
+  OK   - phase-09 integration test present
+  -- OK=8 FAIL=0 SKIP=0
+-- scripts/smoke/phase-10.sh
+smoke: phase-10 ui-discovery
+  OK   - runtime/apps discovery.go + embed.go exist
+  OK   - runtime/apps builds CGo-free with the Phase 10 additions
+  OK   - Discover / RegisterDiscovered / ConventionDir surface present
+  OK   - embed pipeline uses //go:embed and exposes Bundle.Validate + ErrEmptyBundle
+  OK   - internal/manifest exposes WriteDiscoveredApps
+  OK   - runtime/apps + internal/manifest tests pass
+  OK   - phase-10 integration test passes
+  -- OK=7 FAIL=0 SKIP=0
+-- scripts/smoke/phase-10a.sh
+smoke: phase-10a design-system
+  OK   - web/ui package + config files exist
+  OK   - web/ui is @dockyard/ui with a gate script
+  OK   - design tokens exist (tokens.css --dy-* + tokens.ts)
+  OK   - all 19 web/ui inventory components exist
+  OK   - src/index.ts barrel exports the public surface
+  OK   - web/ui gate passes (svelte-check + tsc + vitest)
+  OK   - CONVENTIONS.md §3 documents the delivered inventory
+  OK   - logo + approved inspector mockup exist
+  OK   - Makefile web/web-install targets reference web/ui
+  -- OK=9 FAIL=0 SKIP=0
+-- scripts/smoke/phase-11.sh
+smoke: phase-11 bridge-shell
+  OK   - web/bridge project exists
+  OK   - web/bridge public entry (index.ts + bridge.ts) present
+  OK   - web/bridge declares no SvelteKit dependency (D-006)
+  OK   - web/bridge centralises the ui/ dialect methods in protocol.ts
+  OK   - web/bridge has a vitest config and a unit-test suite
+  OK   - web/bridge type-check + unit tests pass (make web)
+  OK   - frontend CI gate wired (ci.yml web job + Makefile web target)
+  -- OK=7 FAIL=0 SKIP=0
+-- scripts/smoke/phase-12.sh
+smoke: phase-12 host-profiles
+  OK   - runtime/apps/hostprofile.go exists
+  OK   - runtime/apps builds CGo-free with the host-profile seam
+  OK   - host-profile seam exposes HostProfile interface + RegisterHostProfile factory
+  OK   - claude driver derives a SHA-256 claudemcpcontent.com origin, init()-registered
+  OK   - apps.go has no hardcoded host name — host code stays behind the seam
+  OK   - resourceMeta routes _meta.ui.domain through DerivedDomain (auto-derived)
+  OK   - phase-12 host-profile + domain-derivation tests pass under -race
+  -- OK=7 FAIL=0 SKIP=0
+-- scripts/smoke/phase-13.sh
+smoke: phase-13 tasks-server
+  OK   - runtime/tasks package exists
+  OK   - runtime/tasks builds CGo-free
+  OK   - all four tasks/* methods are defined and routed
+  OK   - CreateTaskResult substitution for task-augmented tools/call is present
+  OK   - lifecycle transitions are enforced via a typed error
+  OK   - tasks capability advertisement is present and capability-driven
+  OK   - runtime/tasks routes wire shapes through protocolcodec — no raw keys (P3)
+  OK   - runtime/tasks and protocolcodec tests pass
+  OK   - phase-13 integration test present
+  -- OK=9 FAIL=0 SKIP=0
+-- scripts/smoke/phase-14.sh
+smoke: phase-14 taskstore
+  OK   - durable TaskStore builds CGo-free
+  OK   - durable TaskStore is a Store-seam facade with a forward-only migration
+  OK   - TaskHandle API (progress, cooperative cancellation, input_required) is present
+  OK   - background TTL purge sweep is present
+  OK   - auth-context binding rejects cross-context tasks/get|result|cancel
+  OK   - tasks/list is withheld when requestors are not identifiable
+  OK   - tasks/* transport mount routes frames into the engine and injects the capability
+  OK   - the four tasks lifecycle manifest keys are defined
+  OK   - the example manifest documents the tasks block
+  OK   - the shared TaskStore conformance suite covers the durable driver
+  OK   - runtime/tasks, taskstoretest and manifest tests pass
+  OK   - phase-14 integration test present
+  OK   - the Tasks transport mount is joined to runtime/server (HTTP + stdio)
+  OK   - the R2 integration test drives tasks/* over a real server + real SDK client
+  -- OK=14 FAIL=0 SKIP=0
+-- scripts/smoke/phase-15.sh
+smoke: phase-15 obs-emitter
+  OK   - runtime/obs builds CGo-free
+  OK   - obs.Event model carries tool/resource/app/task event kinds
+  OK   - the emitter is an interface + factory + driver seam; the ring-buffer driver self-registers
+  OK   - the ring buffer serves recent events and accounts drops
+  OK   - a slow-consumer non-blocking test proves the emitter never blocks
+  OK   - events carry W3C Trace Context trace/span IDs
+  OK   - tool input/output capture defaults to shape+size; full capture is a redaction-gated opt-in
+  OK   - runtime/server, runtime/apps and runtime/tasks emit the obs/v1 stream
+  OK   - the obs/v1 Event wire shape is pinned by a golden test
+  OK   - S1 fix: the migration registry is a caller-owned MigrationSet, the mutable global removed
+  OK   - S1 fix: a concurrent-migrate -race test proves no race / no panic
+  OK   - runtime/obs and runtime/store tests pass
+  OK   - phase-15 integration test present
+  -- OK=13 FAIL=0 SKIP=0
+-- scripts/smoke/phase-16.sh
+smoke: phase-16 obs-transports
+  OK   - the SSE sink exists and runtime/obs builds CGo-free
+  OK   - the SSE sink registers behind the obs emitter seam and is an Emitter
+  OK   - the SSE sink enforces a localhost-only bind
+  OK   - an integration test proves the SSE sink does not corrupt a stdio pipe
+  OK   - the OTelEmitter adapter exists and registers behind the obs emitter seam
+  OK   - OTel spans carry mcp.* / gen_ai.* semantic-convention attributes
+  OK   - the OTelEmitter is off by default — proven by the off-by-default tests
+  OK   - the MCP logging → obs/v1 log-event bridge exists and fans to both sinks
+  OK   - an integration test proves the logging bridge feeds MCP and obs/v1
+  OK   - make build stays CGo-free with the OTel dependency
+  OK   - the phase-16 transport unit tests pass
+  -- OK=11 FAIL=0 SKIP=0
+-- scripts/smoke/phase-17.sh
+smoke: phase-17 dockyard CLI skeleton + new
+  OK   - dockyard binary builds CGo-free
+  OK   - cobra root command exposes 'new'
+  OK   - dockyard new (no --template) produces a project
+  OK   - scaffold includes manifest, main, and an example tool
+  OK   - scaffold ships generated contract artifacts (schema + TypeScript)
+  OK   - the scaffolded project builds
+  OK   - the scaffolded project's contract test passes (it serves)
+  OK   - S1: a handler-emitted log event is trace-correlated to its tool.call
+  -- OK=8 FAIL=0 SKIP=0
+-- scripts/smoke/phase-18.sh
+smoke: phase-18 dockyard generate + validate
+  OK   - dockyard binary builds CGo-free
+  OK   - cobra root command exposes 'generate' and 'validate'
+  OK   - scaffolded a project to generate/validate against
+  OK   - dockyard generate runs in a scaffolded project
+  OK   - dockyard generate is idempotent (second run produces no diff)
+  OK   - dockyard validate exits 0 on a clean scaffolded project
+  OK   - dockyard validate exits non-zero on an invalid manifest
+  OK   - dockyard validate exits non-zero on a broken tool↔UI mapping
+  OK   - dockyard validate exits non-zero on stale generated output
+  -- OK=9 FAIL=0 SKIP=0
+-- scripts/smoke/phase-19.sh
+smoke: phase-19 dockyard dev (fsnotify orchestrator)
+  OK   - internal/devloop orchestrator package exists
+  OK   - internal/devloop embeds fsnotify (one process, no external dev tool)
+  OK   - internal/devloop does not shell out to air/wgo
+  OK   - internal/cli/dev.go exists and root.go registers the dev verb
+  OK   - dockyard binary builds CGo-free
+  OK   - cobra root command exposes 'dev'
+  OK   - dockyard dev --help describes the embedded loop (fsnotify + Vite)
+  OK   - internal/devloop tests pass (-race): debounce, restart, codegen, teardown
+  -- OK=8 FAIL=0 SKIP=0
+-- scripts/smoke/phase-20.sh
+smoke: phase-20 dockyard build + run + install
+  OK   - internal/buildpkg, internal/runpkg, internal/installpkg packages exist
+  OK   - build / run / install verbs are registered in the cobra root
+  OK   - internal/buildpkg pins CGO_ENABLED=0 on go build (CGo-free artifact)
+  OK   - the cross-compile matrix names the RFC §14 triples (darwin/linux/windows x amd64/arm64)
+  OK   - internal/installpkg ships the boot check (verifies the MCP initialize handshake)
+  OK   - dockyard binary builds CGo-free
+  OK   - dockyard --help lists build, run and install
+  OK   - dockyard build --help describes the pipeline (CGo-free, checksum)
+  OK   - dockyard run --help documents --transport
+  OK   - dockyard install --help documents the claude / cursor hosts
+  OK   - dockyard build produced a host binary + a SHA-256 checksum
+  OK   - a non-host cross-compile triple (linux/amd64) builds CGo-free
+  OK   - internal/{buildpkg,runpkg,installpkg} tests pass (-race)
+  -- OK=13 FAIL=0 SKIP=0
+-- scripts/smoke/phase-21.5.sh
+smoke: phase-21.5 test-quality hardening
+  OK   - coveragecheck package + cmd + config exist
+  OK   - make coverage target wired to the coverage checker
+  OK   - CI runs 'make coverage' (a coverage regression fails the build)
+  OK   - coverage checker exits non-zero on a coverage shortfall
+  OK   - web/ui + web/bridge have Vitest coverage.thresholds configured
+  OK   - the web/ gate runs vitest with --coverage (thresholds enforced)
+  OK   - fuzz targets exist for protocolcodec, manifest, codegen, the arg-frame path
+  OK   - each fuzz file defines at least one FuzzXxx target
+  OK   - benchmarks exist for the obs ring buffer, the codecs, the Store drivers
+  OK   - make bench target exists
+  OK   - concurrency-stress tests exist for LogBridge, validate, generate
+  -- OK=11 FAIL=0 SKIP=0
+-- scripts/smoke/phase-21.sh
+smoke: phase-21 dockyard test — contract + compliance gate
+  OK   - dockyard binary builds CGo-free
+  OK   - cobra root command exposes 'test'
+  OK   - scaffolded a project to run the test gate against
+  OK   - dockyard test runs all categories and exits 0 on a clean project
+  OK   - dockyard test exits non-zero on a contract regression
+  OK   - dockyard test exits non-zero on a spec-compliance violation
+  OK   - scaffolded server honours DOCKYARD_TRANSPORT=http (serves HTTP)
+  -- OK=7 FAIL=0 SKIP=0
+-- scripts/smoke/phase-22.sh
+smoke: phase-22 inspector core
+  OK   - internal/inspector exists and builds
+  OK   - inspector refuses a non-localhost bind (typed ErrNonLoopbackBind)
+  OK   - host-half bridge exists and reuses the web/bridge ui/ dialect
+  OK   - inspector obs/v1 stream relay exists
+  OK   - web/inspector is @dockyard/inspector with a gate script
+  OK   - web/inspector is in the make web WEB_PROJECTS set
+  OK   - web/inspector composes the @dockyard/ui design system
+  OK   - the inspector backend serves the server's Apps over /api/apps (R1)
+  OK   - web/inspector App.svelte loads a real App from /api/apps (R1)
+  OK   - web/inspector type-check + unit tests + coverage pass
+  -- OK=10 FAIL=0 SKIP=0
+-- scripts/smoke/phase-23.sh
+smoke: phase-23 inspector advanced
+  OK   - fixture switcher has the six fixtures wired to generated contracts
+  OK   - the Fixtures DetailRail panel exists
+  OK   - the Verdicts backend reuses internal/validate.Run
+  OK   - the Verdicts DetailRail panel exists
+  OK   - capability-set emulation exists as a capability toggle set
+  OK   - no hardcoded per-host capability matrix (§6/§13)
+  OK   - the Host capability-set control exists
+  OK   - the Tasks DetailRail panel renders the lifecycle + input_required
+  OK   - the Tools/Resources DetailRail panel exists
+  OK   - dockyard inspect is wired with --url / --dir / --port / --no-open
+  OK   - dockyard inspect is registered on the root command
+  OK   - dockyard inspect wires Verdicts, Contracts, and the App-preview source (R1)
+  OK   - dockyard inspect --help runs
+  OK   - internal/inspector/dist/index.html is the real Vite SPA bundle (R4 B1)
+  OK   - web/inspector type-check + unit tests + coverage pass
+  -- OK=15 FAIL=0 SKIP=0
+-- scripts/smoke/phase-24.sh
+smoke: phase-24 template system + analytics-widgets
+  OK   - dockyard binary builds CGo-free (with the analytics-widgets template embedded)
+  OK   - dockyard new --template analytics-widgets produces a project
+  OK   - materialised project includes the manifest, main, contracts, handlers, App and ChartFrame
+  OK   - manifest declares 3 tools + 1 inline-only app
+  OK   - materialised project ships 18 fixtures (6 per tool)
+  OK   - the materialised project builds CGo-free
+  OK   - the materialised project's contract tests pass
+  OK   - Sparkline lives in web/ui/ and is exported
+  OK   - docs/design/CONVENTIONS.md §3 lists Sparkline
+  OK   - ChartFrame stays template-local (decision D-127)
+  OK   - Sparkline is not duplicated under the template (composed from web/ui)
+  OK   - internal/scaffold ships the template-discovery seam (interface + RegisterTemplate + ErrUnknownTemplate)
+  OK   - no source file (internal/, cmd/, scripts/, templates/, web/) references the old name
+  OK   - the no-template 'dockyard new' path still works (Phase 17 first-class)
+  OK   - dockyard new --help lists --template
+  OK   - Phase 24 integration test passes (real materialise → build → tools/call cycle)
+  OK   - the inspector loads on-disk project fixtures via /api/fixtures (D-130)
+  OK   - the bridge default peer posts with targetOrigin='*' (D-129 regression)
+  OK   - the host bridge unwraps Svelte $state via postSafe (D-129)
+  OK   - the three Playwright-captured widget screenshots are checked in
+  OK   - the inspector ships operator-initiated tools/call (D-131)
+  OK   - the Dockyard wordmark is wired into PageHeader.lead
+  OK   - the analytics-widgets template exposes obs/v1 on the MCP listener (D-132)
+  OK   - the AppFrame push-tool-result effect guards against re-fire loops (D-133)
+  OK   - every rail tab is captured working end-to-end under docs/screenshots/phase-24-finish/
+  -- OK=25 FAIL=0 SKIP=0
+-- scripts/smoke/phase-25.sh
+smoke: phase-25 approval-flows template + bridge elicitation + tasks-engine scaffold
+  OK   - dockyard binary builds CGo-free (with the approval-flows template embedded)
+  OK   - dockyard new --template approval-flows produces a project
+  OK   - materialised project includes the manifest, main, contracts, handlers, App, ApprovalCard and EditsForm
+  OK   - manifest declares 2 task-augmented tools + 1 inline-only app
+  OK   - the scaffolded main.go attaches a tasks.Engine via server.Options.Tasks (D-135)
+  OK   - materialised project ships 12 fixtures (6 per tool)
+  OK   - the materialised approval-flows project builds CGo-free
+  OK   - the materialised approval-flows project's contract tests pass
+  OK   - FieldDiff lives in web/ui/ and is exported
+  OK   - docs/design/CONVENTIONS.md §3 lists FieldDiff
+  OK   - FieldDiff is not duplicated under the template (composed from web/ui)
+  OK   - the EditsForm composes FieldDiff from @dockyard/ui
+  OK   - the bridge ships the elicitation-response notification + the typed View helper (D-134)
+  OK   - the inspector host-bridge dispatches the elicitation-response (D-134)
+  OK   - the inspector ships operator-initiated elicitation-response (D-134)
+  OK   - AppShell supports fullViewport and the inspector enables it
+  OK   - no source file (internal/, cmd/, scripts/, templates/, web/) references the singular old name
+  OK   - Phase 25 integration test passes (tasks lifecycle + elicitation round-trip)
+  OK   - all four phase-25 screenshots are checked in
+  -- OK=19 FAIL=0 SKIP=0
+-- scripts/smoke/phase-27.sh
+smoke: phase-27 security + conformance
+  OK   - fuzz target present: internal/protocolcodec/fuzz_test.go
+  OK   - fuzz target present: internal/manifest/fuzz_test.go
+  OK   - fuzz target present: internal/codegen/fuzz_test.go
+  OK   - fuzz target present: runtime/tool/fuzz_test.go
+  OK   - fuzz target present: runtime/tasks/fuzz_test.go
+  OK   - fuzz target present: internal/inspector/fuzz_test.go
+  OK   - HTTPSecurity stress integration test present
+  OK   - Tasks security adversarial integration test present
+  OK   - Inspector security re-audit integration test present
+  OK   - conformance suite directory + at least one test file
+  OK   - Makefile coverage recipe no longer suppresses go test output unconditionally
+  OK   - Phase 27 decisions D-143..D-149 filed
+  OK   - Phase 27 packages compile under go vet
+  -- OK=13 FAIL=0 SKIP=0
+-- scripts/smoke/phase-28.sh
+smoke: phase-28 examples + godoc + docs hygiene
+  OK   - examples/backend-tools-only/ exists
+  OK   - examples/backend-tools-only/dockyard.app.yaml present
+  OK   - examples/backend-tools-only/cmd/server/main.go present
+  OK   - examples/backend-tools-only/README.md present
+  OK   - examples/combined-patterns/ exists
+  OK   - examples/combined-patterns/dockyard.app.yaml present
+  OK   - examples/combined-patterns/cmd/server/main.go present
+  OK   - examples/combined-patterns/README.md present
+  OK   - examples/prompts-demo/ exists
+  OK   - examples/prompts-demo/dockyard.app.yaml present
+  OK   - examples/prompts-demo/cmd/server/main.go present
+  OK   - examples/prompts-demo/README.md present
+  OK   - examples/backend-tools-only compiles
+  OK   - examples/combined-patterns compiles
+  OK   - examples/prompts-demo compiles
+  OK   - runtime/server.AddPrompt exists
+  OK   - obs.KindPromptGet exists
+  OK   - obs.PromptGetPayload exists
+  OK   - Recorder.PromptGet exists
+  OK   - runtime/server/prompt_test.go has TestAddPrompt* tests
+  OK   - runtime/server has Example test(s) for pkg.go.dev
+  OK   - runtime/tool has Example test(s) for pkg.go.dev
+  OK   - internal/cli/inspect.go no longer carries the unconditional 'read-only' inspector framing
+  OK   - docs/site/guides/inspector.md cites D-144 / operator-initiated
+  OK   - skills/test-with-the-inspector/SKILL.md cites D-144 / operator-initiated
+  OK   - templates/analytics-widgets/README.md.tmpl mentions 'go mod tidy' (D-139)
+  OK   - templates/approval-flows/README.md.tmpl mentions 'go mod tidy' (D-139)
+  OK   - docs/site/getting-started/examples.md exists
+  OK   - scripts/drift-audit.sh §19 hook covers examples/
+  OK   - examples/... tests pass under -race
+  OK   - runtime/server TestAddPrompt tests pass under -race
+  -- OK=31 FAIL=0 SKIP=0
+-- scripts/smoke/phase-29.sh
+smoke: phase-29 skills + tech-docs site
+  OK   - skill exists: scaffold-a-server
+  OK   - skill exists: add-a-tool
+  OK   - skill exists: attach-a-ui-resource
+  OK   - skill exists: define-contracts
+  OK   - skill exists: run-the-dev-loop
+  OK   - skill exists: validate
+  OK   - skill exists: package
+  OK   - skill exists: test-with-the-inspector
+  OK   - skillcheck: skills/ tree is clean
+  OK   - skillcheck rejects the malformed fixture (synthetic §19 drift case)
+  OK   - docs/site/.vitepress/config.ts exists
+  OK   - docs/site/package.json exists
+  OK   - .github/workflows/docs.yml exists
+  OK   - docs walkthrough exists for template: analytics-widgets
+  OK   - docs walkthrough exists for template: approval-flows
+  OK   - docs/site/cli/index.md references the core verbs
+  OK   - docs/site/agent-skills/index.md exists
+  OK   - docs/site VitePress build is clean
+  OK   - scripts/drift-audit.sh carries the §19 hook
+  -- OK=19 FAIL=0 SKIP=0
+-- scripts/smoke/phase-30.sh
+smoke: phase-30 V1 release engineering + cut
+  OK   - CHANGELOG.md exists
+  OK   - CHANGELOG.md carries a v1.0.0 release heading
+  OK   - CHANGELOG.md frames the V1 story by P1
+  OK   - CHANGELOG.md frames the V1 story by P2
+  OK   - CHANGELOG.md frames the V1 story by P3
+  OK   - CHANGELOG.md frames the V1 story by P4
+  OK   - .github/workflows/release.yml exists
+  OK   - release.yml triggers on v* tag push
+  OK   - release.yml carries the workflow_dispatch (dry-run) trigger
+  OK   - release.yml runs make preflight as a release gate
+  OK   - release.yml drives internal/releasebuild for the cross-compile matrix
+  OK   - release.yml uses softprops/action-gh-release for the GitHub Release
+  OK   - release.yml verifies the aggregate checksums before publishing
+  OK   - internal/changelogx builds
+  OK   - internal/releasebuild builds
+  OK   - changelogx CLI extracts the v1.0.0 section
+  OK   - changelogx CLI rejects a missing version
+  OK   - releasebuild CLI is reachable and prints its usage
+  OK   - docs/V2-BACKLOG.md exists
+  OK   - V2-BACKLOG references D-088
+  OK   - V2-BACKLOG references D-101
+  OK   - V2-BACKLOG references D-108
+  OK   - V2-BACKLOG references D-136
+  OK   - V2-BACKLOG references D-139
+  OK   - V2-BACKLOG references analytics-widgets
+  OK   - V2-BACKLOG references SLSA
+  OK   - V2-BACKLOG references ChatGPT Apps SDK
+  OK   - V2-BACKLOG references Postgres
+  OK   - docs/RELEASING.md exists
+  OK   - RELEASING.md documents the v1.0.0 tag-push command
+  OK   - RELEASING.md documents the semver policy
+  OK   - RELEASING.md documents the rollback procedure
+  OK   - README.md documents the go-install recommended path
+  OK   - skills/scaffold-a-server/SKILL.md documents the go-install recommended path
+  OK   - docs/site/getting-started/index.md documents the go-install recommended path
+  OK   - docs/site/index.md carries the v1.0.0 release callout
+  OK   - docs/plans/README.md marks Phase 30 as Shipped
+  OK   - docs/release/v1.0.0/ exists (dry-run transcripts)
+  OK   - docs/release/v1.0.0/cross-compile-matrix.txt is present and non-empty
+  OK   - docs/release/v1.0.0/preflight.txt is present and non-empty
+  OK   - docs/release/v1.0.0/binary-help.txt is present and non-empty
+  OK   - docs/release/v1.0.0/README.md is present and non-empty
+  OK   - scripts/drift-audit.sh still carries the §19 hook
+  OK   - decisions log carries D-154
+  OK   - decisions log carries D-155
+  OK   - decisions log carries D-156
+  OK   - decisions log carries D-157
+  OK   - decisions log carries D-158
+  OK   - decisions log carries D-159
+  OK   - decisions log carries D-160
+  -- OK=50 FAIL=0 SKIP=0
+== preflight: drift-audit ==
+DRIFT-AUDIT OK
+PREFLIGHT OK

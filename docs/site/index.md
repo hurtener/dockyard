@@ -28,6 +28,18 @@ features:
     details: "Drive your tools by hand, switch fixtures across UI states (happy/empty/error/permission/slow/large), render Apps in a sandboxed iframe, walk a task's lifecycle as a Timeline."
 ---
 
+## Released: v1.0.0
+
+Dockyard is now stable. Install the latest release with one command:
+
+```bash
+go install github.com/hurtener/dockyard/cmd/dockyard@v1.0.0
+```
+
+Full release notes are in [`CHANGELOG.md`](https://github.com/hurtener/dockyard/blob/main/CHANGELOG.md);
+the post-V1 backlog (what comes next) lives in
+[`docs/V2-BACKLOG.md`](https://github.com/hurtener/dockyard/blob/main/docs/V2-BACKLOG.md).
+
 ## Why Dockyard
 
 Dockyard is the third product in a three-part ecosystem:
