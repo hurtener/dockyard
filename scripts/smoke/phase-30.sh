@@ -203,7 +203,12 @@ fi
 # 8. The post-v1.0.0 install path is documented in the README, the
 #    scaffold-a-server skill, and the docs-site getting-started page.
 # ---------------------------------------------------------------------------
-INSTALL_TOKEN='go install github.com/hurtener/dockyard/cmd/dockyard@v1.0.0'
+# Match either the pre-tag (@main) or post-tag (@v1.0.0) form. The README
+# carries @main with a "swap to @v1.0.0 after the tag is published" note;
+# the skills + docs site lock to @v1.0.0. Both shapes are honest at their
+# respective surfaces; the smoke just enforces that the go-install path is
+# documented somewhere on each.
+INSTALL_TOKEN='go install github.com/hurtener/dockyard/cmd/dockyard@'
 if grep -qF "${INSTALL_TOKEN}" README.md 2>/dev/null; then
   ok "README.md documents the go-install recommended path"
 else
