@@ -486,6 +486,21 @@ a manifest field, a template, the generated-project shape, a public runtime API 
 work touches user-facing surface lists the skill/doc updates in its `Files added or
 changed` section. The §14 pre-merge checklist enforces it.
 
+**User-facing vocabulary.** Dockyard's internal phase-by-phase build methodology
+is contributor vocabulary. It lives in `docs/plans/`, `docs/decisions.md`,
+`docs/research/`, the RFC, `AGENTS.md`/`CLAUDE.md`, the glossary, the design-spec,
+CONVENTIONS, Makefile/workflow comments, and internal code. It **must not** bleed
+into user-facing surfaces — the root `README.md`, `CHANGELOG.md`,
+`docs/site/**/*.md`, `examples/*/README.md`, or `templates/*/README.md.tmpl`. User-
+facing surfaces describe what the framework *does* and *is*, not when it was
+built. "Phase N", "phase-N", and similar wording is forbidden on those paths.
+`D-NNN` decision-log citations are acceptable in `docs/site/**/*.md` and
+`examples/*/README.md` (they cross-link the public decisions reference page); they
+are **not** acceptable in `templates/*/README.md.tmpl` (a scaffolded user's project
+README should be 100% about that project, not Dockyard's institutional memory). The
+`drift-audit` script's §19 hook enforces this mechanically; a future regression
+fails CI before merge.
+
 Before Phase 29 lands, `skills/` and the docs site do not yet exist and the rule is
 inert; Phase 29 establishes both and turns the rule on.
 

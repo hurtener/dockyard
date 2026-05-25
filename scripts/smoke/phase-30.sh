@@ -260,6 +260,15 @@ else
   fail "scripts/drift-audit.sh has lost the §19 hook"
 fi
 
+# §19 user-facing-vocabulary hook (added in the v1.0.0 polish pass):
+# every user-facing surface is mechanically free of "Phase N" prose.
+if grep -q "user-facing vocabulary" scripts/drift-audit.sh \
+   && grep -q "template-README D-NNN" scripts/drift-audit.sh; then
+  ok "scripts/drift-audit.sh carries the §19 user-facing-vocabulary + template-D-NNN hooks"
+else
+  fail "scripts/drift-audit.sh is missing the §19 user-facing-vocabulary hook"
+fi
+
 # ---------------------------------------------------------------------------
 # 12. The new D-NNN entries land in the decisions log.
 # ---------------------------------------------------------------------------
