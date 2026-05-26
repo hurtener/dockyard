@@ -1,0 +1,103 @@
+=============================================================================
+v1.1 wave B — runtime cleanups — capability test transcript
+D-165: Claude signed-origin testgate cleanup
+=============================================================================
+Captured: 2026-05-25 (clean checkout of feat/v1.1-runtime-cleanups)
+Worktree: /Users/santiagobenvenuto/Repos/dockyard-v1.1-runtime
+CLI build: go build -o /tmp/dockyard-wave-b ./cmd/dockyard
+
+This transcript demonstrates the D-165 cleanup: the capability-
+degradation testgate category now consults
+HostProfile.RequiresServerURL() and exercises every shipped host
+profile honestly — the synthetic URL the gate previously fabricated to
+dodge the Claude signed-origin invariant is GONE.
+
+-----------------------------------------------------------------------------
+STEP 1 — Verify the synthetic-URL workaround is retired
+-----------------------------------------------------------------------------
+$ grep -nE "capability-test.example|syntheticServerURL" \
+    internal/testgate/categories.go
+
+  (no matches — both the constant and its example domain are gone)
+
+$ grep -nE "profile\.RequiresServerURL\(\)" internal/testgate/categories.go
+
+  264:			if profile.RequiresServerURL() {
+  265:				continue
+  266:			}
+  267:			if _, err := profile.DeriveDomain(label, ""); err != nil {
+
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The gate now consults profile.RequiresServerURL() and passes an EMPTY
+  server URL to DeriveDomain. A profile that requires a server URL is
+  exempt from the empty-URL derivation (its signed-origin binding is
+  proven by the profile's own tests under runtime/apps/); a profile that
+  does not require one derives cleanly against an empty URL.
+
+-----------------------------------------------------------------------------
+STEP 2 — Verify the HostProfile method declarations
+-----------------------------------------------------------------------------
+$ grep -nE "RequiresServerURL\(\) bool" runtime/apps/hostprofile*.go
+
+  runtime/apps/hostprofile.go:54:	RequiresServerURL() bool
+  runtime/apps/hostprofile_claude.go:75:func (claudeHostProfile) RequiresServerURL() bool { return true }
+  runtime/apps/hostprofile_generic.go:30:func (genericHostProfile) RequiresServerURL() bool { return false }
+
+  generic returns false — pass-through; the label flows through verbatim
+  claude  returns true  — signing host, derivation binds to server URL
+
+-----------------------------------------------------------------------------
+STEP 3 — dockyard test against the analytics-widgets template scaffold
+-----------------------------------------------------------------------------
+$ /tmp/dockyard-wave-b new widgets-demo --template analytics-widgets \
+    --dockyard-path /Users/santiagobenvenuto/Repos/dockyard-v1.1-runtime
+$ cd widgets-demo && go mod tidy && /tmp/dockyard-wave-b generate
+
+$ /tmp/dockyard-wave-b test
+
+  [PASS] go-test: `go test ./...` passed
+  [PASS] contract: 7 contract artifact(s) match their Go source
+  [PASS] golden: 6 schema snapshot(s) present, valid, and coherent with TypeScript
+  [PASS] spec-compliance: conforms to the vendored MCP specs
+  [PASS] capability: degrades gracefully across 2 host profile(s); every UI tool has a model-facing fallback
+  test: OK — 5/5 categories passed
+
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The capability category passes for the analytics-widgets scaffold (one
+  UI App against the two registered host profiles, generic + claude)
+  WITHOUT the synthetic URL the gate previously fabricated. The claude
+  profile is skipped via the new RequiresServerURL exemption; the generic
+  profile derives cleanly against the empty URL.
+
+-----------------------------------------------------------------------------
+STEP 4 — dockyard test against the auto-wired tasks-demo (D-164)
+-----------------------------------------------------------------------------
+$ cd /tmp/wave-b-demo/tasks-demo && /tmp/dockyard-wave-b test
+
+  [PASS] go-test: `go test ./...` passed
+  [PASS] contract: 3 contract artifact(s) match their Go source
+  [PASS] golden: 2 schema snapshot(s) present, valid, and coherent with TypeScript
+  [PASS] spec-compliance: conforms to the vendored MCP specs (1 warning(s))
+  [PASS] capability: degrades gracefully across 2 host profile(s); every UI tool has a model-facing fallback
+  test: OK — 5/5 categories passed
+
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The auto-wired tasks-supporting scaffold (D-164) also passes the
+  capability category against the cleaned-up gate (D-165) — the two
+  wave-B items compose cleanly.
+
+=============================================================================
+SUMMARY
+=============================================================================
+- The HostProfile interface now declares RequiresServerURL() bool;
+  generic returns false, claude returns true. Out-of-tree implementers
+  must add the one-line method (semver-minor breaking — see D-165 for
+  the trade-off framing).
+- internal/testgate/categories.go's runCapability consults the new
+  method instead of fabricating https://capability-test.example/mcp.
+- The capability category passes for every shipped scaffold:
+  analytics-widgets, approval-flows (the templates), and the
+  auto-wired no-template scaffold (tasks-demo above).
+- D-145 (the original synthetic-URL workaround that recorded "Phase 27
+  hardening" as the deferral) is closed; the V2-backlog entry stays in
+  docs/V2-BACKLOG.md as a cross-link to D-165.
