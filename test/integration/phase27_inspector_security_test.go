@@ -54,6 +54,11 @@ func TestPhase27_InspectorSecurity_NewClientAudit(t *testing.T) {
 			funcName: "invokeToolViaSDK",
 			decision: "D-131 (operator-initiated tools/call from the inspector)",
 		},
+		"internal/inspector/prompts.go": {
+			path:     "internal/inspector/prompts.go",
+			funcName: "dialAttachedPrompt",
+			decision: "D-163 (operator-initiated prompts/list + prompts/get; v1.1 Wave A)",
+		},
 		"internal/installpkg/bootcheck.go": {
 			path:     "internal/installpkg/bootcheck.go",
 			funcName: "bootCheck",

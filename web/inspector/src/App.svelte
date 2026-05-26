@@ -34,6 +34,7 @@
   import VerdictsPanel from './lib/VerdictsPanel.svelte';
   import TasksPanel from './lib/TasksPanel.svelte';
   import AnalyticsPanel from './lib/AnalyticsPanel.svelte';
+  import PromptsPanel from './lib/PromptsPanel.svelte';
   import HostControl from './lib/HostControl.svelte';
   import {
     fetchServerInfo,
@@ -41,12 +42,14 @@
     fetchVerdicts,
     fetchContracts,
     fetchApps,
+    fetchPrompts,
     fetchProjectFixtures,
     obsStreamURL,
     postElicitationResponse,
     type ServerInfo,
     type VerdictRow,
     type AppPreview,
+    type PromptInfo,
     type ToolInvokeResult,
   } from './lib/api.js';
   import type { ElicitationResponseParams } from '@dockyard/bridge';
@@ -123,13 +126,17 @@
   let apps = $state<AppPreview[]>([]);
   let appsState = $state<PageStateValue>('loading');
   let appsError = $state('');
+
+  // -- registered prompts (drive the Prompts panel; v1.1 Wave A, D-163) --
+  let prompts = $state<PromptInfo[]>([]);
+  let promptsState = $state<PageStateValue>('loading');
   // The HTML the App-frame renders: the test override when set, otherwise the
   // first App discovered from the attached server's ui:// resources.
   const previewHtml = $derived(appHtml !== '' ? appHtml : (apps[0]?.html ?? ''));
   const previewName = $derived(apps[0]?.name ?? serverInfo?.name);
 
   // The inspector DetailRail tabs.
-  const tabs = ['Events', 'RPC', 'Fixtures', 'Tools', 'Verdicts', 'Tasks', 'Analytics'];
+  const tabs = ['Events', 'RPC', 'Fixtures', 'Tools', 'Prompts', 'Verdicts', 'Tasks', 'Analytics'];
   let activeTab = $state(0);
 
   function onHostRpc(entry: HostRpcLogEntry): void {
@@ -195,6 +202,23 @@
       contractsState = contracts.length > 0 ? 'ready' : 'empty';
     } catch {
       contractsState = contracts.length > 0 ? 'ready' : 'error';
+    }
+  }
+
+  /**
+   * Loads the attached server's registered prompts from `GET /api/prompts`
+   * (v1.1 Wave A; closes D-151). The panel routes the standard four-state:
+   * loading while the read is in flight, empty when the server registers
+   * none, error (with a working retry) when prompts/list fails, ready
+   * once the list is rendered.
+   */
+  async function loadPrompts(): Promise<void> {
+    promptsState = 'loading';
+    try {
+      prompts = await fetchPrompts(base);
+      promptsState = prompts.length > 0 ? 'ready' : 'empty';
+    } catch {
+      promptsState = prompts.length > 0 ? 'ready' : 'error';
     }
   }
 
@@ -308,7 +332,14 @@
       serverInfo = { name: 'disconnected', version: '', transport: '' };
     }
     startStream();
-    await Promise.all([loadRpcLog(), loadVerdicts(), loadContracts(), loadApps(), loadProjectFixtures()]);
+    await Promise.all([
+      loadRpcLog(),
+      loadVerdicts(),
+      loadContracts(),
+      loadApps(),
+      loadProjectFixtures(),
+      loadPrompts(),
+    ]);
   });
 
   onDestroy(() => stream?.close());
@@ -387,6 +418,15 @@
             />
           </RailCard>
         {:else if index === 4}
+          <RailCard title="Prompts">
+            <PromptsPanel
+              {prompts}
+              panelState={promptsState}
+              onRetry={loadPrompts}
+              {base}
+            />
+          </RailCard>
+        {:else if index === 5}
           <RailCard title="Verdicts">
             <VerdictsPanel
               {verdicts}
@@ -394,11 +434,11 @@
               onRetry={loadVerdicts}
             />
           </RailCard>
-        {:else if index === 5}
+        {:else if index === 6}
           <RailCard title="Tasks">
             <TasksPanel {events} streamState={eventsState} onRetry={startStream} />
           </RailCard>
-        {:else if index === 6}
+        {:else if index === 7}
           <RailCard title="Analytics">
             <AnalyticsPanel {events} streamState={eventsState} onRetry={startStream} />
           </RailCard>
