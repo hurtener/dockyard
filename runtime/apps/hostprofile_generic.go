@@ -22,6 +22,12 @@ func (genericHostProfile) DeriveDomain(label, _ string) (string, error) {
 	return label, nil
 }
 
+// RequiresServerURL implements HostProfile: the generic profile is
+// pass-through, so the serverURL is not consulted. The capability-degradation
+// testgate category drives this profile against an empty serverURL without
+// the synthetic-URL workaround D-165 retires.
+func (genericHostProfile) RequiresServerURL() bool { return false }
+
 // init registers the generic profile. It is the always-present default the
 // registry falls back to (HostProfileFor("") and DefaultHostProfile()).
 func init() {

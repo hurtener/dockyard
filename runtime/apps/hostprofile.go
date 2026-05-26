@@ -33,6 +33,24 @@ type HostProfile interface {
 	// origin form (for Claude, a SHA-256-derived `claudemcpcontent.com`
 	// subdomain — brief 01 §2.5).
 	DeriveDomain(label, serverURL string) (string, error)
+	// RequiresServerURL reports whether the profile cannot derive a domain
+	// from a non-empty label without a non-empty serverURL — the case of a
+	// signing host that binds the derivation to the server URL so distinct
+	// servers cannot forge each other's origin (brief 01 §2.5, D-063, D-064).
+	//
+	// A pass-through profile (e.g. "generic") returns false: it returns the
+	// label verbatim regardless of serverURL. A signing profile (e.g.
+	// "claude") returns true: feeding it an empty serverURL yields the
+	// ErrInvalidApp-wrapped "cannot derive a signed origin without a server
+	// URL" error rather than a forgeable origin.
+	//
+	// The method is the seam D-165 closes: it lets the
+	// capability-degradation testgate category exercise every profile
+	// honestly — a profile that requires a server URL is exempt from the
+	// empty-URL derivation (its derivation is proven by the profile's own
+	// tests, not synthesised in the gate) — without the gate fabricating a
+	// synthetic placeholder URL to dodge the invariant.
+	RequiresServerURL() bool
 }
 
 // hostProfileRegistry is the process-wide interface + factory + driver registry
