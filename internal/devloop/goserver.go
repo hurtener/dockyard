@@ -14,11 +14,22 @@ import (
 // CGO_ENABLED=0 matches the shipped-artifact guarantee (CLAUDE.md §5); the dev
 // child is not the shipped artifact, but keeping it CGo-free avoids a divergent
 // dev-vs-build behaviour.
-func goServerCommand(projectDir string, override []string) command {
+//
+// When extraEnv is non-empty, those entries are appended to the inherited
+// environment after CGO_ENABLED. The dev loop uses this to pin the
+// scaffolded server's transport to HTTP on a deterministic address when the
+// inspector auto-attaches (v1.1 Wave A) — so the inspector has a known
+// MCP base URL to connect to without the developer having to set the
+// env-vars by hand. A developer who already set DOCKYARD_TRANSPORT /
+// DOCKYARD_HTTP_ADDR in their shell wins via the later-wins os/exec.Cmd
+// environment ordering — the dev loop's pins are a default, not an override.
+func goServerCommand(projectDir string, override []string, extraEnv []string) command {
+	env := append(os.Environ(), "CGO_ENABLED=0")
+	env = append(env, extraEnv...)
 	c := command{
 		name: "go server",
 		dir:  projectDir,
-		env:  append(os.Environ(), "CGO_ENABLED=0"),
+		env:  env,
 	}
 	if len(override) > 0 {
 		// Test/seam override: an injected command (e.g. a controllable stub)

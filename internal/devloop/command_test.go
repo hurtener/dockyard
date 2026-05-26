@@ -8,7 +8,7 @@ import (
 
 func TestGoServerCommandDefault(t *testing.T) {
 	t.Parallel()
-	c := goServerCommand("/tmp/proj", nil)
+	c := goServerCommand("/tmp/proj", nil, nil)
 	if c.path != "go" {
 		t.Errorf("default go-server path = %q, want %q", c.path, "go")
 	}
@@ -32,9 +32,36 @@ func TestGoServerCommandDefault(t *testing.T) {
 
 func TestGoServerCommandOverride(t *testing.T) {
 	t.Parallel()
-	c := goServerCommand("/tmp/proj", []string{"/bin/echo", "hi"})
+	c := goServerCommand("/tmp/proj", []string{"/bin/echo", "hi"}, nil)
 	if c.path != "/bin/echo" || len(c.args) != 1 || c.args[0] != "hi" {
 		t.Errorf("override not applied: path=%q args=%v", c.path, c.args)
+	}
+}
+
+// TestGoServerCommandExtraEnv exercises the v1.1-wave-A extension: the
+// dev loop appends inspector auto-attach env pins (DOCKYARD_TRANSPORT,
+// DOCKYARD_HTTP_ADDR) to the child environment when the inspector is
+// enabled. The pins land AFTER the inherited environment so a developer's
+// own setting (`DOCKYARD_TRANSPORT=stdio dockyard dev`) wins via the
+// later-entry-wins rule os/exec follows.
+func TestGoServerCommandExtraEnv(t *testing.T) {
+	t.Parallel()
+	extras := []string{"DOCKYARD_TRANSPORT=http", "DOCKYARD_HTTP_ADDR=127.0.0.1:9999"}
+	c := goServerCommand("/tmp/proj", nil, extras)
+	var sawTransport, sawAddr bool
+	for _, e := range c.env {
+		if e == "DOCKYARD_TRANSPORT=http" {
+			sawTransport = true
+		}
+		if e == "DOCKYARD_HTTP_ADDR=127.0.0.1:9999" {
+			sawAddr = true
+		}
+	}
+	if !sawTransport {
+		t.Error("go-server env missing DOCKYARD_TRANSPORT=http extra")
+	}
+	if !sawAddr {
+		t.Error("go-server env missing DOCKYARD_HTTP_ADDR extra")
 	}
 }
 
