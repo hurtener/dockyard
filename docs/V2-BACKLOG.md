@@ -64,6 +64,10 @@ recorded order in the decisions log. Each item carries:
 
 ### `dockyard dev`'s inspector auto-attach seam
 
+- **Status: Closed in v1.1 Wave A** — D-161 (the auto-attach seam +
+  `--no-inspector` opt-out), D-162 (the in-process-vs-subprocess
+  choice). The plan is
+  `docs/plans/v1.1-wave-A-inspector-polish.md`.
 - **Origin.** D-085 (Phase 19 deferred inspector attachment to the
   phase that builds the inspector); D-101 (Phase 23 left the
   auto-attach as a clean follow-up seam). RFC §12 names both
@@ -127,6 +131,10 @@ recorded order in the decisions log. Each item carries:
 
 ### Inspector Prompts panel
 
+- **Status: Closed in v1.1 Wave A** — D-163 (the panel + the
+  operator-initiated `GET /api/prompts` + `POST /api/prompts/get`
+  surfaces). The plan is
+  `docs/plans/v1.1-wave-A-inspector-polish.md`.
 - **Origin.** D-151 (the Phase 28 `runtime/server.AddPrompt` surface);
   the `prompts-demo` example's README documents the missing
   visible-demo path.

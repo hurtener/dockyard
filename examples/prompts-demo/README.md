@@ -83,11 +83,11 @@ go run ./cmd/server
 # 4) Or, run it over streamable-HTTP on 127.0.0.1:8080:
 DOCKYARD_TRANSPORT=http go run ./cmd/server
 
-# 5) The inspector currently renders Tools / Resources / Tasks but not
-#    Prompts; to drive prompts/list + prompts/get
-#    use a host that surfaces prompts (Claude, an MCP CLI), or call the
-#    JSON-RPC frames directly. See the screenshot under
-#    docs/screenshots/phase-28/ for the inspect-side view.
+# 5) The inspector renders a Prompts rail tab (v1.1 Wave A) that lists
+#    the prompts and lets an operator drive prompts/get end-to-end —
+#    `dockyard dev` auto-attaches it. Or, for the standalone path:
+#    DOCKYARD_TRANSPORT=http go run ./cmd/server   # in one terminal
+#    dockyard inspect --url http://127.0.0.1:8080  # in another
 ```
 
 Run the handler tests:

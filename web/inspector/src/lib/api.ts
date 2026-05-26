@@ -9,6 +9,14 @@
 
 import { parseRelayLog, type RpcEntry } from './rpc.js';
 import { parseContracts, type ToolContract } from './contracts.js';
+import {
+  parsePrompts,
+  parsePromptGetResponse,
+  type PromptInfo,
+  type PromptGetResponse,
+} from './prompts.js';
+
+export type { PromptInfo, PromptGetResponse, PromptGetMessage, PromptArgumentInfo } from './prompts.js';
 
 /** One verdict row from the backend `GET /api/verdicts` endpoint. */
 export interface VerdictRow {
@@ -343,4 +351,76 @@ export async function fetchProjectFixtures(
           ? (d.structuredContent as Record<string, unknown>)
           : undefined,
     }));
+}
+
+/**
+ * Fetches the attached server's registered MCP Prompts from
+ * `GET /api/prompts` (v1.1 Wave A; closes D-151). The backend performs a
+ * read-only prompts/list against the attached server (D-163 extends D-103's
+ * pattern). A detached inspector yields an empty list and the panel renders
+ * its four-state empty state; an unreachable server is a thrown error the
+ * panel surfaces in its error state with a working retry.
+ */
+export async function fetchPrompts(
+  base = '',
+  fetchImpl: typeof fetch = fetch,
+): Promise<PromptInfo[]> {
+  const resp = await fetchImpl(`${base}/api/prompts`);
+  if (!resp.ok) {
+    let detail = `inspector: /api/prompts returned ${resp.status}`;
+    try {
+      const body: unknown = await resp.json();
+      if (
+        typeof body === 'object' &&
+        body !== null &&
+        typeof (body as { error?: unknown }).error === 'string'
+      ) {
+        detail = (body as { error: string }).error;
+      }
+    } catch {
+      // A non-JSON error body — keep the status-code detail.
+    }
+    throw new Error(detail);
+  }
+  return parsePrompts(await resp.json());
+}
+
+/**
+ * Invokes a prompt on the attached server through the inspector's
+ * `POST /api/prompts/get` endpoint (v1.1 Wave A; D-163; RFC §12; P4). The
+ * operator is the one driving the request through the UI — the inspector
+ * itself remains the lone client-shaped surface, dev-mode-gated and
+ * localhost-bound (the listener's loopback gate enforces it). A
+ * transport-level failure (the server is unreachable, the prompt not
+ * found) is a thrown error the caller surfaces in the panel's error
+ * state. A server-side prompts/get error is returned as a result with
+ * `error` filled in (the 200-with-error pattern D-131 set for tools).
+ */
+export async function invokePrompt(
+  request: { name: string; arguments?: Record<string, string> },
+  base = '',
+  fetchImpl: typeof fetch = fetch,
+): Promise<PromptGetResponse> {
+  const resp = await fetchImpl(`${base}/api/prompts/get`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!resp.ok) {
+    let detail = `inspector: /api/prompts/get returned ${resp.status}`;
+    try {
+      const body: unknown = await resp.json();
+      if (
+        typeof body === 'object' &&
+        body !== null &&
+        typeof (body as { error?: unknown }).error === 'string'
+      ) {
+        detail = (body as { error: string }).error;
+      }
+    } catch {
+      // A non-JSON error body — keep the status-code detail.
+    }
+    throw new Error(detail);
+  }
+  return parsePromptGetResponse(await resp.json());
 }

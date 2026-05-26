@@ -43,6 +43,30 @@ type Config struct {
 	// a full Go toolchain codegen run; production always leaves it false.
 	SkipCodegen bool
 
+	// DisableInspector skips the supervised inspector child. By default the
+	// dev loop auto-attaches the inspector as a third supervised child
+	// (v1.1 Wave A; closes D-101). A developer who wants the headless dev
+	// loop — a CI run, a screen-sharing session, a no-UI iteration —
+	// passes --no-inspector at the CLI which sets this flag.
+	DisableInspector bool
+
+	// InspectorAddr is the inspector's loopback bind address. Empty selects
+	// `127.0.0.1:0` (an OS-assigned port). A non-loopback or malformed
+	// address is rejected by internal/inspector.requireLoopback before the
+	// listener opens; the inspector child stays down and the dev loop's
+	// other children continue.
+	InspectorAddr string
+
+	// ServerHTTPAddr is the deterministic HTTP transport address the dev
+	// loop pins for the Go server when the inspector auto-attaches.
+	// Empty selects 127.0.0.1:8080 — the same default the scaffolded
+	// templates and `examples/prompts-demo` use, so a default dev session
+	// works without configuration. The pin lands as a default env-var on
+	// the supervised Go server; a developer who already exported
+	// DOCKYARD_HTTP_ADDR in their shell wins via the later-entry-wins
+	// env-var ordering.
+	ServerHTTPAddr string
+
 	// hooks, when non-nil, receives lifecycle notifications. Test-only — it is
 	// unexported so it is not part of the public seam.
 	hooks *hooks
@@ -57,12 +81,22 @@ type hooks struct {
 	onCodegen func(error)
 	// onReady fires once the initial process tree is up.
 	onReady func()
+	// onInspectorReady fires once the supervised inspector has its
+	// listener open and is serving — the test waits on this instead of
+	// polling the loopback URL.
+	onInspectorReady func(url string)
 }
 
 // errFatal wraps an error that ends the dev session. A child crash is not
 // fatal (the loop reports and survives); a watcher failure or an inability to
 // start the initial tree is.
 var errFatal = errors.New("devloop: fatal")
+
+// defaultServerHTTPAddr is the dev loop's default HTTP bind for the
+// supervised Go server when the inspector auto-attaches. Matches the
+// scaffolded templates' `httpAddr` constant so the dev loop's default
+// behaviour mirrors what `DOCKYARD_TRANSPORT=http go run .` already does.
+const defaultServerHTTPAddr = "127.0.0.1:8080"
 
 // Run starts the dev orchestrator and blocks until ctx is cancelled or a fatal
 // error occurs. On return the whole process tree — the Go server, Vite, and
@@ -110,8 +144,9 @@ type orchestrator struct {
 	// ctx through every helper signature.
 	ctx context.Context //nolint:containedctx // a per-run session object; not reused
 
-	goServer *supervisor
-	vite     *supervisor
+	goServer  *supervisor
+	vite      *supervisor
+	inspector *inspectorChild
 }
 
 // run is the orchestrator's lifecycle: bring up the process tree, drive the
@@ -137,7 +172,16 @@ func (o *orchestrator) run(ctx context.Context) error {
 	}()
 
 	// --- Go server supervisor --------------------------------------------
-	o.goServer = newSupervisor(ctx, goServerCommand(o.projectDir, o.cfg.GoServerCommand), o.logger)
+	// When the inspector auto-attaches, the dev loop pins the Go server's
+	// transport to HTTP on a deterministic address so the inspector has a
+	// known MCP base URL to connect to. The pins land as defaults — a
+	// developer who already set DOCKYARD_TRANSPORT / DOCKYARD_HTTP_ADDR
+	// in their shell wins via the later-entry-wins env-var ordering
+	// os/exec follows. With --no-inspector the dev loop pins nothing,
+	// preserving the pre-v1.1 behaviour exactly.
+	serverHTTPAddr := o.serverHTTPAddr()
+	extraEnv := o.goServerExtraEnv(serverHTTPAddr)
+	o.goServer = newSupervisor(ctx, goServerCommand(o.projectDir, o.cfg.GoServerCommand, extraEnv), o.logger)
 	// A Go-server crash is reported, not fatal: the developer's next save
 	// rebuilds it. onExit fires only for an unsolicited exit.
 	o.goServer.onExit = func(exitErr error) {
@@ -175,6 +219,32 @@ func (o *orchestrator) run(ctx context.Context) error {
 		}
 	} else {
 		o.logger.InfoContext(ctx, "no web/ UI project found — supervising the go server only")
+	}
+
+	// --- inspector child (gated on --no-inspector) -----------------------
+	// The inspector is the third supervised child (v1.1 Wave A; closes
+	// D-101). It runs in-process: internal/inspector is an importable Go
+	// package, so the dev loop builds + serves an Inspector directly
+	// rather than re-execing `bin/dockyard inspect`. The in-process choice
+	// is captured by D-162; the auto-attach + opt-out seam is D-161.
+	if !o.cfg.DisableInspector {
+		serverURL := "http://" + serverHTTPAddr
+		o.inspector = newInspectorChild(o.logger, o.cfg.InspectorAddr, serverURL, o.projectDir)
+		if startErr := o.inspector.Start(ctx); startErr != nil {
+			// A bind failure is reported, not fatal: the rest of the dev
+			// tree stays useful. The most common cause is a stale
+			// inspector still running on a pinned port; the developer
+			// fixes that and re-runs `dockyard dev`.
+			o.logger.ErrorContext(ctx, "inspector start failed",
+				slog.String("error", startErr.Error()),
+				slog.String("hint", "is another inspector already on this port? pass --inspector-addr 127.0.0.1:0 or kill the other one"))
+			o.inspector = nil
+		} else {
+			o.logger.InfoContext(ctx, "inspector ready at "+o.inspector.URL())
+			if o.cfg.hooks != nil && o.cfg.hooks.onInspectorReady != nil {
+				o.cfg.hooks.onInspectorReady(o.inspector.URL())
+			}
+		}
 	}
 
 	o.logger.InfoContext(ctx, "dockyard dev is watching for changes",
@@ -271,13 +341,42 @@ func (o *orchestrator) restartGoServer() {
 
 // teardown stops the supervised children. Children are stopped before the
 // watcher so a final file event cannot trigger a restart of a child that is
-// being torn down.
+// being torn down. The inspector is stopped first so its in-process HTTP
+// server drains before its serverURL points at a dead Go server (avoids a
+// transient 502 on the operator's last UI action).
 func (o *orchestrator) teardown() {
+	if o.inspector != nil {
+		o.inspector.Stop()
+	}
 	if o.goServer != nil {
 		o.goServer.Stop()
 	}
 	if o.vite != nil {
 		o.vite.Stop()
+	}
+}
+
+// serverHTTPAddr returns the deterministic HTTP bind for the supervised
+// Go server. The Config override wins; otherwise the dev loop picks the
+// canonical scaffold default so a default run works without setup.
+func (o *orchestrator) serverHTTPAddr() string {
+	if o.cfg.ServerHTTPAddr != "" {
+		return o.cfg.ServerHTTPAddr
+	}
+	return defaultServerHTTPAddr
+}
+
+// goServerExtraEnv returns the env-var pins the dev loop adds to the
+// supervised Go server when the inspector auto-attaches. When the
+// inspector is disabled the function returns nil — the supervised
+// server's environment is unchanged from the pre-v1.1 behaviour.
+func (o *orchestrator) goServerExtraEnv(serverHTTPAddr string) []string {
+	if o.cfg.DisableInspector {
+		return nil
+	}
+	return []string{
+		"DOCKYARD_TRANSPORT=http",
+		"DOCKYARD_HTTP_ADDR=" + serverHTTPAddr,
 	}
 }
 

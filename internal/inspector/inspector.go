@@ -121,6 +121,20 @@ type Options struct {
 	// P4 (localhost-bound, operator-driven, no long-lived client).
 	Elicitor Elicitor
 
+	// Prompts is the read-only source for the inspector's Prompts panel
+	// (v1.1 Wave A; D-163). When nil, `GET /api/prompts` answers with an
+	// empty array and the Prompts panel renders its four-state empty
+	// state. Use [PromptsFromServer] to source it from a running MCP
+	// server's prompts/list call.
+	Prompts PromptSource
+
+	// PromptInvoker performs one operator-initiated prompts/get against
+	// the attached MCP server (v1.1 Wave A; D-163 — extends D-131's
+	// operator-initiated framing to a third client-shaped surface).
+	// When nil, `POST /api/prompts/get` answers 503. Use
+	// [PromptsFromServer] which returns this paired with the source.
+	PromptInvoker PromptInvoker
+
 	// Logger is the structured logger. When nil, a no-op logger is used.
 	Logger *slog.Logger
 }

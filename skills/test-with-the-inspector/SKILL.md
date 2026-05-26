@@ -28,7 +28,24 @@ The inspector is Dockyard's local **test + debug** surface. It is:
 
 ## Attach to a running server
 
-In one terminal, run the server on HTTP (the inspector relays via HTTP):
+The fastest path is `dockyard dev` — it **auto-attaches** the
+inspector as a third supervised child alongside the Go server and
+Vite, and prints the inspector URL to stdout once it is reachable.
+You skip the second terminal entirely:
+
+```bash
+dockyard dev
+# ...
+# INFO inspector ready at http://127.0.0.1:54321
+```
+
+Pass `--no-inspector` (CI / headless) to skip the supervised
+inspector child.
+
+For a server that is not under `dockyard dev` (e.g. a deployed dev
+build, a remote loopback server you are debugging), use the
+standalone path. In one terminal, run the server on HTTP (the
+inspector relays via HTTP):
 
 ```bash
 DOCKYARD_TRANSPORT=http dockyard run
@@ -64,6 +81,7 @@ mechanical enforcement of RFC §12 (the CVE-2025-49596 lesson).
 | Tab        | What it shows / does                                                       |
 | ---------- | -------------------------------------------------------------------------- |
 | Tools      | All registered tools; click one to fire it (the Operator-Invoke surface — D-131) |
+| Prompts    | All registered MCP prompts; pick one, fill its arguments, render `prompts/get` messages (D-163) |
 | Apps       | Each `ui://` resource rendered in a sandboxed iframe (D-103)               |
 | Tasks      | The active and recent tasks, rendered as a lifecycle Timeline               |
 | Events     | The live Logbook stream — every tool/resource/app/task event              |
@@ -71,6 +89,38 @@ mechanical enforcement of RFC §12 (the CVE-2025-49596 lesson).
 | Fixtures   | The fixture switcher — pick a UI state for the App preview                 |
 | Verdicts   | Re-runs `dockyard validate`; renders blockers + warnings                  |
 | RPC        | The raw JSON-RPC log between the inspector and the attached server         |
+
+## The Prompts panel
+
+MCP separates two model-facing primitives:
+
+- **Tools** — things the model PUSHES (a typed input becomes a typed
+  output, the host validates, the runtime emits a Logbook event).
+- **Prompts** — templates the host PULLS via `prompts/get` (named
+  curated message sets a chat host surfaces as `/slash` commands or
+  quick-action buttons; the user picks one, the host fills its
+  arguments, the model is seeded).
+
+The Prompts panel lists every prompt the attached server registered
+via `runtime/server.AddPrompt`. Pick one, fill its string arguments
+(MCP prompt arguments are flat strings — see D-152; no JSON Schema
+form), press **Invoke prompts/get**. The inspector opens a
+short-lived MCP client session, calls `prompts/get`, closes the
+session, and renders the resulting message list — one card per
+message, role chip + the text body. A server-side error renders in
+the result region (the 200-with-error pattern); a transport-level
+failure renders in the panel's `ErrorState` with a working retry.
+
+Use the Prompts panel to:
+
+- Verify a `server.AddPrompt` registration is reachable end-to-end.
+- Inspect what a host actually sees when it pulls one of your prompts
+  — exact roles, exact text, exact substitutions.
+- Compare two argument variants quickly (re-fill, re-invoke; the
+  result region updates in place).
+
+Try it against `examples/prompts-demo` — three prompts (`summarize_for_review`,
+`code_review`, `explain_error`) exercise the panel end-to-end.
 
 ## The Operator-Invoke flow
 

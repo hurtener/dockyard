@@ -216,6 +216,88 @@ func newMux(opts Options, log *slog.Logger) http.Handler {
 		_ = json.NewEncoder(w).Encode(resp)
 	})
 
+	// /api/prompts — the read-only Prompts panel source. It performs a
+	// read-only prompts/list against the attached server (v1.1 Wave A;
+	// D-163 extends D-103's pattern to a third operator-initiated
+	// client-shaped surface). When no source is configured the endpoint
+	// answers with an empty array so the panel renders its four-state
+	// empty state cleanly. A listing failure (the server is unreachable,
+	// the SDK call returned an error) answers 502 with a typed message
+	// so the panel surfaces an honest error state.
+	mux.HandleFunc("GET /api/prompts", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		prompts := []PromptInfo{}
+		if opts.Prompts != nil {
+			loaded, err := opts.Prompts(r.Context())
+			if err != nil {
+				log.WarnContext(r.Context(), "dockyard inspector: prompts/list failed",
+					slog.String("error", err.Error()))
+				w.WriteHeader(http.StatusBadGateway)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			if len(loaded) > 0 {
+				prompts = loaded
+			}
+		}
+		_ = json.NewEncoder(w).Encode(prompts)
+	})
+
+	// /api/prompts/get — the operator-initiated prompts/get surface
+	// (v1.1 Wave A; D-163). The inspector frontend POSTs
+	// `{name, arguments}`; this handler opens a short-lived MCP client
+	// session against the attached server, calls `prompts/get`, and
+	// returns the rendered messages. Same posture as /api/tools/invoke
+	// (D-131): localhost-only via the listener's [requireLoopback]
+	// gate; the operator drives the request through the UI; one
+	// short-lived session per request. A detached inspector answers
+	// 503; a malformed body answers 400; a transport-level failure
+	// answers 502 with a typed JSON message. A server-side prompts/get
+	// error is a successful RPC: HTTP 200 with `error` filled in the
+	// response (the same isError-as-200 pattern D-131 set).
+	mux.HandleFunc("POST /api/prompts/get", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+
+		if opts.PromptInvoker == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "inspector is detached — no MCP server attached to get prompts from",
+			})
+			return
+		}
+
+		var req PromptGetRequest
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "invalid prompts/get body: " + err.Error(),
+			})
+			return
+		}
+		if req.Name == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "prompts/get: `name` is required",
+			})
+			return
+		}
+
+		resp, err := opts.PromptInvoker(r.Context(), req)
+		if err != nil {
+			log.WarnContext(r.Context(), "dockyard inspector: prompts/get failed",
+				slog.String("name", req.Name),
+				slog.String("error", err.Error()))
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
 	// /api/apps — the read-only App-preview source. It performs a read-only
 	// resources/list + resources/read of the attached server's ui:// resources
 	// (RFC §12 line 711 — the inspector renders the server's Apps; D-103). When

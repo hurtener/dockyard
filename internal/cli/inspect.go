@@ -124,6 +124,8 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 	var appSource inspector.AppSource
 	var invoker inspector.ToolInvoker
 	var elicitor inspector.Elicitor
+	var promptSource inspector.PromptSource
+	var promptInvoker inspector.PromptInvoker
 	serverInfo := inspector.ServerInfo{Name: "inspector", Transport: "detached"}
 	if cfg.serverURL != "" {
 		obsURL, infErr := obsStreamURLFor(cfg.serverURL)
@@ -147,6 +149,12 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 		// localhost-only posture as the invoker; the operator is the one
 		// driving the write through the App's Approve / Reject button.
 		elicitor = inspector.ElicitationFromServer(cfg.serverURL)
+		// The operator-initiated prompts/list + prompts/get surface
+		// (v1.1 Wave A; D-163 extends D-131 to a third operator-
+		// initiated client-shaped read). The pair is wired together —
+		// the panel lists prompts then drives one prompts/get per
+		// operator click. Same short-lived-session pattern.
+		promptSource, promptInvoker = inspector.PromptsFromServer(cfg.serverURL)
 		serverInfo = inspector.ServerInfo{
 			Name:      cfg.serverURL,
 			Transport: "http",
@@ -170,17 +178,19 @@ func runInspect(ctx context.Context, cfg inspectConfig) error {
 	}
 
 	insp, err := inspector.New(inspector.Options{
-		Addr:       addr,
-		Relay:      relay,
-		Assets:     inspector.EmbeddedAssets(),
-		ServerInfo: serverInfo,
-		Verdicts:   verdicts,
-		Contracts:  contracts,
-		Apps:       appSource,
-		Fixtures:   fixtures,
-		Invoker:    invoker,
-		Elicitor:   elicitor,
-		Logger:     cfg.logger,
+		Addr:          addr,
+		Relay:         relay,
+		Assets:        inspector.EmbeddedAssets(),
+		ServerInfo:    serverInfo,
+		Verdicts:      verdicts,
+		Contracts:     contracts,
+		Apps:          appSource,
+		Fixtures:      fixtures,
+		Invoker:       invoker,
+		Elicitor:      elicitor,
+		Prompts:       promptSource,
+		PromptInvoker: promptInvoker,
+		Logger:        cfg.logger,
 	})
 	if err != nil {
 		// A non-loopback bind is the expected, typed refusal — surface it
