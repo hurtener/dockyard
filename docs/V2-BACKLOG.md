@@ -89,6 +89,16 @@ recorded order in the decisions log. Each item carries:
 
 ### Scaffold + `dockyard run` auto-wire of `tasks.Engine`
 
+> **Status:** **Claimed by v1.1 wave B (D-164).** The scaffold detects
+> task-supporting tools at generation time and emits a
+> `tasks.NewInMemoryStore()` + `tasks.NewEngine(...)` block plus
+> `server.Options{Tasks: engine}` attachment in `main.go`; `dockyard
+> run` warns when the manifest demands an engine but `main.go` does
+> not appear to wire one. See
+> `docs/plans/v1.1-wave-B-runtime-cleanups.md` for the implementation
+> details. The entry stays here as the audit trail of what was
+> deferred and when it shipped.
+
 - **Origin.** D-108 (R2 follow-up explicitly named); D-135 (the
   `approval-flows` template's `main.go` does this directly).
 - **What was deferred + why.** R2 closed the wiring gap by giving
@@ -136,6 +146,14 @@ recorded order in the decisions log. Each item carries:
   shape (consistent with D-152) drive the panel.
 
 ### Analytics-widgets / Claude signed-origin follow-up
+
+> **Status:** **Claimed by v1.1 wave B (D-165), Path B.** The
+> `HostProfile` interface gained a `RequiresServerURL() bool` method;
+> the capability category in `internal/testgate/categories.go` now
+> consults it (the `syntheticServerURL` constant retired). See
+> `docs/plans/v1.1-wave-B-runtime-cleanups.md` for the implementation
+> details. The entry stays here as the audit trail of what was
+> deferred and when it shipped.
 
 - **Origin.** Phase 29 live-skill validation surfaced the gap;
   `internal/testgate/categories.go`'s `runCapability` carries the

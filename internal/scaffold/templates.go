@@ -42,8 +42,13 @@ tools:
     # truth (P1, RFC §6). Their JSON Schema is generated, never hand-written.
     input: internal/contracts.GreetInput
     output: internal/contracts.GreetOutput
-    # This tool runs synchronously; it never becomes an MCP Task.
-    task_support: forbidden
+    # task_support declares the tool's relationship to the MCP Tasks
+    # extension (RFC §8.4). forbidden = the tool always runs synchronously;
+    # optional = the runtime may run it as a task; required = it always runs
+    # as a task. When at least one tool declares optional or required,
+    # the scaffold's main.go constructs a tasks.Engine and attaches it via
+    # server.Options{Tasks: engine} — dockyard new does this for you.
+    task_support: %s
 
 # A no-template server ships no UI, so there is no apps[] block. Attach a
 # Svelte UI later with 'dockyard new --template' or by adding an apps[] entry.
@@ -58,7 +63,7 @@ quality:                  # RFC §9.4 — enforced by 'dockyard validate'.
   require_fixtures: true
   require_contract_tests: true
   require_spec_compliance: true
-`, o.Name, titleCase(o.Name))
+`, o.Name, titleCase(o.Name), o.taskSupport())
 }
 
 // renderGoMod renders the scaffolded project's go.mod. It requires the
@@ -88,7 +93,25 @@ func renderGoMod(o Options) string {
 // the variable is unset) or "http" (the streamable-HTTP service mode). Reading
 // it here means `dockyard run --transport http` genuinely serves HTTP without
 // the developer touching main.go.
+//
+// The renderer branches on whether the manifest declares any task-supporting
+// tool (D-164): when it does, the rendered main.go constructs a real
+// tasks.Engine over an in-memory TaskStore and attaches it via
+// server.Options{Tasks: engine} so the server's stdio + HTTP transports
+// intercept tasks/* JSON-RPC frames and route them into the engine. When
+// no tool declares task support, the rendered main.go skips the engine
+// construction entirely — zero overhead, zero new dependencies.
 func renderMainGo(o Options) string {
+	if o.wireTasksEngine() {
+		return renderMainGoWithTasks(o)
+	}
+	return renderMainGoPlain(o)
+}
+
+// renderMainGoPlain renders the engine-free shape of main.go — the
+// historical default. It is the rendered output when no tool in the
+// manifest declares task_support: optional or required.
+func renderMainGoPlain(o Options) string {
 	return fmt.Sprintf(`// Command %s is an MCP server scaffolded by 'dockyard new'.
 //
 // It registers one example tool ("greet") and serves the MCP protocol. The
@@ -184,6 +207,191 @@ func serveHTTP(ctx context.Context, srv *server.Server, logger *slog.Logger) err
 	return nil
 }
 `, o.Name, dockyardModule, o.Name, titleCase(o.Name))
+}
+
+// renderMainGoWithTasks renders the engine-wired shape of main.go (D-164).
+// It is the rendered output when at least one tool in the manifest declares
+// task_support: optional or required.
+//
+// The differences from the plain shape are intentionally local:
+//
+//   - imports add runtime/tasks
+//   - main constructs `taskStore := tasks.NewInMemoryStore()` and
+//     `engine, err := tasks.NewEngine(taskStore, &tasks.Options{...})`
+//   - `engine.StartSweep(ctx)` runs the purge sweep for the process
+//     lifetime; `defer engine.StopSweep()` joins it on shutdown
+//   - server.Options carries `Tasks: engine` — the server's stdio and HTTP
+//     transports now intercept tasks/* JSON-RPC frames and route them
+//     into the engine (RFC §8.2)
+//
+// The Lifecycle defaults are intentionally conservative: MaxTTL 1h,
+// DefaultTTL 5m, PurgeInterval 30s, MaxConcurrentPerRequestor 16. They
+// match brief 02 §4.5/§4.6's "non-zero defaults, room for a single-user
+// stdio workload" guidance. A developer with a different production
+// posture edits main.go after scaffold.
+//
+// Stdio is single-user and unauthenticated: AdvertiseList stays off
+// (brief 02 §4.5 — a receiver that cannot identify requestors must not
+// advertise tasks/list). An HTTP deployment with real authentication
+// sets RequestorIdentifiable: true and passes a TasksAuthContext on the
+// server.Options.
+func renderMainGoWithTasks(o Options) string {
+	return fmt.Sprintf(`// Command %s is an MCP server scaffolded by 'dockyard new'.
+//
+// It registers one example tool (%q) and serves the MCP protocol. The
+// transport is chosen by the DOCKYARD_TRANSPORT environment variable — "stdio"
+// (the default: the local, single-user transport) or "http" (the
+// streamable-HTTP service mode). 'dockyard run --transport http' sets it for
+// you; you can also set it by hand. Wire the server into an MCP host (Claude,
+// Cursor, …) with 'dockyard install'.
+//
+// The manifest declares at least one tool with task_support: optional or
+// required, so the scaffold has auto-wired a tasks.Engine (D-164). The
+// engine routes tasks/* JSON-RPC frames into a real lifecycle: a tool that
+// runs as a task can pause for input_required, report progress, observe
+// cooperative cancellation, and reach a terminal status (RFC §8.4). The
+// in-memory TaskStore is correct for single-user stdio; replace it with
+// runtime/store/sqlite for a durable HTTP/Portico deployment.
+package main
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"time"
+
+	"%s/runtime/server"
+	"%s/runtime/tasks"
+)
+
+// httpAddr is the address the HTTP transport listens on when
+// DOCKYARD_TRANSPORT=http. DOCKYARD_HTTP_ADDR overrides it.
+const httpAddr = "127.0.0.1:8080"
+
+func main() {
+	// A text slog handler — readable local logs (Dockyard convention).
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	// Serve until the process is interrupted (Ctrl-C) or the host closes the
+	// transport.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	// --- the Tasks engine (D-164) -----------------------------------------
+	//
+	// The manifest declares at least one tool with task_support: optional
+	// or required, so the scaffold has wired a real tasks.Engine over an
+	// in-memory TaskStore and attached it via server.Options{Tasks: engine}.
+	// The Lifecycle defaults below are conservative; tune them in your
+	// manifest's tasks: block, or edit Options here for a different
+	// production posture.
+	//
+	// In-memory store. For single-user stdio the in-memory store is
+	// correct: tasks live as long as the process. For a production HTTP
+	// deployment, replace with sqlitestore.Open + the engine's migration
+	// step. The contract is the tasks.TaskStore seam — the engine works
+	// against either driver.
+	taskStore := tasks.NewInMemoryStore()
+	engine, err := tasks.NewEngine(taskStore, &tasks.Options{
+		Logger: logger,
+		// Stdio is single-user and unauthenticated: tasks/list is not
+		// advertised (brief 02 §4.5). An HTTP deployment with real auth
+		// should set RequestorIdentifiable: true and pass a
+		// TasksAuthContext on the server.Options below.
+		RequestorIdentifiable: false,
+		AdvertiseList:         false,
+		PollInterval:          250,
+		Lifecycle: tasks.Lifecycle{
+			MaxTTL:                    1 * time.Hour,
+			DefaultTTL:                5 * time.Minute,
+			PurgeInterval:             30 * time.Second,
+			MaxConcurrentPerRequestor: 16,
+		},
+	})
+	if err != nil {
+		logger.Error("create tasks engine", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	// Start the TTL purge sweep; Stop joins it on shutdown.
+	engine.StartSweep(ctx)
+	defer engine.StopSweep()
+
+	srv, err := server.New(server.Info{
+		Name:    %q,
+		Title:   %q,
+		Version: "0.1.0",
+	}, &server.Options{
+		Logger: logger,
+		// Attach the Tasks engine — the server's stdio + HTTP transports
+		// now intercept tasks/* JSON-RPC frames and route them into the
+		// engine (RFC §8.2). The capabilities.tasks block is injected
+		// into the initialize handshake response.
+		Tasks: engine,
+		// TasksAuthContext: nil — stdio is unauthenticated. For HTTP
+		// with real auth, supply a function here that derives the
+		// requestor's identity from the bearer token; the engine then
+		// binds tasks to that context (RFC §8.5).
+		TasksAuthContext: nil,
+	})
+	if err != nil {
+		logger.Error("create server", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	if err := registerTools(srv); err != nil {
+		logger.Error("register tools", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	if err := serve(ctx, srv, logger); err != nil {
+		logger.Error("serve", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+}
+
+// serve brings up the transport named by DOCKYARD_TRANSPORT. An unset or
+// "stdio" value serves stdio; "http" serves the streamable-HTTP transport. An
+// unrecognised value is a clean, explained failure rather than a silent
+// fallback.
+func serve(ctx context.Context, srv *server.Server, logger *slog.Logger) error {
+	switch transport := os.Getenv("DOCKYARD_TRANSPORT"); transport {
+	case "", "stdio":
+		return srv.ServeStdio(ctx)
+	case "http":
+		return serveHTTP(ctx, srv, logger)
+	default:
+		return errors.New("unsupported DOCKYARD_TRANSPORT " + transport + " (want \"stdio\" or \"http\")")
+	}
+}
+
+// serveHTTP serves the streamable-HTTP transport. The HTTP security posture is
+// the runtime's secure default — DNS-rebinding and cross-origin protection both
+// on (runtime/server.DefaultHTTPSecurity). The listen address is httpAddr,
+// overridable with DOCKYARD_HTTP_ADDR.
+func serveHTTP(ctx context.Context, srv *server.Server, logger *slog.Logger) error {
+	handler, err := srv.HTTPHandler(nil)
+	if err != nil {
+		return err
+	}
+	addr := httpAddr
+	if override := os.Getenv("DOCKYARD_HTTP_ADDR"); override != "" {
+		addr = override
+	}
+	httpSrv := &http.Server{Addr: addr, Handler: handler}
+	go func() {
+		<-ctx.Done()
+		_ = httpSrv.Close()
+	}()
+	logger.Info("serving streamable-HTTP transport", slog.String("addr", addr))
+	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+`, o.Name, "greet", dockyardModule, dockyardModule, o.Name, titleCase(o.Name))
 }
 
 // renderGreetTool renders greet.go — the example contract-first tool. It shows

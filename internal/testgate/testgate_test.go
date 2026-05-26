@@ -182,6 +182,45 @@ func TestRunCapability_BlankServerPasses(t *testing.T) {
 	}
 }
 
+// TestRunCapability_UIAppPassesWithoutSyntheticURL: a UI-bearing App is
+// resolved through every registered host profile WITHOUT the synthetic
+// placeholder URL (D-165 — supersedes D-145's workaround). A profile that
+// declares RequiresServerURL is exempt from the empty-URL derivation; a
+// profile that does not require one derives cleanly against an empty URL.
+// The category passes for every shipped host profile.
+func TestRunCapability_UIAppPassesWithoutSyntheticURL(t *testing.T) {
+	t.Parallel()
+	const widgetsManifest = `name: widgets-server
+title: Widgets Server
+version: 0.1.0
+runtime:
+  transports: [stdio]
+  ui:
+    framework: svelte
+    bundle: single-file
+apps:
+  - id: widgets
+    uri: ui://widgets-server/widgets
+    entry: web/src/App.svelte
+    display_modes: [inline]
+tools:
+  - name: render
+    description: Render a widget inline in the host.
+    input: internal/contracts.RenderInput
+    output: internal/contracts.RenderOutput
+    ui: widgets
+    task_support: forbidden
+`
+	m := loadManifestString(t, widgetsManifest)
+	res := runCapability(t.TempDir(), m)
+	if !res.Passed {
+		t.Fatalf("runCapability failed for a UI App: %s", res.Detail)
+	}
+	if strings.Contains(res.Detail, "capability-test.example") {
+		t.Errorf("capability-test detail leaks the retired synthetic URL: %s", res.Detail)
+	}
+}
+
 // TestRunCapability_UIToolWithoutOutputFails: a UI-bearing tool with no output
 // contract cannot degrade to a model-facing result when Apps is not
 // negotiated — a capability regression.

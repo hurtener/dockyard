@@ -4899,3 +4899,153 @@ the run page; duplicating it is noise. The in-tree captures are
 the V1-cut artifact — proof produced by the maintainer that the
 pipeline really works, durable + audit-friendly in the same
 repository the framework ships in.
+
+---
+
+## D-164 — Scaffold + `dockyard run` auto-wire the Tasks engine when the manifest declares task-supporting tools
+
+**Date:** 2026-05-25
+**Status:** Settled (v1.1 wave B — runtime cleanups)
+**Where it lives:** `internal/scaffold/manifest_detect.go` (the
+`RequiresTasksEngine` detection seam), `internal/scaffold/templates.go`
+(the `renderMainGoWithTasks` engine-wired branch + the original
+`renderMainGoPlain` engine-free branch), `internal/scaffold/scaffold.go`
+(the `Options.ExampleToolTaskSupport` knob the no-template scaffold
+takes), `internal/runpkg/run.go` (the `auditAutoWire` warning emitter
+the `dockyard run` verb consults at start time),
+`templates/approval-flows/main.go.tmpl` (the template whose hand-written
+wiring matches the generator's output so a future maintainer reads one
+shape, not two), `docs/V2-BACKLOG.md` (the original deferral entry, now
+cross-linked to this decision).
+
+**The decision.** Whenever the project's manifest declares any tool
+with `task_support: optional` or `task_support: required`, the
+scaffolded `main.go` constructs a real `tasks.NewInMemoryStore()` +
+`tasks.NewEngine(...)` and attaches it via `server.Options{Tasks:
+engine}` — no hand edit required. The detection is the new
+`scaffold.RequiresTasksEngine(*manifest.Manifest) bool` helper, called
+both at scaffold time (the renderer branches on
+`Options.wireTasksEngine()`) and at `dockyard run` start time (the
+audit warns if the manifest demands an engine but `main.go`'s source
+does not appear to attach one — a heads-up the engine the manifest
+implies is not wired). The two paths agree by construction: the same
+predicate over the same value.
+
+**Why scaffold-time emission, not run-time engine attachment.** The
+brief offered two paths — detect at scaffold time and write the
+engine into `main.go`, or detect at run time and inject the engine
+into the running binary. Run-time injection is wrong: `dockyard run`
+is a build-and-exec verb, not a runtime; the project's binary is
+self-contained and runs without `dockyard run` (Claude Code execs the
+binary directly via the manifest's stdio transport entry). Scaffold-
+time emission keeps the project authoritative — the generated code is
+what runs, the user can edit it, the engine is visible in their
+source tree. The run-time audit is a soft check that surfaces a
+post-scaffold manifest edit ("user added `task_support: required` to
+a tool after scaffolding but didn't re-scaffold") with one warning
+line on stderr — never a failure.
+
+**Why in-memory store, not the SQLite driver.** The auto-wire is
+deployment-shape agnostic; an in-memory store is correct for the
+single-user stdio default the blank scaffold targets. A developer
+running a durable HTTP/Portico deployment edits `main.go` to swap in
+`sqlitestore.Open` + the engine's migration step — the same edit the
+`approval-flows` template's docs already describe. Auto-wiring SQLite
+would force a `modernc.org/sqlite` import on every task-supporting
+project regardless of deployment shape, and would commit the
+auto-wire to a manifest field (`tasks.store: sqlite`) we have not
+designed yet.
+
+**Why `Options.ExampleToolTaskSupport` rather than a manifest read.**
+The blank `Generate()` builds the manifest YAML from a hardcoded
+template; the renderer can either re-parse its own output or take the
+knob directly. Taking the knob is simpler, cheaper, and lets a
+caller (the integration test, a future custom scaffold path) opt the
+example tool into tasks without round-tripping through YAML. The
+`scaffold.RequiresTasksEngine` helper remains the read side a
+post-scaffold loader (`dockyard run`, `dockyard validate`) calls
+against a loaded manifest — the predicate is the same in both
+directions.
+
+**Conservative Lifecycle defaults.** The auto-wired engine ships
+with: `MaxTTL: 1h`, `DefaultTTL: 5m`, `PurgeInterval: 30s`,
+`MaxConcurrentPerRequestor: 16`, `RequestorIdentifiable: false`,
+`AdvertiseList: false`, `PollInterval: 250`. The non-zero
+`MaxConcurrentPerRequestor` keeps the brief 02 §4.6 resource-
+exhaustion guard active by default; the 16-task ceiling is large
+enough that no realistic single-user stdio workload trips it. A
+developer with a different production posture edits the rendered
+`main.go`. The `approval-flows` template's hand-written wiring is
+brought into the same shape so a future maintainer reading both
+finds the engine-construction block identical.
+
+**Supersedes.** D-108 (the original R2 follow-up deferral —
+"scaffold + run auto-wire is a future CLI/scaffold phase"). The
+V2-backlog entry that recorded the deferral stays in
+`docs/V2-BACKLOG.md` as a cross-link audit trail; it is now marked
+claimed by v1.1 wave B.
+
+---
+
+## D-165 — `HostProfile.RequiresServerURL` retires the synthetic-URL workaround in the capability testgate
+
+**Date:** 2026-05-25
+**Status:** Settled (v1.1 wave B — runtime cleanups)
+**Where it lives:** `runtime/apps/hostprofile.go` (the new
+`RequiresServerURL() bool` method on the `HostProfile` interface),
+`runtime/apps/hostprofile_generic.go` (returns `false`),
+`runtime/apps/hostprofile_claude.go` (returns `true`),
+`internal/testgate/categories.go` (`runCapability` consults the new
+method; the `syntheticServerURL` constant + comment block are
+removed), `docs/V2-BACKLOG.md` (the original deferral entry, now
+cross-linked).
+
+**The decision.** The host-profile interface gains a
+`RequiresServerURL() bool` method. The capability-degradation
+testgate category (`internal/testgate/categories.go`) consults it
+when driving each App through each registered host profile: a
+profile that returns `true` (a signing host whose origin derivation
+binds to the server URL — D-063, D-064) is exempt from the
+empty-URL derivation; a profile that returns `false` (a pass-through
+profile like `generic`) derives cleanly against an empty URL. The
+`syntheticServerURL` constant (`https://capability-test.example/mcp`)
+that the gate fabricated to dodge the signing-host invariant is
+removed; the gate fabricates no URL.
+
+**Why path B, not path A.** The V2-backlog entry identified two
+fixes: (A) declare `_meta.ui.domain` in the `analytics-widgets`
+manifest so the signed-origin derivation has the metadata it needs,
+or (B) extend the host-profile API. Path B generalises: any future
+host profile with a similar invariant declares it honestly via the
+new method, and the capability gate threads through that declaration
+rather than fabricating an input per host. Path A would force every
+UI-bearing template manifest to declare a `_meta.ui.domain` purely
+to satisfy the capability test — template-specific noise that
+solves the immediate symptom but does not generalise. The host-
+profile API churn is minimal (one method, two implementations); the
+semver implications are addressed below.
+
+**Semver framing.** Adding a method to the `HostProfile` interface
+is breaking for an out-of-tree implementer (they must add the
+method) but additive for a caller (it only reads the new method
+through the same interface). The change rides with the v1.1 minor
+per the semver policy (D-159 — minor for additive changes,
+"breaking on a public interface" is the borderline case here). Two
+mitigations: (1) no out-of-tree host profile has been observed yet
+(the registry is V1 but the pattern is documented per RFC §7.5, not
+declared and used by any third party we know of); (2) the new
+method is trivial to add — one line returning the right bool.
+
+**Why exempt rather than test-with-a-URL.** A signing profile's
+derivation is bound to the server URL by design; a synthetic URL
+satisfies the derivation invariant nominally but exercises a *fake*
+binding, not the seam the profile is meant to prove. The honest
+posture is "the capability gate proves the seam resolves; the
+signed-origin binding is proven by the profile's own tests under
+`runtime/apps/`". Exempting a `RequiresServerURL` profile from the
+empty-URL derivation says exactly that on the wire.
+
+**Supersedes.** D-145 (the original synthetic-URL workaround that
+recorded "Phase 27 hardening" as the deferral). The V2-backlog
+entry that recorded the deferral stays as a cross-link; it is now
+marked claimed by v1.1 wave B.

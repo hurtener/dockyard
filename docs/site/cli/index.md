@@ -185,6 +185,7 @@ optional product-pattern showcases; pass --template <name> to scaffold one.
 | Flag | Description | Default |
 | --- | --- | --- |
 | `--dir` | parent directory to create the project under (default: current directory) | `—` |
+| `--example-task-support` | example tool's task_support declaration: forbidden (default), optional, or required. optional/required also auto-wires a tasks.Engine in main.go. | `—` |
 | `--module` | Go module path for the new project's go.mod (default: example.com/&lt;name&gt;) | `—` |
 | `--template` | product-pattern template to scaffold (e.g. analytics-widgets). Omit for the blank no-template scaffold (the first-class path). | `—` |
 

@@ -3,10 +3,13 @@ package runpkg
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -242,3 +245,225 @@ func TestRun_BuildsAndServesThenStopsCleanly(t *testing.T) {
 		t.Fatal("Run did not return after context cancellation")
 	}
 }
+
+// -- D-164 auto-wire audit -------------------------------------------------
+
+// TestMainGoWiresTasks_Heuristic exercises the source-grep heuristic the
+// auto-wire audit uses. The heuristic accepts both the option-struct shape
+// the scaffold emits and the imperative WithTasks form an embedder may use.
+func TestMainGoWiresTasks_Heuristic(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{
+			name: "engine-free plain scaffold",
+			src: `package main
+func main() {
+    srv, _ := server.New(info, &server.Options{Logger: logger})
+    _ = srv
+}`,
+			want: false,
+		},
+		{
+			name: "option-struct Tasks: engine",
+			src: `package main
+func main() {
+    srv, _ := server.New(info, &server.Options{
+        Logger: logger,
+        Tasks:  engine,
+    })
+    _ = srv
+}`,
+			want: true,
+		},
+		{
+			name: "imperative WithTasks",
+			src: `package main
+func main() {
+    srv := server.New(info, nil).WithTasks(engine, nil)
+    _ = srv
+}`,
+			want: true,
+		},
+		{
+			name: "single-line option struct",
+			src:  `srv := server.New(info, &server.Options{Tasks: engine})`,
+			want: true,
+		},
+		{
+			name: "Tasks: appears outside Options literal — not counted",
+			src: `package main
+// Tasks: notes about tasks in a comment, not a wiring
+func main() { _ = server.New(info, &server.Options{Logger: logger}) }`,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := mainGoWiresTasks(tt.src); got != tt.want {
+				t.Errorf("mainGoWiresTasks() = %v, want %v\nsrc:\n%s", got, tt.want, tt.src)
+			}
+		})
+	}
+}
+
+// TestAuditAutoWire_WarnsOnUnwiredTaskSupport proves the D-164 audit: a
+// project whose manifest declares task-supporting tools but whose main.go
+// does not appear to attach the engine logs a warning. A project whose
+// main.go does wire the engine is silent. The audit never fails the run.
+func TestAuditAutoWire_WarnsOnUnwiredTaskSupport(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		manifest    string
+		mainSrc     string
+		wantWarning bool
+	}{
+		{
+			name: "manifest requires tasks but main is engine-free",
+			manifest: `name: rp-audit
+title: Rp Audit
+version: 0.1.0
+runtime:
+  transports: [stdio]
+tools:
+  - name: greet
+    description: greet
+    input: internal/contracts.GreetInput
+    output: internal/contracts.GreetOutput
+    task_support: required
+quality:
+  require_fixtures: false
+  require_contract_tests: false
+  require_spec_compliance: false
+`,
+			mainSrc: `package main
+func main() {
+    srv, _ := server.New(info, &server.Options{Logger: logger})
+    _ = srv
+}`,
+			wantWarning: true,
+		},
+		{
+			name: "manifest requires tasks and main wires the engine",
+			manifest: `name: rp-audit
+title: Rp Audit
+version: 0.1.0
+runtime:
+  transports: [stdio]
+tools:
+  - name: greet
+    description: greet
+    input: internal/contracts.GreetInput
+    output: internal/contracts.GreetOutput
+    task_support: required
+quality:
+  require_fixtures: false
+  require_contract_tests: false
+  require_spec_compliance: false
+`,
+			mainSrc: `package main
+func main() {
+    srv, _ := server.New(info, &server.Options{Logger: logger, Tasks: engine})
+    _ = srv
+}`,
+			wantWarning: false,
+		},
+		{
+			name: "manifest forbids tasks — no warning regardless",
+			manifest: `name: rp-audit
+title: Rp Audit
+version: 0.1.0
+runtime:
+  transports: [stdio]
+tools:
+  - name: greet
+    description: greet
+    input: internal/contracts.GreetInput
+    output: internal/contracts.GreetOutput
+    task_support: forbidden
+quality:
+  require_fixtures: false
+  require_contract_tests: false
+  require_spec_compliance: false
+`,
+			mainSrc: `package main
+func main() {
+    srv, _ := server.New(info, &server.Options{Logger: logger})
+    _ = srv
+}`,
+			wantWarning: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "dockyard.app.yaml"), []byte(tt.manifest), 0o600); err != nil {
+				t.Fatalf("write manifest: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(tt.mainSrc), 0o600); err != nil {
+				t.Fatalf("write main: %v", err)
+			}
+			var buf logBuffer
+			logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			auditAutoWire(context.Background(), dir, logger)
+			got := buf.String()
+			hasWarn := contains(got, "D-164") && contains(got, "level=WARN")
+			if hasWarn != tt.wantWarning {
+				t.Errorf("audit warning emitted = %v, want %v\nlog output:\n%s",
+					hasWarn, tt.wantWarning, got)
+			}
+		})
+	}
+}
+
+// TestAuditAutoWire_MissingManifestIsSilent proves the audit is best-effort:
+// a missing manifest, missing main.go, or malformed manifest is silently
+// ignored rather than blowing up. The audit's job is to help, not to fail
+// the run.
+func TestAuditAutoWire_MissingManifestIsSilent(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	var buf logBuffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	auditAutoWire(context.Background(), dir, logger)
+	if got := buf.String(); got != "" {
+		t.Errorf("missing manifest: audit logged unexpectedly:\n%s", got)
+	}
+}
+
+// -- test helpers ----------------------------------------------------------
+
+// logBuffer captures slog handler output for assertion.
+type logBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (b *logBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+
+func (b *logBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.buf)
+}
+
+// contains is a thin alias of strings.Contains kept for readability inside
+// the audit assertions ("warning text contains the D-164 marker") — the same
+// shape the rest of the assertions use.
+func contains(haystack, needle string) bool { return stringsContains(haystack, needle) }
+
+// stringsContains is strings.Contains under a renamed wrapper so the import
+// stays one place rather than scattered through the assertions.
+func stringsContains(s, sub string) bool { return strings.Contains(s, sub) }

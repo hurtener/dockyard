@@ -51,6 +51,15 @@ This is the first-class path — one manifest, one example contract-first
 tool (`greet`), generated artifacts, a runnable `main.go`. No UI; add
 one later with [`attach-a-ui-resource`](/guides/ui-resources).
 
+Want a working `tasks/*` surface from the first run? Pass
+`--example-task-support required` (or `optional`): the scaffold both
+declares the example tool that way in the manifest AND emits an
+engine-wired `main.go` that constructs a real
+`tasks.NewInMemoryStore()` + `tasks.NewEngine(...)` and attaches it
+via `server.Options{Tasks: engine}` — no hand edit required. See
+the [agent skills index](/agent-skills/) for the `scaffold-a-server`
+skill that documents the full flag set.
+
 ### b) Scaffold a template
 
 The two shipped V1 templates exercise the framework end-to-end:

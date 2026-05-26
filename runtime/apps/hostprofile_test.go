@@ -18,6 +18,7 @@ type fakeProfile struct{ id string }
 
 func (f fakeProfile) ID() string                                 { return f.id }
 func (fakeProfile) DeriveDomain(label, _ string) (string, error) { return label, nil }
+func (fakeProfile) RequiresServerURL() bool                      { return false }
 
 func TestHostProfileFor_BuiltIns(t *testing.T) {
 	t.Parallel()
@@ -169,5 +170,34 @@ func TestClaudeProfile_MissingServerURL(t *testing.T) {
 	p, _ := apps.HostProfileFor("claude")
 	if _, err := p.DeriveDomain("main", ""); err == nil {
 		t.Error("claude DeriveDomain with empty serverURL = nil error, want error")
+	}
+}
+
+// TestHostProfile_RequiresServerURL is the table-driven assertion of the new
+// HostProfile method D-165 introduced — every shipped profile declares
+// whether its derivation depends on a non-empty server URL. The testgate
+// capability category consults this to exercise every profile honestly
+// without the synthetic-URL workaround D-165 retired.
+func TestHostProfile_RequiresServerURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		id   string
+		want bool
+	}{
+		{"generic", false},
+		{"claude", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			t.Parallel()
+			p, err := apps.HostProfileFor(tt.id)
+			if err != nil {
+				t.Fatalf("HostProfileFor(%q): %v", tt.id, err)
+			}
+			if got := p.RequiresServerURL(); got != tt.want {
+				t.Errorf("HostProfileFor(%q).RequiresServerURL() = %v, want %v",
+					tt.id, got, tt.want)
+			}
+		})
 	}
 }

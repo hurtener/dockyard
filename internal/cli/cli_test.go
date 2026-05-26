@@ -144,3 +144,61 @@ func TestNew_TemplateUnknown_TypedError(t *testing.T) {
 		t.Errorf("error message does not name the unknown-template case: %v", err)
 	}
 }
+
+// TestNew_ExampleTaskSupportFlagListedInHelp proves the
+// --example-task-support flag (D-164) is wired into the cobra `new`
+// command's help.
+func TestNew_ExampleTaskSupportFlagListedInHelp(t *testing.T) {
+	t.Parallel()
+	out, _, err := run(t, "new", "--help")
+	if err != nil {
+		t.Fatalf("new --help: %v", err)
+	}
+	if !strings.Contains(out, "--example-task-support") {
+		t.Errorf("new --help does not list --example-task-support:\n%s", out)
+	}
+}
+
+// TestNew_ExampleTaskSupportRequiredAutoWires proves the D-164 CLI path:
+// `dockyard new --example-task-support required` produces a scaffolded
+// project whose manifest declares the example tool as `task_support:
+// required` AND whose main.go carries the auto-wired tasks.Engine.
+func TestNew_ExampleTaskSupportRequiredAutoWires(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if _, _, err := run(t, "new", "tasks-server",
+		"--dir", dir, "--example-task-support", "required"); err != nil {
+		t.Fatalf("new --example-task-support required: %v", err)
+	}
+	manifestBytes, err := os.ReadFile(filepath.Join(dir, "tasks-server", "dockyard.app.yaml")) //nolint:gosec // test temp dir
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if !strings.Contains(string(manifestBytes), "task_support: required") {
+		t.Errorf("scaffolded manifest does not declare task_support: required:\n%s", manifestBytes)
+	}
+	mainBytes, err := os.ReadFile(filepath.Join(dir, "tasks-server", "main.go")) //nolint:gosec // test temp dir
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	for _, m := range []string{"tasks.NewEngine", "tasks.NewInMemoryStore", "Tasks: engine"} {
+		if !strings.Contains(string(mainBytes), m) {
+			t.Errorf("scaffolded main.go missing auto-wire marker %q", m)
+		}
+	}
+}
+
+// TestNew_ExampleTaskSupportInvalid_Error proves a bad value of the new
+// flag surfaces a clear CLI error.
+func TestNew_ExampleTaskSupportInvalid_Error(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	_, _, err := run(t, "new", "invalid-ts",
+		"--dir", dir, "--example-task-support", "sometimes")
+	if err == nil {
+		t.Fatal("new --example-task-support sometimes: want an error")
+	}
+	if !strings.Contains(err.Error(), "invalid --example-task-support") {
+		t.Errorf("error message does not name the invalid-flag case: %v", err)
+	}
+}

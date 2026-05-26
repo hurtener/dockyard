@@ -66,6 +66,15 @@ func (claudeHostProfile) DeriveDomain(label, serverURL string) (string, error) {
 	return hash + "." + claudeContentApex, nil
 }
 
+// RequiresServerURL implements HostProfile: Claude's profile binds the
+// signed-origin derivation to the MCP server URL (brief 01 §2.5,
+// D-063/D-064) so distinct servers cannot forge each other's origin. A
+// non-empty domain label demands a non-empty serverURL; the capability-
+// degradation testgate category honours that by exempting Claude from
+// the empty-URL derivation rather than synthesising a placeholder URL
+// to dodge the invariant (D-165 — supersedes D-145's workaround).
+func (claudeHostProfile) RequiresServerURL() bool { return true }
+
 // init registers the Claude host profile via the seam (AGENTS.md §4.4).
 func init() {
 	if err := RegisterHostProfile(claudeHostProfile{}); err != nil {

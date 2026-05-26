@@ -131,6 +131,25 @@ Skip it once Dockyard is published.
 - `--dir <path>` — parent directory for the project (default: cwd).
 - `--module <go-module>` — Go module path for `go.mod` (default:
   `example.com/<name>`).
+- `--example-task-support <forbidden|optional|required>` — set the
+  no-template scaffold's example tool's `task_support` declaration.
+  Default is `forbidden` (the historical shape; the tool runs
+  synchronously). Setting it to `optional` or `required` makes the
+  scaffold (a) declare the example tool that way in the rendered
+  manifest AND (b) emit the engine-wired shape of `main.go` — a
+  `tasks.NewInMemoryStore()` + `tasks.NewEngine(...)` block + a
+  `server.Options{Tasks: engine}` attachment. The flag only affects
+  the no-template scaffold (templates carry their own task-support
+  declarations).
+
+  Example — a fresh scaffold with a working `tasks/*` surface:
+
+  ```bash
+  dockyard new tasks-demo --example-task-support required
+  cd tasks-demo
+  cat main.go    # carries tasks.NewEngine + Tasks: engine
+  go run .       # serves stdio; tasks/* are routable
+  ```
 
 ## Verify the scaffold
 

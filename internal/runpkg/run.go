@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hurtener/dockyard/internal/buildpkg"
+	"github.com/hurtener/dockyard/internal/manifest"
+	"github.com/hurtener/dockyard/internal/scaffold"
 )
 
 // ErrRun is the sentinel wrapping a `dockyard run` failure. Callers branch
@@ -104,6 +108,14 @@ func Run(ctx context.Context, opts Options) error {
 		addr = defaultHTTPAddr
 	}
 
+	// The manifest-vs-main.go auto-wire detection (D-164): if the manifest
+	// declares any tool with task_support: optional or required but the
+	// project's main.go source does not appear to attach a Tasks engine,
+	// surface a warning. The run still proceeds — the project's main is
+	// authoritative; the warning is a heads-up that the engine the
+	// manifest implies is not wired.
+	auditAutoWire(ctx, opts.ProjectDir, logger)
+
 	// Build the project host-only — a fresh, validated, CGo-free binary.
 	logger.InfoContext(ctx, "run: building project")
 	res, err := buildpkg.Build(ctx, buildpkg.Options{
@@ -191,4 +203,83 @@ func (o Options) logger() *slog.Logger {
 		return o.Logger
 	}
 	return slog.New(slog.DiscardHandler)
+}
+
+// auditAutoWire checks the project's manifest against its main.go source and
+// emits a warning (D-164) when the manifest declares task-supporting tools
+// but the source does not appear to attach a Tasks engine via
+// server.Options{Tasks: …}.
+//
+// The check is best-effort: it loads the manifest, then greps main.go for
+// the Tasks attachment shape. A malformed manifest, a missing main.go, or
+// any other read error is silently ignored — the run still proceeds and the
+// real error (if any) surfaces from the build step. The audit's job is to
+// help; it must never fail a run on its own.
+//
+// The heuristic is intentionally conservative: it matches "server.Options{"
+// followed (across a few lines) by "Tasks:" or matches the imperative
+// "WithTasks(" call. False negatives (a project that wires the engine
+// through an out-of-band path) are acceptable; false positives (warning
+// the user about a non-issue) are not.
+func auditAutoWire(ctx context.Context, projectDir string, logger *slog.Logger) {
+	manifestPath := filepath.Join(projectDir, manifest.DefaultFilename)
+	m, err := manifest.LoadFile(manifestPath)
+	if err != nil {
+		return
+	}
+	if !scaffold.RequiresTasksEngine(m) {
+		return
+	}
+	mainPath := filepath.Join(projectDir, "main.go")
+	src, err := os.ReadFile(mainPath) //nolint:gosec // path is a fixed project-relative file under a caller-supplied project dir
+	if errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		return
+	}
+	if mainGoWiresTasks(string(src)) {
+		return
+	}
+	logger.WarnContext(ctx,
+		"run: manifest declares task-supporting tools but main.go does not appear to attach a Tasks engine — "+
+			"`dockyard new` auto-wires the engine for projects that declare task_support: optional or required; "+
+			"see the approval-flows template for the hand-written wiring shape (D-164)",
+		slog.String("manifest", manifestPath),
+		slog.String("main", mainPath),
+	)
+}
+
+// mainGoWiresTasks reports whether src appears to attach a Tasks engine to
+// the server — either the option-struct shape (server.Options{...Tasks:})
+// or the imperative WithTasks call. It is the heuristic the auto-wire
+// audit consults.
+func mainGoWiresTasks(src string) bool {
+	if strings.Contains(src, ".WithTasks(") {
+		return true
+	}
+	// Tolerate intervening whitespace + lines between "server.Options{" and
+	// "Tasks:". The structured-option form is the dominant shape the
+	// scaffold emits; this is a per-line check that walks the option-struct
+	// literal.
+	idx := strings.Index(src, "server.Options{")
+	for idx >= 0 {
+		// Look for the closing brace of this literal; "Tasks:" must appear
+		// before it for the wiring to count.
+		end := strings.Index(src[idx:], "}")
+		if end < 0 {
+			return false
+		}
+		segment := src[idx : idx+end]
+		if strings.Contains(segment, "Tasks:") {
+			return true
+		}
+		// Move past this literal and look for another, in case the file
+		// constructs two server.Options literals (unusual but valid).
+		idx = strings.Index(src[idx+end:], "server.Options{")
+		if idx >= 0 {
+			idx += end
+		}
+	}
+	return false
 }
