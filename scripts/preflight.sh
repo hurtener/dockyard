@@ -10,6 +10,7 @@ make build
 
 echo "== preflight: smoke =="
 smoke_fail=0
+# Phase smoke scripts (one per shipped phase, drift-audit pairs them).
 if compgen -G "scripts/smoke/phase-*.sh" >/dev/null; then
   for s in scripts/smoke/phase-*.sh; do
     echo "-- $s"
@@ -17,6 +18,18 @@ if compgen -G "scripts/smoke/phase-*.sh" >/dev/null; then
   done
 else
   echo "(no phase smoke scripts yet)"
+fi
+# Post-V1 wave smoke scripts. The naming convention is
+# scripts/smoke/v<MAJOR>.<MINOR>-wave-<LETTER>.sh; the matching plan lives
+# under docs/plans/v<MAJOR>.<MINOR>-wave-<LETTER>-*.md and is intentionally
+# not phase-paired by drift-audit (a wave is not a phase). The wave's smoke
+# script still runs in the same gate so its acceptance criteria are
+# exercised on every preflight (D-164).
+if compgen -G "scripts/smoke/v[0-9]*-wave-*.sh" >/dev/null; then
+  for s in scripts/smoke/v[0-9]*-wave-*.sh; do
+    echo "-- $s"
+    bash "$s" || smoke_fail=1
+  done
 fi
 
 echo "== preflight: drift-audit =="
