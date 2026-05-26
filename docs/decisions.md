@@ -4902,6 +4902,260 @@ repository the framework ships in.
 
 ---
 
+## D-161 — `dockyard dev` auto-attaches the inspector as a third supervised child, with `--no-inspector` opt-out (closes the V2-backlog auto-attach seam)
+
+**Date:** 2026-05-25
+**Status:** Settled (v1.1 Wave A — inspector polish)
+**Where it lives:** `internal/devloop/devloop.go` (the orchestrator
+that brings up the third child), `internal/devloop/inspector.go`
+(the inspector child wiring), `internal/cli/dev.go` (the
+`--no-inspector` flag), `docs/V2-BACKLOG.md` ("dockyard dev's
+inspector auto-attach seam" — the closure of this item),
+`scripts/smoke/v1.1-wave-A.sh` (the mechanical assertion that the
+seam is wired).
+
+**Why now.** The v1.0.0 cut left the auto-attach as a deferred seam
+(D-085 in phase 19; D-101 in phase 23 — both noting the supervisor
+was shaped to accept it). The deferral was correct in V1: the
+inspector was still solidifying (Phases 22 / 23 / 24-finish / 25 /
+27 each added or sharpened a client-shaped surface), and embedding
+it into `internal/devloop` would have widened a phase already
+carrying the framework's largest surface. v1.1 picks up the
+follow-up exactly as the V2-BACKLOG entry's "definition of done"
+described it: the inspector is a third supervised child alongside
+the Go server and Vite, auto-attached by default, with a clean
+opt-out flag for CI / headless dev.
+
+**The decision.** When `dockyard dev` is run without
+`--no-inspector`, the orchestrator brings up three supervised
+children rather than two:
+
+1. The Go MCP server (as before — `go run .` with `CGO_ENABLED=0`).
+2. The Vite dev server, when a `web/` UI is present (as before).
+3. The inspector, hosted in-process via the importable
+   `internal/inspector` package (D-162 covers the in-process
+   choice). Its bind is loopback-only (`127.0.0.1:0` by default,
+   OS-assigned port); its server-URL is `http://127.0.0.1:8080`
+   (the v1.1-default address the dev loop pins for the Go server
+   so the inspector has a known MCP base URL to attach to); its
+   project-source wiring (Verdicts / Contracts / Fixtures /
+   Prompts) is identical to the standalone `dockyard inspect`
+   path so the two entry points surface the same panels.
+
+The inspector child uses the same loopback-only gate
+(`requireLoopback`) the standalone path does — a developer who
+passes a non-loopback `--inspector-addr` gets the typed
+`ErrNonLoopbackBind` and the dev tree continues without it (the
+P4 invariant is mechanical, not by policy).
+
+**Why default-on.** The V2-BACKLOG entry's "definition of done"
+makes the choice: a developer running `dockyard dev` should get
+the inspector reachable without remembering a flag, and the few
+contexts where the inspector is unwanted (CI, headless servers,
+screen-shares) are exactly the contexts where the operator types
+a flag anyway. Default-on plus a clean opt-out is the smaller
+cognitive load over default-off plus a remember-this flag.
+
+**Why pin the Go server to HTTP on a known port.** The inspector
+needs a deterministic MCP base URL to attach to; without a pin
+the supervised server would default to stdio (the scaffold's
+default — `DOCKYARD_TRANSPORT` unset). The dev loop pins
+`DOCKYARD_TRANSPORT=http` and `DOCKYARD_HTTP_ADDR=127.0.0.1:8080`
+as **defaults** on the child environment — a developer who
+already exported either env-var in their shell wins via the
+later-entry-wins rule `os/exec` follows. With `--no-inspector`
+the pins are not applied at all, preserving the pre-v1.1
+behaviour exactly. A future `--server-addr` flag could expose
+the pin choice; left out of Wave A as the default works for the
+scaffolded templates and `examples/prompts-demo`.
+
+**Teardown ordering.** Children are stopped before the watcher
+(as in V1), and the inspector is stopped FIRST among the
+children — its in-process HTTP server drains while the Go server
+is still up, so the operator's last UI action sees a clean
+shutdown rather than a transient 502 from a backend whose
+upstream just disappeared. The Vite child and the Go server stop
+in the previous order.
+
+**Knock-on.** The `--no-inspector` flag becomes a new
+user-facing CLI surface — the §19 hygiene rule mandates a same-PR
+update to `skills/run-the-dev-loop/SKILL.md` and to
+`docs/site/guides/dev-loop.md`. The published docs pages
+describe the new default + the opt-out; the skill teaches it.
+
+---
+
+## D-162 — The supervised inspector is hosted in-process, not as a `bin/dockyard inspect` subprocess
+
+**Date:** 2026-05-25
+**Status:** Settled (v1.1 Wave A — inspector polish)
+**Where it lives:** `internal/devloop/inspector.go` (the
+`inspectorChild` type that hosts the inspector in-process),
+`internal/devloop/devloop.go` (the orchestrator that drives the
+in-process lifecycle directly rather than spawning a subprocess).
+
+**Why this is settled rather than implementation-internal.** The
+auto-attach (D-161) had two credible shapes:
+
+- **In-process.** `internal/inspector` is an importable Go
+  package; the dev loop calls `inspector.New(opts)` and runs the
+  HTTP server in a supervised goroutine. The inspector's
+  lifecycle rides on the dev session's context.
+- **Subprocess.** The dev loop spawns `bin/dockyard inspect
+  --url … --dir …` as a third supervised child, the same way it
+  spawns the Go server and Vite — uniform supervisor pattern.
+
+Either shape works; the rationale for the choice is worth
+recording so a future contributor does not re-litigate it.
+
+**The decision.** The supervised inspector is hosted **in-process**.
+The reasons, in order of weight:
+
+1. **No `bin/dockyard` resolution at runtime.** A subprocess
+   approach needs to locate the dockyard binary at dev time
+   (`os.Executable`, then a $PATH fallback). The most common
+   contributor configuration runs `dockyard dev` via
+   `go run ./cmd/dockyard` — there is no installed binary; the
+   subprocess shape would have to re-spawn the same `go run` with
+   different args, which is brittle and slow (a second `go run`
+   startup on every dev session start).
+2. **One process, one shutdown.** A subprocess inspector survives
+   only as long as the supervisor signals it correctly through
+   the process group; the in-process path rides on the same
+   `context.Context` the rest of the dev loop already uses. One
+   fewer concurrent-shutdown ordering to get right (the v1
+   `wave9_test.go` audit's lesson).
+3. **No transitive PATH ordering.** A user with a `dockyard` from
+   a homebrew install on their PATH and a freshly-built
+   `./bin/dockyard` in the worktree would land in unpredictable
+   territory; the in-process path uses exactly the code that is
+   compiled into the running `dockyard dev` binary, no version
+   drift.
+4. **The inspector lifecycle is already an importable Go API.**
+   `internal/inspector.New(opts)` is the same API
+   `internal/cli/inspect.go` already uses. The dev loop building
+   options is a thin reshape, not a new public surface.
+
+**Why this does not violate the supervisor uniformity.** The
+supervisor pattern's load-bearing property is "every supervised
+child is started, restarted, and stopped through one explicit
+seam" — not "every supervised child is a subprocess." The
+`inspectorChild` type honours that seam (`Start` / `Stop`,
+context-driven cancellation, the same teardown ordering as the
+process supervisors); it just runs inside the dev-loop process
+rather than outside it. The two supervisor flavours
+(`*supervisor` for subprocesses, `*inspectorChild` for the
+in-process inspector) are intentionally not unified into a single
+interface — the abstractions are different (an `*exec.Cmd` is
+not an `*inspector.Inspector`), and the surface area is small
+enough that the dev-loop orchestrator can drive both directly.
+
+**Knock-on.** A future second in-process child (say, a watched
+HTTP probe) would land alongside `inspectorChild`. A unified
+"child" interface is the right move only when there are three+
+in-process children with comparable lifecycles — premature
+abstraction with one in-process child is a worse trade than the
+two small concrete types.
+
+---
+
+## D-163 — The inspector's Prompts panel + `POST /api/prompts/get` is an operator-initiated client-shaped surface (extends D-131 to a third read)
+
+**Date:** 2026-05-25
+**Status:** Settled (v1.1 Wave A — inspector polish; closes
+[`docs/V2-BACKLOG.md`]'s "Inspector Prompts panel" entry, D-151)
+**Where it lives:** `internal/inspector/prompts.go` (the typed
+`PromptSource` + `PromptInvoker` + the SDK client wiring),
+`internal/inspector/assets.go` (the `GET /api/prompts` +
+`POST /api/prompts/get` mux routes),
+`internal/inspector/inspector.go` (`Options.Prompts` +
+`Options.PromptInvoker`),
+`web/inspector/src/lib/PromptsPanel.svelte` (the rail tab),
+`web/inspector/src/lib/prompts.ts` (the typed prompt model),
+`web/inspector/src/lib/api.ts` (`fetchPrompts` / `invokePrompt`),
+`test/integration/phase27_inspector_security_test.go` (the
+`prompts.go` allow-list entry — the mechanical guard that an
+inspector PR adding a new `mcp.NewClient` filed a decision).
+
+**Why now.** Phase 28 (D-151 / D-152) shipped the prompts surface
+on the runtime side — `runtime/server.AddPrompt`, the obs/v1
+`prompt.get` carrier, the `examples/prompts-demo` worked example
+— but the inspector did not render Prompts (D-151 explicitly
+called this a post-V1 candidate). The result: a developer
+running `examples/prompts-demo` could see their prompts work
+against a host that surfaces prompts (Claude, an MCP CLI), but
+not through the inspector — a gap the V2-BACKLOG named as a
+clean v1.1 closure.
+
+**The decision.** The inspector grows a Prompts rail tab and
+two new backend endpoints:
+
+- `GET /api/prompts` — a read-only `prompts/list` of the
+  attached server's registered prompts. Returns the inspector's
+  typed `PromptInfo` slice — no raw SDK type leaks (P3,
+  mirroring D-103's `AppPreview` and D-131's `InvokeResponse`).
+- `POST /api/prompts/get` — an operator-initiated `prompts/get`
+  against the attached server. The panel POSTs `{name,
+  arguments}`; the backend opens a short-lived MCP client
+  session, calls `prompts/get`, and returns the rendered
+  messages. A detached inspector answers 503; a malformed body
+  answers 400; a transport-level failure answers 502 with a
+  typed JSON message; a server-side `prompts/get` error is a
+  successful RPC (200 with `error` filled in the response —
+  the same isError-as-200 pattern D-131 set for `tools/invoke`).
+
+**Why this stays within P4 (CLAUDE.md §1, §13).** D-163 extends
+D-131's "operator-initiated `tools/call`" framing to a third
+operator-initiated client-shaped surface. Every clause of P4
+remains intact:
+
+- The inspector is still the lone client-shaped component — no
+  new package, no long-lived client, no production client.
+- The endpoint is localhost-only via the existing
+  `requireLoopback` gate (CVE-2025-49596 lesson; D-145
+  hardening).
+- The operator is the one driving the read through the UI —
+  not an off-localhost actor; same shape as D-099 (operator
+  views the relay), D-103 (operator views Apps), D-131
+  (operator invokes tools), D-134 (operator approves a task).
+- Each invocation opens a fresh client session, calls one
+  prompt, and closes — no long-lived client state, no SDK
+  types leak into Dockyard's handler-facing surface (P3 — the
+  `PromptGetRequest` / `PromptGetResponse` types are the
+  inspector's own).
+
+**Why this is "operator-initiated", not just "read-only".** A
+`prompts/get` is a read in the MCP semantic sense (the host
+pulls a rendered template — no side-effect on the server), so
+"read-only" would be defensible. But D-144 already re-cast the
+inspector's framing as "operator-initiated only" rather than
+"read-only" — every client-shaped surface is driven by an
+explicit UI action with a documented decision. D-163 follows
+the same framing for consistency: the panel renders, the
+operator clicks Invoke, the inspector makes one prompts/get
+call. The audit gate (the Phase 27 `mcp.NewClient` allow-list)
+treats every new client surface uniformly; the consistency
+keeps the audit's mental model simple.
+
+**Why not contract-first for the argument form.** MCP prompt
+arguments are a flat string-keyed map (D-152) — no JSON Schema
+on the argument shape. The panel renders a simple typed form
+keyed by `PromptArgument.Name` rather than reusing the
+contract-first `schema-form.ts` pipeline the Tools panel uses.
+This is the same constraint D-152 settled on the runtime side;
+the inspector mirrors it.
+
+**Knock-on.** The §19 hygiene rule mandates a same-PR update to
+`skills/test-with-the-inspector/SKILL.md` and to
+`docs/site/guides/inspector.md`. The published docs page
+describes the new Prompts panel + its operator-initiated
+framing; the skill teaches a developer to drive it. Pagination
+of `prompts/list` is left for V2 (the SDK supports cursor
+pagination; the V1 panel walks the first page only — a follow-
+up V2 item, small and additive).
+
+---
+
 ## D-164 — Scaffold + `dockyard run` auto-wire the Tasks engine when the manifest declares task-supporting tools
 
 **Date:** 2026-05-25

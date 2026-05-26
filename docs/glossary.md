@@ -436,6 +436,15 @@ component. It implements the host half of the `ui/` bridge to render Apps locall
 surfaces the Logbook stream, fixtures, latency analytics, drift verdicts, and
 capability-set emulation. Dev-mode-gated, localhost-only, read-only. RFC §12.
 
+**Inspector auto-attach** — `dockyard dev`'s default behaviour of starting the
+inspector as a third supervised child alongside the supervised Go server and
+Vite, so the local debug surface is reachable without a second terminal. Opt
+out with `--no-inspector` (CI / headless dev). The inspector is hosted
+**in-process** rather than as a `bin/dockyard inspect` subprocess (D-162);
+the dev loop pins the supervised Go server to HTTP on a known address so the
+inspector has a deterministic MCP base URL to attach to. RFC §9.2, §12.
+D-161, D-162.
+
 **Inspector backend** — the Go side of the inspector (`internal/inspector`,
 Phase 22): a localhost HTTP server that serves the `web/inspector` frontend
 bundle and brokers the read-only inspector API. It refuses any non-loopback
@@ -645,6 +654,15 @@ It routes an async region to exactly one of loading / empty / error / ready; the
 empty and error panels are mandatory and carry real copy plus a working
 retry/action affordance. Every Dockyard page and async region routes through it.
 `docs/design/CONVENTIONS.md` §4. AGENTS.md §20. D-066.
+
+**Prompts panel** — the inspector rail tab (v1.1 Wave A) that lists the
+attached server's registered MCP prompts and lets an operator invoke
+`prompts/get` against one. Backed by two operator-initiated client-shaped
+surfaces: `GET /api/prompts` (read-only `prompts/list`) and
+`POST /api/prompts/get` (one short-lived MCP client session per click;
+extends D-131's framing to a third read). The argument form is a flat
+typed form keyed by `PromptArgument.Name` — contract-first does not extend
+to prompts (D-152). RFC §12. D-163.
 
 ## Q
 

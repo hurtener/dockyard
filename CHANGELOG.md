@@ -23,6 +23,25 @@ deliberately deferred to V2.
 
 ### Added
 
+- `dockyard dev` now **auto-attaches the inspector** as a third
+  supervised child alongside the Go server and Vite. The inspector
+  URL is printed to stdout once it is reachable. Opt out with
+  `--no-inspector` (for CI / headless dev runs). The dev loop pins
+  the supervised Go server to HTTP on `127.0.0.1:8080` by default
+  so the inspector has a known MCP base URL to attach to; a
+  developer who already exported `DOCKYARD_TRANSPORT` /
+  `DOCKYARD_HTTP_ADDR` wins. Closes the v1.0.0 deferral; decisions
+  D-161 (the auto-attach seam), D-162 (the in-process choice).
+- The inspector grows a **Prompts rail tab** that lists the
+  attached server's registered MCP prompts and lets an operator
+  invoke `prompts/get` against one. Two new operator-initiated
+  client-shaped backend endpoints — `GET /api/prompts` (read-only
+  `prompts/list`) and `POST /api/prompts/get` (one short-lived
+  MCP client session per click) — back it. Closes the v1.0.0
+  deferral; decision D-163.
+- New CLI flags on `dockyard dev`: `--no-inspector` (skip the
+  supervised inspector child) and `--inspector-addr` (override the
+  inspector's loopback bind; default `127.0.0.1:0`).
 - **Scaffold + `dockyard run` auto-wire the Tasks engine when the
   manifest declares task-supporting tools** (D-164). Whenever the
   project's manifest declares any tool with `task_support: optional`
