@@ -21,7 +21,55 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Scaffold + `dockyard run` auto-wire the Tasks engine when the
+  manifest declares task-supporting tools** (D-164). Whenever the
+  project's manifest declares any tool with `task_support: optional`
+  or `task_support: required`, the scaffolded `main.go` now
+  constructs `tasks.NewInMemoryStore()` + `tasks.NewEngine(...)` and
+  attaches it via `server.Options{Tasks: engine}` — no hand edit
+  required. A new `scaffold.Options.ExampleToolTaskSupport` field
+  lets a caller choose the example tool's declaration; the renderer
+  branches on it. The blank scaffold (whose example tool declares
+  `task_support: forbidden`) and the `analytics-widgets` template
+  (whose tools all declare `forbidden`) keep their engine-free
+  `main.go` — zero overhead. `dockyard run` reads the project's
+  manifest at start time and warns when the manifest declares task
+  support but `main.go` does not appear to wire the engine.
+- **`HostProfile.RequiresServerURL() bool`** (D-165). A new method
+  on the `runtime/apps.HostProfile` interface declares whether the
+  profile's domain derivation requires a non-empty server URL — the
+  Claude profile returns `true` (it binds the signed origin to the
+  server URL per D-063/D-064); the generic pass-through profile
+  returns `false`. The capability-degradation testgate category
+  consults the method to exercise each profile honestly, replacing
+  the synthetic-URL workaround D-145 recorded.
+
+### Changed
+
+- **`HostProfile` interface gains `RequiresServerURL`.** This is
+  additive for callers, breaking for an out-of-tree
+  implementer — they must add the one-line method. The semver minor
+  framing follows D-159; the change is documented in D-165.
+- **The scaffold's example-tool manifest now writes the explicit
+  `task_support:` declaration** rather than always writing the
+  literal string "forbidden". The default (the no-template
+  scaffold's `task_support: forbidden`) is unchanged; a custom
+  `ExampleToolTaskSupport` flows through to the rendered YAML.
+- **`scripts/preflight.sh` discovers `vN.N-wave-*.sh` smoke scripts**
+  alongside the per-phase smoke scripts. Post-V1 release waves are
+  not phase-paired by drift-audit (a wave is not a phase) but their
+  smoke checks still run on every preflight (D-164).
+
+### Removed
+
+- **The `syntheticServerURL` constant in
+  `internal/testgate/categories.go`.** Retired by D-165 — the
+  capability category now consults
+  `HostProfile.RequiresServerURL()` to exempt signing profiles from
+  the empty-URL derivation rather than fabricating a placeholder
+  URL to dodge the invariant.
 
 ## [1.0.0] - 2026-05-25
 
