@@ -1,0 +1,31 @@
+Run Dockyard's embedded dev loop against a project (RFC §9.2).
+
+'dockyard dev' is one process supervising a process tree. It watches the
+project with an embedded fsnotify watcher — no external dev tool — and:
+
+  - restarts the Go MCP server on a .go source change;
+  - re-runs contract codegen in-process on a change under internal/contracts,
+    so the generated types are live before the server restarts;
+  - supervises the Vite dev server for the project's web/ UI (Vite owns Svelte
+    HMR). A project with no web/ UI degrades gracefully — only the Go server is
+    supervised.
+  - auto-attaches the local inspector against the supervised server so the
+    Tools / Events / RPC / Verdicts / Prompts panels are one click away. The
+    inspector URL is printed to stdout once it is reachable.
+
+By default the dev loop pins the supervised Go server to HTTP on
+127.0.0.1:8080 so the inspector has a known MCP base URL to attach to.
+A developer who already exported DOCKYARD_TRANSPORT / DOCKYARD_HTTP_ADDR
+in their shell wins — the dev-loop pins are defaults, not overrides.
+
+Press Ctrl-C to stop: the whole process tree is torn down cleanly.
+
+Usage:
+  dockyard dev [flags]
+
+Flags:
+      --debounce duration       file-change debounce window (default: 250ms)
+      --dir string              project directory (default: current directory)
+  -h, --help                    help for dev
+      --inspector-addr string   inspector loopback bind (default: 127.0.0.1:0 — OS-assigned port)
+      --no-inspector            do not auto-attach the inspector (for CI / headless dev runs)
