@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hurtener/dockyard/internal/manifest"
 	"github.com/hurtener/dockyard/internal/scaffold"
 )
 
@@ -21,10 +22,11 @@ import (
 // first-class one (RFC §10).
 func newNewCmd() *cobra.Command {
 	var (
-		dir          string
-		modulePath   string
-		dockyardPath string
-		templateName string
+		dir                string
+		modulePath         string
+		dockyardPath       string
+		templateName       string
+		exampleTaskSupport string
 	)
 
 	cmd := &cobra.Command{
@@ -54,12 +56,17 @@ optional product-pattern showcases; pass --template <name> to scaffold one.`,
 			if resolvedDockyard != "" {
 				resolvedWeb = filepath.Join(resolvedDockyard, "web")
 			}
+			taskSupport, tsErr := parseExampleTaskSupport(exampleTaskSupport)
+			if tsErr != nil {
+				return tsErr
+			}
 			opts := scaffold.Options{
-				Name:            name,
-				Dir:             dir,
-				ModulePath:      modulePath,
-				DockyardReplace: resolvedDockyard,
-				DockyardWebPath: resolvedWeb,
+				Name:                   name,
+				Dir:                    dir,
+				ModulePath:             modulePath,
+				DockyardReplace:        resolvedDockyard,
+				DockyardWebPath:        resolvedWeb,
+				ExampleToolTaskSupport: taskSupport,
 			}
 			var res scaffold.Result
 			if templateName == "" {
@@ -82,6 +89,15 @@ optional product-pattern showcases; pass --template <name> to scaffold one.`,
 	cmd.Flags().StringVar(&templateName, "template", "",
 		"product-pattern template to scaffold (e.g. analytics-widgets). "+
 			"Omit for the blank no-template scaffold (the first-class path).")
+	// --example-task-support opts the no-template scaffold's example tool
+	// into a non-default task_support declaration. The blank default is
+	// "forbidden" (the historical shape); "optional" / "required" makes the
+	// scaffold both write the corresponding manifest line AND emit the
+	// engine-wired main.go that constructs a real tasks.Engine and attaches
+	// it via server.Options.Tasks (D-164).
+	cmd.Flags().StringVar(&exampleTaskSupport, "example-task-support", "",
+		"example tool's task_support declaration: forbidden (default), optional, or required. "+
+			"optional/required also auto-wires a tasks.Engine in main.go.")
 	// --dockyard-path is the pre-release seam: until Dockyard is published to a
 	// module registry, a scaffolded project needs a `replace` directive
 	// pointing at a local Dockyard checkout to compile. It is hidden because a
@@ -91,6 +107,25 @@ optional product-pattern showcases; pass --template <name> to scaffold one.`,
 	_ = cmd.Flags().MarkHidden("dockyard-path")
 
 	return cmd
+}
+
+// parseExampleTaskSupport validates the --example-task-support flag value and
+// turns it into a typed manifest.TaskSupport. An empty value is the zero
+// value (the historical "task_support: forbidden" shape — D-164's
+// renderer normalises it). An unknown value is a clear CLI-facing error.
+func parseExampleTaskSupport(s string) (manifest.TaskSupport, error) {
+	switch s {
+	case "":
+		return "", nil
+	case string(manifest.TaskSupportForbidden):
+		return manifest.TaskSupportForbidden, nil
+	case string(manifest.TaskSupportOptional):
+		return manifest.TaskSupportOptional, nil
+	case string(manifest.TaskSupportRequired):
+		return manifest.TaskSupportRequired, nil
+	default:
+		return "", errf("invalid --example-task-support %q — use forbidden, optional, or required", s)
+	}
 }
 
 // resolveDockyardPath turns a user-supplied --dockyard-path into an absolute

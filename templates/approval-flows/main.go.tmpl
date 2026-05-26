@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/hurtener/dockyard/runtime/apps"
 	"github.com/hurtener/dockyard/runtime/obs"
@@ -75,16 +76,16 @@ func main() {
 	}
 	defer func() { _ = obsSink.Close() }()
 
-	// --- the Tasks engine (D-135) -----------------------------------------
+	// --- the Tasks engine (D-135, D-164) ----------------------------------
 	//
 	// The approval-flows template declares both its tools `task_support:
 	// required` — every tool call runs as an MCP Task with an
-	// `input_required` round-trip (RFC §8.4). The scaffolded main is
-	// therefore responsible for constructing a real `tasks.Engine` over a
-	// real `TaskStore` and attaching it to the server via
-	// `server.Options.Tasks` (the R2 follow-up D-108 named). Phase 25 /
-	// D-135 generalises this wiring: any template that declares a
-	// task-supporting tool in its manifest gets the same generated code.
+	// `input_required` round-trip (RFC §8.4). The wiring shape below is
+	// the same shape the no-template scaffold's auto-wire emits when its
+	// manifest declares any task-supporting tool (D-164); the template
+	// pre-dates the generator and is hand-written for its UI bundle and
+	// SSE sink. A maintainer comparing the two should find the
+	// engine-construction block identical.
 	//
 	// In-memory store. For a single-user stdio deployment the in-memory
 	// store is correct: tasks live as long as the process. For a
@@ -105,6 +106,12 @@ func main() {
 		// A short poll interval keeps the inspector's Tasks panel
 		// responsive; production deployments may want to raise this.
 		PollInterval: 250,
+		Lifecycle: tasks.Lifecycle{
+			MaxTTL:                    1 * time.Hour,
+			DefaultTTL:                5 * time.Minute,
+			PurgeInterval:             30 * time.Second,
+			MaxConcurrentPerRequestor: 16,
+		},
 	})
 	if err != nil {
 		logger.Error("create tasks engine", slog.String("error", err.Error()))

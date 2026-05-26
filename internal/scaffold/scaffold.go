@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/hurtener/dockyard/internal/codegen"
+	"github.com/hurtener/dockyard/internal/manifest"
 )
 
 // ErrInvalidName is the sentinel for a rejected project name. Callers branch
@@ -52,6 +53,41 @@ type Options struct {
 	// `npm install` before the packages are published to npm. Empty leaves
 	// published-version fallbacks in place (post-publish workflow).
 	DockyardWebPath string
+	// ExampleToolTaskSupport sets the no-template scaffold's example tool's
+	// task_support declaration. The zero value ("") preserves the historical
+	// behaviour — the example tool ships as task_support: forbidden, a plain
+	// synchronous tool. Setting it to manifest.TaskSupportOptional or
+	// TaskSupportRequired makes the scaffold both (a) declare the example
+	// tool that way in the rendered manifest and (b) emit the engine-wired
+	// shape of main.go — a `tasks.NewInMemoryStore()` + `tasks.NewEngine(...)`
+	// block + `server.Options{Tasks: engine}` (D-164).
+	//
+	// This is the manifest-side knob the scaffold consumes; RequiresTasksEngine
+	// is the corresponding read side that `dockyard run` consults at start time
+	// against the project's loaded manifest.
+	ExampleToolTaskSupport manifest.TaskSupport
+}
+
+// taskSupport returns the example tool's effective task_support declaration.
+// The empty zero value normalises to forbidden — RFC §8.4 makes "omitted ==
+// forbidden" the canonical reading, and the scaffold writes the explicit
+// form so the manifest is self-documenting.
+func (o Options) taskSupport() manifest.TaskSupport {
+	if o.ExampleToolTaskSupport == "" {
+		return manifest.TaskSupportForbidden
+	}
+	return o.ExampleToolTaskSupport
+}
+
+// wireTasksEngine reports whether the no-template scaffold's example tool
+// requires the engine to be auto-wired into main.go. It is the renderer's
+// side of D-164's detection.
+func (o Options) wireTasksEngine() bool {
+	switch o.taskSupport() {
+	case manifest.TaskSupportOptional, manifest.TaskSupportRequired:
+		return true
+	}
+	return false
 }
 
 // modulePath returns the effective Go module path.

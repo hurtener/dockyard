@@ -16,7 +16,12 @@ tools:
     # truth (P1, RFC §6). Their JSON Schema is generated, never hand-written.
     input: internal/contracts.GreetInput
     output: internal/contracts.GreetOutput
-    # This tool runs synchronously; it never becomes an MCP Task.
+    # task_support declares the tool's relationship to the MCP Tasks
+    # extension (RFC §8.4). forbidden = the tool always runs synchronously;
+    # optional = the runtime may run it as a task; required = it always runs
+    # as a task. When at least one tool declares optional or required,
+    # the scaffold's main.go constructs a tasks.Engine and attaches it via
+    # server.Options{Tasks: engine} — dockyard new does this for you.
     task_support: forbidden
 
 # A no-template server ships no UI, so there is no apps[] block. Attach a

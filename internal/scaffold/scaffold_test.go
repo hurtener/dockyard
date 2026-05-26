@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hurtener/dockyard/internal/manifest"
 )
 
 func TestValidateName(t *testing.T) {
@@ -227,6 +229,133 @@ func TestGenerate_ContractsAreGenerated(t *testing.T) {
 		}
 		if !strings.Contains(string(b), `"type": "object"`) {
 			t.Errorf("%s is not a JSON Schema object:\n%s", rel, b)
+		}
+	}
+}
+
+// TestScaffoldMainGo_AutoWiresTasksEngine proves the D-164 auto-wire: when
+// the example tool is scaffolded with task_support: required (or optional),
+// the rendered main.go constructs a real tasks.Engine over an in-memory
+// TaskStore and attaches it via server.Options{Tasks: engine}. The plain
+// shape (task_support: forbidden) keeps the engine-free main.go.
+func TestScaffoldMainGo_AutoWiresTasksEngine(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name             string
+		support          manifest.TaskSupport
+		wantAutoWire     bool
+		mustContain      []string
+		mustNotContain   []string
+		mustContainPlain []string // markers that should appear regardless
+	}{
+		{
+			name:    "forbidden — no auto-wire",
+			support: manifest.TaskSupportForbidden,
+			mustContain: []string{
+				`server.New(server.Info{`,
+			},
+			mustNotContain: []string{
+				"tasks.NewEngine",
+				"tasks.NewInMemoryStore",
+				"Tasks: engine",
+			},
+		},
+		{
+			name:         "required — auto-wire on",
+			support:      manifest.TaskSupportRequired,
+			wantAutoWire: true,
+			mustContain: []string{
+				"tasks.NewInMemoryStore",
+				"tasks.NewEngine",
+				"Tasks: engine",
+				"engine.StartSweep",
+				"defer engine.StopSweep",
+				"runtime/tasks",
+				"D-164", // the comment block names the decision so a future reader can find it
+			},
+		},
+		{
+			name:         "optional — auto-wire on",
+			support:      manifest.TaskSupportOptional,
+			wantAutoWire: true,
+			mustContain: []string{
+				"tasks.NewEngine",
+				"Tasks: engine",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			src := renderMainGo(Options{
+				Name:                   "auto-wire-server",
+				ExampleToolTaskSupport: tt.support,
+			})
+			for _, m := range tt.mustContain {
+				if !strings.Contains(src, m) {
+					t.Errorf("rendered main.go missing %q\nfull source:\n%s", m, src)
+				}
+			}
+			for _, m := range tt.mustNotContain {
+				if strings.Contains(src, m) {
+					t.Errorf("rendered main.go unexpectedly contains %q", m)
+				}
+			}
+		})
+	}
+}
+
+// TestScaffoldManifest_HonoursTaskSupport proves the rendered manifest's
+// example tool carries the requested task_support value verbatim — the
+// scaffold writes the explicit form so the manifest is self-documenting,
+// not relying on the loader's "omitted == forbidden" normalisation.
+func TestScaffoldManifest_HonoursTaskSupport(t *testing.T) {
+	t.Parallel()
+	for _, want := range []manifest.TaskSupport{
+		manifest.TaskSupportForbidden,
+		manifest.TaskSupportOptional,
+		manifest.TaskSupportRequired,
+	} {
+		got := renderManifest(Options{
+			Name:                   "demo-server",
+			ExampleToolTaskSupport: want,
+		})
+		if !strings.Contains(got, "task_support: "+string(want)) {
+			t.Errorf("manifest for support=%q does not contain task_support: %q\n%s",
+				want, want, got)
+		}
+	}
+}
+
+// TestGenerate_AutoWireEndToEnd proves Generate's end-to-end auto-wire path:
+// when the Options carry ExampleToolTaskSupport=required, the scaffolded
+// project ships both a manifest declaring greet as task_support: required
+// AND a main.go that constructs the engine.
+func TestGenerate_AutoWireEndToEnd(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	res, err := Generate(Options{
+		Name:                   "tasks-demo",
+		Dir:                    dir,
+		ExampleToolTaskSupport: manifest.TaskSupportRequired,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	yaml, err := os.ReadFile(filepath.Join(res.Dir, "dockyard.app.yaml"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if !strings.Contains(string(yaml), "task_support: required") {
+		t.Errorf("scaffolded manifest missing task_support: required:\n%s", yaml)
+	}
+	mainGo, err := os.ReadFile(filepath.Join(res.Dir, "main.go"))
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	for _, m := range []string{"tasks.NewEngine", "tasks.NewInMemoryStore", "Tasks: engine"} {
+		if !strings.Contains(string(mainGo), m) {
+			t.Errorf("scaffolded main.go missing auto-wire marker %q", m)
 		}
 	}
 }
