@@ -128,6 +128,16 @@ For a tool that runs as a long-running task, see the `approval-flows`
 template (`task_support: required` in the manifest, and the handler
 exercises the `TaskHandle` API).
 
+If you change a tool's `task_support` from `forbidden` to `optional`
+or `required` AFTER scaffolding, you also need to construct a
+`tasks.Engine` in `main.go` and attach it via
+`server.Options{Tasks: engine}` — `dockyard run` will warn on start
+when the manifest demands an engine but `main.go` does not appear
+to attach one. The easier path is to re-scaffold with
+`dockyard new --example-task-support required` so the auto-wire
+emits the engine block for you (the `approval-flows` template is the
+canonical example of the wiring shape).
+
 ## 4. Declare the tool in the manifest
 
 Append an entry to `dockyard.app.yaml`'s `tools[]`:
