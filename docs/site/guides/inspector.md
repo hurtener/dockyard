@@ -23,8 +23,24 @@ The inspector is Dockyard's local **test + debug** surface
 
 ## Attach
 
-In one terminal, run the server on HTTP (the inspector relays via
-HTTP):
+The fastest path is `dockyard dev` — it **auto-attaches** the
+inspector as a third supervised child alongside the Go server and
+Vite, and prints the inspector URL to stdout:
+
+```bash
+dockyard dev
+# ...
+# INFO inspector ready at http://127.0.0.1:54321
+```
+
+`cmd-click` the URL to open it. Pass `--no-inspector` (CI /
+headless) to skip the supervised inspector child. See the
+[dev loop guide](dev-loop) for the auto-attach details.
+
+For a server that is not under `dockyard dev` — a remote loopback
+build, a deployed dev server you are debugging — use the standalone
+path. In one terminal, run the server on HTTP (the inspector relays
+via HTTP):
 
 ```bash
 DOCKYARD_TRANSPORT=http dockyard run
@@ -51,6 +67,7 @@ A non-loopback `--port` host is refused before the listener opens
 | Tab        | What it shows / does                                                       |
 | ---------- | -------------------------------------------------------------------------- |
 | Tools      | All registered tools; fire one (the Operator-Invoke surface, [D-131](/reference/decisions)) |
+| Prompts    | All registered MCP prompts; fill arguments and render `prompts/get` messages ([D-163](/reference/decisions)) |
 | Apps       | Each `ui://` resource rendered in a sandboxed iframe                       |
 | Tasks      | Active + recent tasks rendered as a lifecycle Timeline                     |
 | Events     | The live Logbook stream                                                   |
@@ -62,6 +79,31 @@ A non-loopback `--port` host is refused before the listener opens
 ![tools-invoke](/screenshots/phase-24-finish/tools-invoke.png)
 
 ![events](/screenshots/phase-24-finish/events.png)
+
+## The Prompts panel
+
+MCP separates two model-facing primitives. **Tools** are things the
+model PUSHES (a typed input becomes a typed output). **Prompts** are
+templates the host PULLS via `prompts/get` (named curated message
+sets a chat host surfaces as `/slash` commands; the user picks one,
+the host fills its arguments, the model is seeded). The Prompts
+panel lists every prompt the attached server registered via
+`runtime/server.AddPrompt`. Pick one, fill its string arguments
+(MCP prompt arguments are flat strings — see
+[D-152](/reference/decisions); no JSON Schema form), press
+**Invoke prompts/get**. The inspector opens a short-lived MCP
+client session, calls `prompts/get`, closes the session, and renders
+the resulting message list.
+
+The panel's invocation surface uses the same operator-initiated P4
+framing as the Tools tab ([D-131](/reference/decisions),
+[D-144](/reference/decisions)) — the inspector remains the lone
+client-shaped component, dev-mode-gated, localhost-bound. The new
+endpoint is `POST /api/prompts/get`.
+
+Try it against `examples/prompts-demo` — three prompts
+(`summarize_for_review`, `code_review`, `explain_error`) exercise
+the panel end-to-end.
 
 ## The Fixtures switcher
 
@@ -112,4 +154,4 @@ quality gates.
 
 - [`test-with-the-inspector` agent skill](/agent-skills/)
 - [Dev loop guide](dev-loop)
-- [Decisions: D-103, D-130, D-131](/reference/decisions)
+- [Decisions: D-103, D-130, D-131, D-163](/reference/decisions)
