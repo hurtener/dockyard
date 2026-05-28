@@ -66,7 +66,7 @@ contract artifacts (`dockyard generate`) for you, so the project is ready
 to build, test, and validate immediately — no manual setup step. Pass
 `--no-postgen` to skip both (for hermetic / air-gapped / CI runs, or when
 you want to run them yourself); a fresh scaffold then needs `go mod tidy`
-+ `dockyard generate` before `dockyard validate` is green.
+and `dockyard generate` before `dockyard validate` is green.
 
 The scaffold produces:
 
