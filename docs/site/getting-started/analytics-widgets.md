@@ -56,14 +56,11 @@ The output of each tool carries a `Kind` discriminator (`"chart"`,
 
 ## Run + inspect
 
+`dockyard new` already ran `go mod tidy` and `dockyard generate`, so the
+project's dependencies and contract artifacts (JSON Schema + TS) are ready.
+(If you scaffolded with `--no-postgen`, run those two first.)
+
 ```bash
-# One-time after a pre-publish scaffold:
-go mod tidy
-
-# A template scaffold ships the Go contracts but not the generated
-# JSON Schema + TS — produce them once:
-dockyard generate
-
 # Build the project once so web/dist exists
 dockyard build
 

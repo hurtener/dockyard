@@ -57,15 +57,16 @@ export PATH="$PWD/bin:$PATH"   # bin/dockyard
 ```bash
 dockyard new my-server
 cd my-server
-go mod tidy             # populate go.sum from the resolved replace target
 go test ./...           # the scaffolded contract test
 go run .                # serves over stdio on the current terminal
 ```
 
-`go mod tidy` is required once after a pre-publish scaffold — the
-generated `go.mod` carries a `replace` directive but no `go.sum`, so the
-first `go test` / `go run` would otherwise fail to resolve transitive
-deps.
+`dockyard new` resolves dependencies (`go mod tidy`) and generates the
+contract artifacts (`dockyard generate`) for you, so the project is ready
+to build, test, and validate immediately — no manual setup step. Pass
+`--no-postgen` to skip both (for hermetic / air-gapped / CI runs, or when
+you want to run them yourself); a fresh scaffold then needs `go mod tidy`
+and `dockyard generate` before `dockyard validate` is green.
 
 The scaffold produces:
 
@@ -131,6 +132,10 @@ Skip it once Dockyard is published.
 - `--dir <path>` — parent directory for the project (default: cwd).
 - `--module <go-module>` — Go module path for `go.mod` (default:
   `example.com/<name>`).
+- `--no-postgen` — skip the post-scaffold `go mod tidy` + `dockyard
+  generate` steps. Default is to run both so a fresh scaffold is green
+  under `dockyard validate` on the first try. Use it for hermetic /
+  air-gapped / CI runs, or when you run those steps yourself.
 - `--example-task-support <forbidden|optional|required>` — set the
   no-template scaffold's example tool's `task_support` declaration.
   Default is `forbidden` (the historical shape; the tool runs
@@ -153,18 +158,18 @@ Skip it once Dockyard is published.
 
 ## Verify the scaffold
 
-For any scaffold path:
+For any scaffold path (`dockyard new` already ran `go mod tidy` +
+`dockyard generate`, unless you passed `--no-postgen`):
 
 ```bash
 cd <project>
-go mod tidy             # only needed once, after a pre-publish scaffold
-dockyard generate       # template scaffolds need this once before validate (blank scaffolds ship them pre-generated)
 dockyard validate       # quality gates — should report 0 blockers
 go test ./...
 ```
 
-If `dockyard validate` reports stale codegen on a fresh scaffold, that is
-a Dockyard bug; file it.
+If you scaffolded with `--no-postgen`, run `go mod tidy` and
+`dockyard generate` first. If `dockyard validate` reports stale codegen on
+a fresh scaffold that ran the post-step, that is a Dockyard bug; file it.
 
 ## Common pitfalls
 

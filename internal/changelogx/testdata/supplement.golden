@@ -1,0 +1,18 @@
+---
+
+### Commits
+
+**Added**
+
+- **apps:** add the prompts panel (#55)
+- add --no-postgen flag (#60)
+
+**Changed**
+
+- speed up the ring buffer
+- Tweak something directly
+- **server:** extract helper
+
+**Fixed**
+
+- **codegen:** handle empty structs (#54)

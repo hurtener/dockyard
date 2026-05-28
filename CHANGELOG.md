@@ -21,7 +21,25 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-(No entries yet — the v1.2.0 surface will land here.)
+### Added
+
+- `dockyard new --no-postgen` — opt out of the new post-scaffold steps
+  (for hermetic / air-gapped / CI runs, or to run them yourself).
+
+### Changed
+
+- **`dockyard new` now runs `go mod tidy` + `dockyard generate` for you
+  at scaffold time**, so a fresh project — blank or `--template` —
+  reaches a green `dockyard validate` on the first try with no manual
+  command. The steps are best-effort: a failure (e.g. no module-proxy
+  reach) prints a warning and the manual fallback rather than failing the
+  scaffold. Opt out with `--no-postgen`.
+- **Release notes now carry an auto-generated commit supplement.** A
+  GitHub Release body is the hand-authored `CHANGELOG.md` section
+  followed by a Conventional-Commits-derived list of what landed
+  (`feat` → Added, `fix` → Fixed, the rest → Changed; `docs`/`chore`/
+  `test`/`ci`/`build`/`style` dropped). The hand-authored prose stays the
+  canonical narrative; the supplement is appended on a tag push only.
 
 ## [1.1.0] - 2026-05-26
 

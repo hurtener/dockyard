@@ -125,6 +125,23 @@ The push triggers `.github/workflows/release.yml`. The workflow:
    re-run: a re-run uploads any artifacts not already present and
    updates the body; it never creates a duplicate release.
 
+The release body is the hand-authored CHANGELOG section followed by an
+auto-generated **commit supplement** (D-167): the build job runs
+`changelogx -supplement` over the `previous-tag..this-tag` commit range
+and appends a Conventional-Commits-derived list (feat → Added, fix →
+Fixed, everything else → Changed; `docs`/`chore`/`test`/`ci`/`build`/`style`
+are dropped as noise) below the prose. The hand-authored section stays
+the canonical narrative — the supplement is the "what landed in detail"
+companion. It is appended only on a real tag push and only when a
+previous tag exists; a dry-run keeps the bare extracted section. Preview
+it locally before tagging:
+
+```bash
+# What the supplement will append for the next release:
+go run ./internal/changelogx/cmd/changelogx \
+  -supplement -from v1.1.0 -to HEAD
+```
+
 The first run for a tag typically takes 5–10 minutes (the
 cross-compile is the slowest step). A `workflow_dispatch` dry-run is
 2–3 minutes.

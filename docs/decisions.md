@@ -5303,3 +5303,116 @@ empty-URL derivation says exactly that on the wire.
 recorded "Phase 27 hardening" as the deferral). The V2-backlog
 entry that recorded the deferral stays as a cross-link; it is now
 marked claimed by v1.1 wave B.
+
+---
+
+## D-166 — `dockyard new` runs `go mod tidy` + `dockyard generate` at scaffold time (supersedes D-139)
+
+**Date:** 2026-05-28
+**Status:** Settled (v1.2 wave A — scaffold autogen + changelog supplement)
+**Where it lives:** `internal/cli/new.go` (the post-scaffold step + the
+`--no-postgen` flag + the `goModTidyFn` / `generateFn` seams),
+`internal/cli/new_test.go`, `test/integration/v1_2_wave_a_test.go`,
+`docs/site/cli/index.md` (the regenerated CLI reference),
+`skills/scaffold-a-server/SKILL.md`,
+`docs/site/getting-started/{index,analytics-widgets,approval-flows}.md`,
+`templates/{analytics-widgets,approval-flows}/README.md.tmpl`,
+`docs/V2-BACKLOG.md` (the D-139 deferral, now cross-linked).
+
+**The decision.** `dockyard new` (blank or `--template`) runs, after the
+pure scaffold writes its tree, two one-time steps so a fresh project
+reaches a green `dockyard validate` with no manual command: (1) `go mod
+tidy` (resolve the deps the generated `go.mod`'s `replace` directive
+declares — RFC §4.3) and (2) `dockyard generate` in-process (materialise
+a template's JSON Schema + TypeScript — RFC §6.2). This supersedes
+D-139's "document the two manual steps" stopgap.
+
+**Where the steps live, and why.** The steps run at the CLI boundary
+(`internal/cli/new.go`), **not** inside `scaffold.Generate()`. The pure
+`scaffold` package stays a network-free, deterministic, golden-tested
+file generator — its `TestGolden` is byte-identical and untouched. The
+two side-effecting steps (one shell-out, one filesystem-mutating codegen
+run) are the CLI's job, and they are package-var seams (`goModTidyFn`,
+`generateFn`) so the success and failure paths are unit-tested without a
+real toolchain or network.
+
+**Best-effort, with `--no-postgen`.** `go mod tidy` needs the module
+proxy; an offline / air-gapped developer would otherwise see a hard
+failure. So both steps are best-effort: a failure prints one warning and
+`printNextSteps` shows the manual recovery (`go mod tidy` + `dockyard
+generate`) — the project tree is already written, so the scaffold still
+exits 0. `--no-postgen` skips both steps outright (hermetic / CI runs, or
+a developer who runs them separately). This is a deliberate refinement of
+the V2-backlog "without extra commands" definition of done: the common
+path needs no commands; the offline path degrades to a clear manual
+fallback rather than a broken scaffold.
+
+**Why run generate even for the blank scaffold.** The blank scaffold
+ships its generated artifacts pre-built, so `generate` is idempotent
+there (no diff). Running it unconditionally keeps one code path and makes
+the template case — where it is load-bearing — the same as the blank
+case. The integration test's negative control proves the step is
+load-bearing: a `--template` scaffold without `generate` validates *red*
+(missing/stale codegen), and green only after the step runs.
+
+**Knock-on (D-139 §19 hygiene).** The two manual steps are removed from
+the `scaffold-a-server` skill and the getting-started docs in the same
+PR; the template `README.md.tmpl`s are reframed to "the project is
+ready" (retaining a `go mod tidy` mention as a day-to-day note). The CLI
+reference page is regenerated (D-140) so the new `--no-postgen` flag
+appears.
+
+**Supersedes.** D-139 (the documented manual `go mod tidy` + `dockyard
+generate` workflow). The V2-backlog entry that recorded the deferral
+stays as a cross-link; it is now marked claimed by v1.2 wave A.
+
+---
+
+## D-167 — the release pipeline appends a Conventional-Commits supplement below the hand-authored CHANGELOG section
+
+**Date:** 2026-05-28
+**Status:** Settled (v1.2 wave A — scaffold autogen + changelog supplement)
+**Where it lives:** `internal/changelogx/supplement.go` (the pure
+`Supplement([]Commit) string` + `ParseCommit` + the `Commit` type),
+`internal/changelogx/supplement_test.go` +
+`internal/changelogx/testdata/supplement.golden`,
+`internal/changelogx/cmd/changelogx/main.go` (the `-supplement` mode +
+the `git log` driver), `.github/workflows/release.yml` (the
+tag-push-only append step + `fetch-depth: 0`), `docs/RELEASING.md`.
+
+**The decision.** The GitHub Release body stays the hand-authored
+CHANGELOG section (the canonical P1–P4 narrative — D-154), and the
+release pipeline appends below it an auto-generated, Conventional-Commits
+-derived list of what landed. The build job runs `changelogx -supplement`
+over the `previous-tag..this-tag` range; the pure classifier groups
+commits into Keep-a-Changelog categories (feat → Added, fix → Fixed,
+everything else → Changed) and drops the noise types
+(`docs`/`chore`/`test`/`ci`/`build`/`style`). This is the V2 follow-up
+D-154 explicitly named.
+
+**Why a pure, stdlib-only, golden-tested classifier.** Same reasoning as
+D-157 for the extractor: the release-body path is a load-bearing gate, so
+a third-party changelog-generator or CommonMark dependency would be a
+transitive-behaviour risk on it. The classifier is a small pure function
+(`Supplement`) pinned by a golden test against a fixed commit fixture, so
+a future format change is a loud unit-test failure in PR, not a quiet
+release-time surprise. The `git log` shell-out lives only in the
+`cmd/changelogx` driver, not in the package — the package stays pure and
+testable.
+
+**Tag-push only; narrative stays canonical.** The supplement is appended
+only on a real tag push, and only when a previous tag exists to diff
+against (the first release, and every `workflow_dispatch` dry-run, keep
+the bare extracted section). The supplement is rendered under a distinct
+`### Commits` heading with bold category labels (not `### Added`
+headings) so it never collides visually with the narrative's own
+headings. The supplement is computed at release time and lives only in
+the GitHub Release body — it is never committed back into `CHANGELOG.md`.
+
+**Scope: signal-only.** `docs`/`chore`/`test`/`ci`/`build`/`style`
+commits are dropped — they are noise in a release body. `feat`/`fix` map
+to Added/Fixed; `perf`/`refactor`/an unknown prefix/a non-conventional
+subject fold into Changed as a safe catch-all. The `git log --no-merges`
+invocation keeps merge commits out of the catch-all. This is tunable in
+one place (the pure `classify` function) if a future release wants a
+fuller list.
