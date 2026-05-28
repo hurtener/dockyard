@@ -34,12 +34,14 @@ else
   skip "internal/cli/new.go not present"
 fi
 
-# The §19 sync proof: the scaffold skill no longer instructs a manual tidy.
+# The §19 sync proof: the scaffold skill documents --no-postgen (the D-166
+# auto-step + its opt-out). It still legitimately mentions `go mod tidy` for
+# the opt-out fallback, so the meaningful signal is the flag, not its absence.
 if [ -f skills/scaffold-a-server/SKILL.md ]; then
-  if grep -q "go mod tidy" skills/scaffold-a-server/SKILL.md; then
-    skip "scaffold-a-server skill still mentions 'go mod tidy' (pre-D-166 docs)"
+  if grep -q -- "--no-postgen" skills/scaffold-a-server/SKILL.md; then
+    ok "scaffold-a-server skill documents the post-step opt-out (D-166)"
   else
-    ok "scaffold-a-server skill dropped the manual 'go mod tidy' step"
+    skip "scaffold-a-server skill not yet synced for D-166"
   fi
 else
   skip "skills/scaffold-a-server/SKILL.md not present"

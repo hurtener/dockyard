@@ -42,10 +42,14 @@ You have two options.
 ```bash
 dockyard new my-server
 cd my-server
-go mod tidy          # populate go.sum (one-time after a pre-publish scaffold)
 go test ./...        # the scaffolded contract test passes
 go run .             # serves over stdio
 ```
+
+`dockyard new` resolves dependencies and generates the contract artifacts
+for you, so the project builds, tests, and validates immediately. (Pass
+`--no-postgen` to skip that and run `go mod tidy` + `dockyard generate`
+yourself — handy for hermetic or air-gapped environments.)
 
 This is the first-class path — one manifest, one example contract-first
 tool (`greet`), generated artifacts, a runnable `main.go`. No UI; add

@@ -193,6 +193,16 @@ recorded order in the decisions log. Each item carries:
 
 ### Pre-publish `--dockyard-path` workflow
 
+> **Status:** **Claimed by v1.2 wave A (D-166).** `dockyard new` now runs
+> `go mod tidy` + `dockyard generate` for the developer at scaffold time
+> (best-effort, with a `--no-postgen` opt-out), so a fresh scaffold —
+> blank or `--template` — reaches a green `dockyard validate` on the
+> first try with no manual command. The two manual steps were dropped
+> from the `scaffold-a-server` skill + getting-started docs in the same
+> PR (§19). See `docs/plans/v1.2-wave-A-scaffold-and-changelog.md`. The
+> entry stays here as the audit trail of what was deferred and when it
+> shipped.
+
 - **Origin.** D-139 (the documented one-time-`go-mod-tidy` +
   `dockyard generate` workflow before v1.0.0 was on a registry).
 - **What was deferred + why.** Before v1.0.0 the scaffold's generated
@@ -333,6 +343,14 @@ recorded order in the decisions log. Each item carries:
   docs alias" as a step.
 
 ### Conventional-Commits-generated changelog supplement
+
+> **Status:** **Claimed by v1.2 wave A (D-167).** The release pipeline
+> now appends a Conventional-Commits-derived list (rendered by a pure,
+> golden-tested `internal/changelogx.Supplement`) below the hand-authored
+> CHANGELOG section in the GitHub Release body, on a tag push only. The
+> hand-authored prose stays the canonical narrative (D-154). See
+> `docs/plans/v1.2-wave-A-scaffold-and-changelog.md`. The entry stays
+> here as the audit trail of what was deferred and when it shipped.
 
 - **Origin.** Phase 30 plan (the v1.0.0 changelog is deliberately
   hand-authored; from v1.1.0 onward the format is open to

@@ -91,6 +91,15 @@ body. Stdlib-only, pure-functional, golden-tested against the in-repo
 `CHANGELOG.md` directly. Returns `ErrSectionNotFound` (exit 2 in the
 CLI) for a missing version. Phase 30. D-157.
 
+**Changelog supplement** — the auto-generated, Conventional-Commits-derived
+list of what landed that the `release` workflow appends below the
+hand-authored `CHANGELOG.md` section in a GitHub Release body. Rendered by
+a pure, golden-tested `internal/changelogx.Supplement` (feat → Added, fix →
+Fixed, the rest → Changed; `docs`/`chore`/`test`/`ci`/`build`/`style`
+dropped); appended on a tag push only. The hand-authored prose stays the
+canonical narrative (D-154); the supplement is the "what landed in detail"
+companion. D-167.
+
 **Capability negotiation** — the MCP `initialize` handshake in which a host
 advertises the extensions and capabilities it supports. Dockyard reads this at run
 time and adapts; it never hardcodes a per-host capability matrix. RFC §7.5. D-011.
@@ -746,6 +755,15 @@ in `docs/RELEASING.md`. D-159.
 example contract-first tool, the generated contract artifacts, a runnable
 `main.go`, a contract test, and project metadata. Owned by `internal/scaffold`;
 deterministic for a fixed invocation and golden-pinned. RFC §9.1, §10.
+
+**Scaffold post-step** — the `dockyard new` CLI-boundary phase that runs
+`go mod tidy` + `dockyard generate` after the pure scaffold writes its tree,
+so a fresh project is green under `dockyard validate` on the first try with
+no manual command. Best-effort (a failure warns + points at the manual
+fallback rather than failing the scaffold); opt out with `--no-postgen`. It
+lives in `internal/cli`, not `internal/scaffold`, so the scaffold package
+stays a network-free, golden-pinned file generator. Supersedes the D-139
+manual workflow. D-166.
 
 **§19 hygiene rule** — the AGENTS.md §19 rule that a PR changing user-facing
 surface (a CLI verb, a manifest field, a template, the generated-project shape,

@@ -85,7 +85,12 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      # fetch-depth: 0 — the changelog supplement (D-167) diffs the commit
+      # range previous-tag..this-tag, so the build needs the full history +
+      # tags, not the default shallow checkout.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
@@ -146,6 +151,26 @@ jobs:
               -out dist/release/RELEASE_NOTES.md
           fi
           head -30 dist/release/RELEASE_NOTES.md
+      # Append the Conventional-Commits supplement (D-167) below the
+      # hand-authored release body — tag push only, and only when a previous
+      # tag exists to diff against. The hand-authored CHANGELOG prose stays the
+      # canonical narrative (D-154); the supplement is the auto-generated
+      # "what landed in detail" companion. An empty diff appends nothing.
+      - name: append changelog supplement
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.version }}"
+          prev="$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)"
+          if [ -z "${prev}" ]; then
+            echo "no previous tag before ${tag}; skipping the commit supplement"
+            exit 0
+          fi
+          echo "supplementing release notes with commits ${prev}..${tag}"
+          go run ./internal/changelogx/cmd/changelogx \
+            -supplement -from "${prev}" -to "${tag}" \
+            -out dist/release/RELEASE_NOTES.md -append
+          tail -40 dist/release/RELEASE_NOTES.md
       - name: upload artifacts (workflow run artifact)
         uses: actions/upload-artifact@v4
         with:
