@@ -79,6 +79,7 @@ export type {
   RequestDisplayModeResult,
   SizeChangedParams,
   StyleVariables,
+  TaskProgressParams,
   ToolCancelledParams,
   ToolInputParams,
   UpdateModelContextParams,

@@ -19,6 +19,7 @@ describe('NotificationRouter', () => {
     router.onToolCancelled(() => calls.push('tool-cancelled'));
     router.onSizeChanged(() => calls.push('size-changed'));
     router.onHostContextChanged(() => calls.push('host-context-changed'));
+    router.onTaskProgress(() => calls.push('task-progress'));
 
     router.dispatch(HostNotification.toolInput, { arguments: {} });
     router.dispatch(HostNotification.toolInputPartial, { arguments: {} });
@@ -26,6 +27,7 @@ describe('NotificationRouter', () => {
     router.dispatch(HostNotification.toolCancelled, {});
     router.dispatch(HostNotification.sizeChanged, { width: 1, height: 1 });
     router.dispatch(HostNotification.hostContextChanged, {});
+    router.dispatch(HostNotification.taskProgress, { taskId: 't1' });
 
     expect(calls).toEqual([
       'tool-input',
@@ -34,6 +36,7 @@ describe('NotificationRouter', () => {
       'tool-cancelled',
       'size-changed',
       'host-context-changed',
+      'task-progress',
     ]);
   });
 
@@ -141,6 +144,49 @@ describe('BridgeShell — notification fan-out end-to-end', () => {
 
     await new Promise((r) => setTimeout(r, 0));
     expect(sizes).toEqual([{ width: 320, height: 240 }]);
+  });
+
+  it('delivers task-progress with a typed fraction + message (RFC §8.4)', async () => {
+    const h = harness();
+    const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+    await bridge.connect();
+
+    const points: { taskId: string; fraction?: number; message?: string }[] = [];
+    const off = bridge.onTaskProgress((p) => points.push(p));
+
+    h.notify(HostNotification.taskProgress, {
+      taskId: 't1',
+      fraction: 0.62,
+      message: 'halfway',
+      status: 'working',
+    });
+    // A status-only point (a phase change a fraction cannot express).
+    h.notify(HostNotification.taskProgress, { taskId: 't1', message: 'finalising' });
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(points).toEqual([
+      { taskId: 't1', fraction: 0.62, message: 'halfway', status: 'working' },
+      { taskId: 't1', message: 'finalising' },
+    ]);
+
+    // Unsubscribe stops further delivery.
+    off();
+    h.notify(HostNotification.taskProgress, { taskId: 't1', fraction: 1 });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(points).toHaveLength(2);
+  });
+
+  it('degrades cleanly when the host never forwards task-progress', async () => {
+    const h = harness();
+    const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+    await bridge.connect();
+
+    // An App subscribes regardless; with no host forwarding, the subscriber
+    // simply never fires — capability-driven degradation (RFC §7.5).
+    const points: unknown[] = [];
+    bridge.onTaskProgress((p) => points.push(p));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(points).toEqual([]);
   });
 
   it('stops delivering notifications after close()', async () => {

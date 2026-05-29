@@ -4,11 +4,38 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/hurtener/dockyard/internal/protocolcodec"
+	"github.com/hurtener/dockyard/runtime/obs"
 )
+
+// captureEmitter is a concurrency-safe obs.Emitter that retains every event for
+// assertions — the tasks test analogue of obs's own test collector.
+type captureEmitter struct {
+	mu     sync.Mutex
+	events []obs.Event
+}
+
+func (c *captureEmitter) Emit(_ context.Context, e obs.Event) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events = append(c.events, e)
+}
+
+func (c *captureEmitter) byKindPhase(kind obs.EventKind, phase obs.Phase) []obs.Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []obs.Event
+	for _, e := range c.events {
+		if e.Kind == kind && e.Phase == phase {
+			out = append(out, e)
+		}
+	}
+	return out
+}
 
 // TestTaskHandle_ProgressReporting is a binding acceptance criterion: a
 // long-running handler reports progress through a TaskHandle, observable by a
@@ -58,6 +85,106 @@ func TestTaskHandle_ProgressReporting(t *testing.T) {
 	if _, err := e.Dispatch(ctx, MethodResult, mustTaskIDParams(t, id)); err != nil {
 		t.Fatalf("tasks/result: %v", err)
 	}
+}
+
+// TestTaskHandle_ProgressEmitsObsEvent is a binding acceptance criterion for
+// the bridge View-side task-progress channel (D-171): TaskHandle.Progress
+// emits an obs/v1 task.progress PhaseProgress event carrying the clamped
+// fraction, and TaskHandle.Status emits one with the message and no fraction —
+// the stream the inspector forwards to the App preview (RFC §8.4).
+func TestTaskHandle_ProgressEmitsObsEvent(t *testing.T) {
+	t.Parallel()
+	capE := &captureEmitter{}
+	e := newEngine(t, &Options{Obs: capE})
+	ctx := context.Background()
+
+	done := make(chan struct{})
+	handler := func(ctx context.Context, h TaskHandle) (json.RawMessage, error) {
+		if err := h.Progress(ctx, 0.62, "halfway"); err != nil {
+			return nil, err
+		}
+		if err := h.Status(ctx, "reticulating splines"); err != nil {
+			return nil, err
+		}
+		close(done)
+		return json.RawMessage(`{"isError":false}`), nil
+	}
+	if _, err := e.CreateForToolCall(ctx, CreateToolCallParams{ToolName: "x", Handle: handler}); err != nil {
+		t.Fatalf("CreateForToolCall: %v", err)
+	}
+	<-done
+
+	// The terminal end event may still be racing; the two PhaseProgress events
+	// are emitted synchronously inside the handler before `done`, so they are
+	// present now.
+	progress := capE.byKindPhase(obs.KindTaskProgress, obs.PhaseProgress)
+	if len(progress) != 2 {
+		t.Fatalf("want 2 PhaseProgress task.progress events, got %d", len(progress))
+	}
+
+	var withFrac obs.TaskProgressPayload
+	if err := json.Unmarshal(progress[0].Payload, &withFrac); err != nil {
+		t.Fatalf("decode progress payload: %v", err)
+	}
+	if withFrac.Fraction == nil || *withFrac.Fraction != 0.62 {
+		t.Errorf("Progress fraction = %v, want 0.62", withFrac.Fraction)
+	}
+	if withFrac.Message != "halfway" {
+		t.Errorf("Progress message = %q, want %q", withFrac.Message, "halfway")
+	}
+
+	var statusOnly obs.TaskProgressPayload
+	if err := json.Unmarshal(progress[1].Payload, &statusOnly); err != nil {
+		t.Fatalf("decode status payload: %v", err)
+	}
+	if statusOnly.Fraction != nil {
+		t.Errorf("Status must carry no fraction, got %v", *statusOnly.Fraction)
+	}
+	if statusOnly.Message != "reticulating splines" {
+		t.Errorf("Status message = %q", statusOnly.Message)
+	}
+}
+
+// TestTaskHandle_ProgressOnTerminalTaskEmitsNothing is a binding acceptance
+// criterion (D-171): a Progress call on a task that has left working returns
+// an error and emits no obs event.
+func TestTaskHandle_ProgressOnTerminalTaskEmitsNothing(t *testing.T) {
+	t.Parallel()
+	capE := &captureEmitter{}
+	e := newEngine(t, &Options{Obs: capE})
+	ctx := context.Background()
+
+	// Grab a handle from inside a handler, cancel the task, then prove a
+	// Progress call after the task left working errors and emits nothing.
+	gotHandle := make(chan TaskHandle, 1)
+	release := make(chan struct{})
+	handler := func(_ context.Context, h TaskHandle) (json.RawMessage, error) {
+		gotHandle <- h
+		<-release
+		return json.RawMessage(`{"isError":false}`), nil
+	}
+	raw, err := e.CreateForToolCall(ctx, CreateToolCallParams{ToolName: "x", Handle: handler})
+	if err != nil {
+		t.Fatalf("CreateForToolCall: %v", err)
+	}
+	res, err := protocolcodec.CodecFor(protocolcodec.DefaultVersion).DecodeCreateTaskResult(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	h := <-gotHandle
+	if _, err := e.Dispatch(ctx, MethodCancel, mustTaskIDParams(t, res.Task.ID)); err != nil {
+		t.Fatalf("tasks/cancel: %v", err)
+	}
+
+	before := len(capE.byKindPhase(obs.KindTaskProgress, obs.PhaseProgress))
+	if err := h.Progress(context.Background(), 0.9, "too late"); err == nil {
+		t.Error("Progress on a cancelled task must return an error")
+	}
+	after := len(capE.byKindPhase(obs.KindTaskProgress, obs.PhaseProgress))
+	if after != before {
+		t.Errorf("Progress on a terminal task emitted %d events, want 0", after-before)
+	}
+	close(release)
 }
 
 // TestTaskHandle_CooperativeCancellation is a binding acceptance criterion: a
