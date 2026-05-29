@@ -1,11 +1,13 @@
 /**
  * notifications.ts — host → View notification fan-out.
  *
- * The host pushes six notifications to the View (brief 01 §2.4):
+ * The host pushes these notifications to the View (brief 01 §2.4):
  * `tool-input`, `tool-input-partial`, `tool-result`, `tool-cancelled`,
- * `size-changed`, `host-context-changed`. The bridge demultiplexes the single
- * transport notification stream into typed, per-kind subscriber sets so an App
- * author registers `onToolResult(...)` instead of pattern-matching raw methods.
+ * `size-changed`, `host-context-changed`, and `task-progress` (a
+ * long-running task's mid-flight progress — RFC §8.4). The bridge
+ * demultiplexes the single transport notification stream into typed,
+ * per-kind subscriber sets so an App author registers `onToolResult(...)`
+ * instead of pattern-matching raw methods.
  *
  * `host-context-changed` is dispatched here *and* consumed by `HostContextState`
  * — the bridge wires that internally so the stores stay current.
@@ -16,6 +18,7 @@ import {
   type CallToolResult,
   type HostContextChangedParams,
   type SizeChangedParams,
+  type TaskProgressParams,
   type ToolCancelledParams,
   type ToolInputParams,
 } from './protocol.js';
@@ -57,6 +60,7 @@ export class NotificationRouter {
   private readonly toolCancelled = new Topic<ToolCancelledParams>();
   private readonly sizeChanged = new Topic<SizeChangedParams>();
   private readonly hostContextChanged = new Topic<HostContextChangedParams>();
+  private readonly taskProgress = new Topic<TaskProgressParams>();
 
   /** Routes one inbound notification to its topic. Unknown methods are no-ops. */
   dispatch(method: string, params: unknown): void {
@@ -80,6 +84,9 @@ export class NotificationRouter {
         this.hostContextChanged.emit(
           (params ?? {}) as HostContextChangedParams,
         );
+        break;
+      case HostNotification.taskProgress:
+        this.taskProgress.emit((params ?? {}) as TaskProgressParams);
         break;
       // `resourceTeardown` and any unknown method are intentionally ignored
       // here; teardown is handled by BridgeShell.close().
@@ -122,6 +129,11 @@ export class NotificationRouter {
     return this.hostContextChanged.subscribe(fn);
   }
 
+  /** Fires with a long-running task's progress point (RFC §8.4). */
+  onTaskProgress(fn: Listener<TaskProgressParams>): Unsubscribe {
+    return this.taskProgress.subscribe(fn);
+  }
+
   /** Drops every subscriber — used on bridge teardown. */
   clear(): void {
     this.toolInput.clear();
@@ -130,5 +142,6 @@ export class NotificationRouter {
     this.toolCancelled.clear();
     this.sizeChanged.clear();
     this.hostContextChanged.clear();
+    this.taskProgress.clear();
   }
 }

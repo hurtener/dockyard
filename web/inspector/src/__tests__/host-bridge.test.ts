@@ -170,6 +170,34 @@ describe('HostBridge handshake', () => {
     host.close();
     view.close();
   });
+
+  it('forwards task progress to the View half (RFC §8.4)', async () => {
+    const channel = new MessageChannel();
+    const host = new HostBridge({
+      peer: channel.port1 as unknown as MessageSink,
+      source: portSource(channel.port1),
+    });
+    host.start();
+    const view = createBridge({
+      peer: channel.port2 as unknown as MessageSink,
+      source: portSource(channel.port2),
+    });
+    await Promise.all([view.connect(), host.ready()]);
+
+    const points: { taskId: string; fraction?: number; message?: string }[] = [];
+    view.onTaskProgress((p) => points.push(p));
+
+    host.sendTaskProgress({ taskId: 't1', fraction: 0.62, message: 'halfway', status: 'working' });
+    host.sendTaskProgress({ taskId: 't1', message: 'finalising' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(points).toEqual([
+      { taskId: 't1', fraction: 0.62, message: 'halfway', status: 'working' },
+      { taskId: 't1', message: 'finalising' },
+    ]);
+    host.close();
+    view.close();
+  });
 });
 
 describe('defaultHostContext', () => {

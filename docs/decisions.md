@@ -5587,3 +5587,69 @@ dedicated unit test. A `make build` checkout binary may pin a pseudo-version
 (its build-info version) on a no-replace scaffold — a dev corner case
 (dev builds use `--dockyard-path`, where the replace wins regardless), not
 a regression over the prior `v0.0.0`.
+
+---
+
+## D-171 — the bridge View-side task-progress channel rides an additive `obs/v1` `PhaseProgress` event
+
+**Date:** 2026-05-29
+**Status:** Settled (v1.3 wave B). Closes the V2-BACKLOG "Bridge View-side
+task-progress channel" item.
+**Where it lives:** `web/bridge/src/protocol.ts`
+(`HostNotification.taskProgress`, `TaskProgressParams`),
+`web/bridge/src/notifications.ts` + `bridge.ts` (`onTaskProgress`),
+`web/inspector/src/host/host-bridge.ts` (`sendTaskProgress`),
+`web/inspector/src/lib/tasks.ts` (`latestTaskProgress`) + `App.svelte` /
+`AppFrame.svelte` (the forwarding wiring), `runtime/obs/payload.go`
+(`TaskProgressPayload.Fraction`), `runtime/tasks/handle.go`
+(`Progress`/`Status` emit `PhaseProgress`).
+
+**The gap.** `runtime/tasks.TaskHandle.Progress` reports a task's progress
+server-side, but it only updated the polled `StatusMessage` (a working→
+working metadata transition) — the bridge (`web/bridge`) exposed no
+View-side progress channel, so an App's card could not render a live "62%".
+Progress surfaced only in the host's own task UI, never inside the App's
+iframe (the first external MCP-Apps builder's feedback, 2026-05-29).
+
+**The decision.**
+
+- **A host→View notification, not a request.** `ui/notifications/task-
+  progress` carries `{ taskId, fraction?, message?, status? }`. The View
+  subscribes with `BridgeShell.onTaskProgress`, mirroring `onToolResult` /
+  `onHostContextChanged` (a typed `Topic` + a router dispatch case). Every
+  field but `taskId` is optional so an App renders whatever the host
+  forwards. Host→View only — an App is a View (P4), so progress flows down
+  to it, never up.
+- **The runtime emits the reserved `PhaseProgress` event.** `obs/event.go`
+  already declared `PhaseProgress` "reserved for future mid-task updates";
+  `TaskHandle.Progress` now emits a `task.progress` `PhaseProgress` event
+  carrying the clamped fraction + the raw message, and `TaskHandle.Status`
+  emits one with the message and no fraction. Emission is gated on the
+  status update succeeding, so a `Progress` call on a task that has left
+  working still errors and emits nothing. The emit path is non-blocking
+  (P2) — a chatty handler never blocks; the inspector folds by task id.
+- **The inspector forwards it.** The inspector is a pure `obs/v1` client
+  (P2): it derives the latest `PhaseProgress` point from the stream and
+  pushes it to the App preview's host-half bridge via `sendTaskProgress`,
+  so the channel is demoable through `dockyard inspect` end to end.
+- **Degradation by absence (RFC §7.5).** A host that never forwards
+  `task-progress` simply never triggers `onTaskProgress` — no capability
+  flag, no host matrix. This mirrors the elicitation channel (D-134).
+
+**The obs/v1 shape change.** `TaskProgressPayload` gains an **additive,
+optional** `Fraction *float64` (`omitempty`). An existing consumer that
+does not read it is unaffected, the schema version stays `dockyard.obs/v1`
+(an additive field is not a shape break, per CLAUDE.md §8), it is documented
+in `CHANGELOG.md`, and the obs golden/recorder tests are re-pinned to the
+new shape. The fraction folds into the existing "62% — message"
+`StatusMessage` for `tasks/get` pollers unchanged, so the polled surface is
+untouched.
+
+**Considered and rejected.** (a) *Parse the fraction back out of the
+`StatusMessage` string in the inspector* — fragile and lossy; a typed
+field is the honest contract. (b) *A negotiated `appCapabilities`/
+`hostCapabilities` flag for task-progress* — unnecessary ceremony; absence
+already degrades cleanly, and a flag would invite a per-host matrix the
+project forbids (§6). (c) *Emit a brand-new `obs/v1` event kind rather than
+reusing `task.progress`/`PhaseProgress`* — `PhaseProgress` was reserved for
+exactly this; a new kind would be a larger, unneeded contract change.

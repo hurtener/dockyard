@@ -951,6 +951,13 @@ adapter's longstanding RFC §11.2 claim. Version `00` only; the W3C
 `forbidden`, `optional`, or `required` (manifest `task_support`, → `execution.taskSupport`
 in `tools/list`). RFC §8.4.
 
+**task-progress notification** — the `ui/notifications/task-progress` host→View
+notification carrying a running task's `{ taskId, fraction?, message?, status? }`
+so an App's card can render a live "62%". The View subscribes via the bridge's
+`onTaskProgress`; the Dockyard runtime emits each `TaskHandle.Progress` /
+`Status` call as an `obs/v1` `task.progress` `progress`-phase event and the
+inspector forwards it. RFC §8.4. D-171.
+
 ## U
 
 **UI auto-discovery** — the RFC §7.6 convention by which a `.svelte` file under

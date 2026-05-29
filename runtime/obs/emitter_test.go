@@ -186,24 +186,39 @@ func TestFanOut_SlowDriverIsItsOwnProblem(t *testing.T) {
 // consumer at all, and assert every Emit returns promptly.
 func TestRingBuffer_SlowConsumerNeverBlocksEmit(t *testing.T) {
 	t.Parallel()
+	const emits = 100000
 	r := NewRingBuffer(8) // tiny ring, no consumer
+
+	// Build the event ONCE, outside the timed loop. mkEvent does two
+	// crypto-random ID generations (NewTrace + newEventID); doing that
+	// `emits` times inside the deadline was measuring mkEvent's RNG cost, not
+	// Emit, and under `-race` + a loaded parallel suite that occasionally
+	// blew the wall clock — the flake. Emit copies the event into the ring,
+	// so one reused event still drives `emits` non-blocking writes and the
+	// Len/Dropped assertions (which do not depend on per-event identity).
+	ev := mkEvent(1)
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i < 100000; i++ {
-			r.Emit(context.Background(), mkEvent(i))
+		for i := 0; i < emits; i++ {
+			r.Emit(context.Background(), ev)
 		}
 		close(done)
 	}()
+	// Emit is a bounded mutex + slice write with no wait, so it can only fail
+	// this test by blocking forever (which hangs until Go's overall test
+	// timeout). The deadline therefore only needs to distinguish
+	// blocked-forever from slow; it is generous so scheduler starvation under
+	// a loaded `-race` run never trips it.
 	select {
 	case <-done:
 		// Every Emit returned; the ring never blocked despite no consumer.
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("Emit blocked with no consumer — the emitter must never block")
 	}
 	if r.Len() != 8 {
 		t.Errorf("ring Len = %d, want 8 (bounded)", r.Len())
 	}
-	if r.Dropped() != 100000-8 {
-		t.Errorf("Dropped = %d, want %d", r.Dropped(), 100000-8)
+	if r.Dropped() != emits-8 {
+		t.Errorf("Dropped = %d, want %d", r.Dropped(), emits-8)
 	}
 }

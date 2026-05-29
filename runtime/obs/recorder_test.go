@@ -1,6 +1,7 @@
 package obs
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -213,6 +214,44 @@ func TestRecorder_TaskEvent(t *testing.T) {
 	}
 	if evs[0].TraceID != evs[1].TraceID {
 		t.Error("task events must share a trace id for correlation")
+	}
+}
+
+// TestRecorder_TaskEvent_Fraction pins the additive Fraction field (D-171):
+// a mid-flight PhaseProgress event carries it; a status-only point omits it
+// from the wire (omitempty), so the obs/v1 shape is unchanged for consumers
+// that never read it.
+func TestRecorder_TaskEvent_Fraction(t *testing.T) {
+	t.Parallel()
+	c := &collector{}
+	r := NewRecorder(c, "srv")
+	sc := NewTrace()
+	frac := 0.62
+	r.TaskEvent(context.Background(), sc.Child(), PhaseProgress,
+		TaskProgressPayload{TaskID: "t1", Status: "working", Message: "halfway", Fraction: &frac}, nil)
+	r.TaskEvent(context.Background(), sc.Child(), PhaseProgress,
+		TaskProgressPayload{TaskID: "t1", Status: "working", Message: "phase change"}, nil)
+
+	evs := c.byKind(KindTaskProgress)
+	if len(evs) != 2 {
+		t.Fatalf("want 2 task.progress events, got %d", len(evs))
+	}
+	if evs[0].Phase != PhaseProgress {
+		t.Errorf("Phase = %q, want progress", evs[0].Phase)
+	}
+	var withFrac TaskProgressPayload
+	if err := json.Unmarshal(evs[0].Payload, &withFrac); err != nil {
+		t.Fatalf("decode progress payload: %v", err)
+	}
+	if withFrac.Fraction == nil || *withFrac.Fraction != 0.62 {
+		t.Errorf("Fraction = %v, want 0.62", withFrac.Fraction)
+	}
+	// A status-only progress point omits the fraction from the wire.
+	if string(evs[1].Payload) != "" && !json.Valid(evs[1].Payload) {
+		t.Fatalf("invalid status-only payload: %s", evs[1].Payload)
+	}
+	if bytes.Contains(evs[1].Payload, []byte(`"fraction"`)) {
+		t.Errorf("status-only progress must omit fraction; got %s", evs[1].Payload)
 	}
 }
 

@@ -10,6 +10,7 @@
  */
 
 import type { StatusTone, TimelineEvent } from '@dockyard/ui';
+import type { TaskProgressParams } from '@dockyard/bridge';
 import type { ObsEvent } from './obs.js';
 
 /** The MCP Tasks five-status lifecycle (RFC §8.6, protocolcodec.TaskStatus). */
@@ -93,6 +94,48 @@ function messageOf(event: ObsEvent): string | undefined {
     if (typeof rec.message === 'string' && rec.message !== '') {
       return rec.message;
     }
+  }
+  return undefined;
+}
+
+/** Reads an optional completion fraction (0–1) from an obs/v1 event payload. */
+function fractionOf(event: ObsEvent): number | undefined {
+  const p = event.payload;
+  if (typeof p === 'object' && p !== null) {
+    const rec = p as Record<string, unknown>;
+    if (typeof rec.fraction === 'number' && Number.isFinite(rec.fraction)) {
+      return rec.fraction;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The most recent task-progress point in the stream, mapped onto the bridge's
+ * `TaskProgressParams` — the value the inspector forwards to the App preview
+ * so its card renders a live "62%" (RFC §8.4). It scans for the last
+ * `task.progress` event with a `progress` phase and a resolvable task id (the
+ * mid-flight points the runtime's `TaskHandle.Progress` / `Status` emit);
+ * `start` / `end` lifecycle events drive the Tasks panel's timeline, not the
+ * App's progress card. Returns `undefined` when no progress point has been
+ * observed — a run with no tasks, or a task that never reports progress.
+ */
+export function latestTaskProgress(
+  events: ObsEvent[],
+): TaskProgressParams | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i];
+    if (ev.kind !== TASK_KIND || ev.phase !== 'progress') continue;
+    const taskId = taskIdOf(ev);
+    if (taskId === '') continue;
+    const params: TaskProgressParams = { taskId };
+    const fraction = fractionOf(ev);
+    if (fraction !== undefined) params.fraction = fraction;
+    const message = messageOf(ev);
+    if (message !== undefined) params.message = message;
+    const status = statusOf(ev);
+    if (status !== null) params.status = status;
+    return params;
   }
   return undefined;
 }

@@ -69,6 +69,22 @@ export const HostNotification = {
   toolCancelled: 'ui/notifications/tool-cancelled',
   sizeChanged: 'ui/notifications/size-changed',
   hostContextChanged: 'ui/notifications/host-context-changed',
+  /**
+   * `ui/notifications/task-progress` — the host forwards a long-running
+   * task's mid-flight progress to the View so an App's card can render a
+   * live "62%" (RFC §8.4, the Tasks `TaskHandle.Progress` surface). The
+   * App subscribes with `BridgeShell.onTaskProgress`.
+   *
+   * Host→View only: an App is a View (P4), so progress flows down to it,
+   * never up from it. The channel is advisory — a host that does not
+   * forward task progress simply never sends it, and `onTaskProgress`
+   * never fires (capability-driven degradation, never a host matrix —
+   * RFC §7.5). The Dockyard runtime emits each `TaskHandle.Progress`
+   * call as an `obs/v1` `task.progress` event; the inspector host-bridge
+   * forwards those to the View, so the channel is demoable through
+   * `dockyard inspect`.
+   */
+  taskProgress: 'ui/notifications/task-progress',
   resourceTeardown: 'ui/resource-teardown',
 } as const;
 
@@ -271,6 +287,32 @@ export interface SizeChangedParams {
 
 /** `host-context-changed` delivers a partial patch of `HostContext`. */
 export type HostContextChangedParams = Partial<HostContext>;
+
+/**
+ * `ui/notifications/task-progress` params — one progress point of a
+ * long-running task (RFC §8.4). Mirrors the Dockyard runtime's `obs/v1`
+ * `task.progress` payload: a `TaskHandle.Progress(fraction, message)` call
+ * carries both; a `TaskHandle.Status(message)` call carries the message and
+ * omits the fraction (a phase change a fraction cannot express).
+ *
+ * Every field but `taskId` is optional so a host can forward whatever it
+ * has — an App reading the value renders defensively (no fraction ⇒ render
+ * the message alone; no message ⇒ render the percentage alone).
+ */
+export interface TaskProgressParams {
+  /** The task this progress point belongs to. */
+  taskId: string;
+  /**
+   * The completion fraction in [0, 1], when known. Absent for a
+   * status-only update. An App renders `Math.round(fraction * 100)` as the
+   * percentage.
+   */
+  fraction?: number;
+  /** An optional human-readable progress note. */
+  message?: string;
+  /** The task's lifecycle status at this point (e.g. `working`). */
+  status?: string;
+}
 
 /* --- view → host elicitation-response (D-134) ------------------------ */
 

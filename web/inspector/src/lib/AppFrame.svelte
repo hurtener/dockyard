@@ -28,6 +28,7 @@
     ElicitationResponseParams,
     HostCapabilities,
     HostContext,
+    TaskProgressParams,
   } from '@dockyard/bridge';
 
   interface Props {
@@ -79,6 +80,15 @@
      * task id.
      */
     taskIdMeta?: string;
+    /**
+     * The most recent task-progress point observed on the `obs/v1` stream
+     * (RFC §8.4). When set, the host-half forwards it to the App as a
+     * `ui/notifications/task-progress` so the App's card renders a live
+     * "62%" — the inspector's emulation of a production host forwarding a
+     * running task's progress. Absent on a run with no tasks; an App that
+     * does not subscribe is unaffected (the channel degrades by absence).
+     */
+    pushTaskProgress?: TaskProgressParams;
   }
 
   let {
@@ -91,6 +101,7 @@
     pushToolResult,
     onElicitationResponse,
     taskIdMeta,
+    pushTaskProgress,
   }: Props = $props();
 
   let iframe = $state<HTMLIFrameElement | undefined>(undefined);
@@ -118,6 +129,7 @@
     // never sees the active fixture). The same value will only flow
     // once into the new instance.
     lastSentPayload = '';
+    lastSentProgress = '';
     handle = mountAppFrame({
       iframe,
       hostWindow: window,
@@ -236,6 +248,29 @@
       structuredContent: pushToolResult,
       ...(meta ? { _meta: meta } : {}),
     });
+  });
+
+  // Forward the latest task-progress point to the App as a
+  // `ui/notifications/task-progress` once the handshake is complete (RFC §8.4).
+  // Same shape as the pushToolResult effect: wait for `ready`, and guard
+  // against re-firing on an unchanged value (a serialised compare) so an
+  // append-only obs stream that re-derives the same latest point is a no-op.
+  let lastSentProgress = '';
+  $effect(() => {
+    void pushTaskProgress;
+    void frameStatus;
+    if (!handle || pushTaskProgress === undefined) return;
+    if (frameStatus !== 'ready') return; // wait for the handshake to finish
+    const serialised = (() => {
+      try {
+        return JSON.stringify(pushTaskProgress);
+      } catch {
+        return '__unstringifiable__:' + Math.random();
+      }
+    })();
+    if (serialised === lastSentProgress) return;
+    lastSentProgress = serialised;
+    handle.bridge.sendTaskProgress(pushTaskProgress);
   });
 
   onDestroy(() => handle?.close());

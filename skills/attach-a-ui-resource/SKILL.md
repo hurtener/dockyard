@@ -201,6 +201,36 @@ A minimal dispatcher:
 The `Kind` discriminator on each output is the dispatcher's switch — the
 `analytics-widgets` template uses this exact pattern.
 
+### Rendering live task progress
+
+A tool backed by a long-running task (`TaskHandle`) reports progress
+server-side with `h.Progress(ctx, fraction, message)`. To render a live
+"62%" inside the App's card, subscribe to `onTaskProgress` — the host
+forwards each progress point as a `ui/notifications/task-progress`
+notification (RFC §8.4):
+
+```svelte
+<script lang="ts">
+  import { onTaskProgress } from '@dockyard/bridge';
+  let percent: number | undefined;
+  let note = '';
+  onTaskProgress((p) => {
+    if (p.fraction !== undefined) percent = Math.round(p.fraction * 100);
+    if (p.message) note = p.message;
+  });
+</script>
+
+{#if percent !== undefined}
+  <progress value={percent} max="100"></progress>
+  <span>{percent}% — {note}</span>
+{/if}
+```
+
+The channel degrades cleanly: a host that does not forward task progress
+simply never fires the subscriber, so subscribe unconditionally and render
+whatever arrives. It is demoable through `dockyard inspect` — the inspector
+forwards the attached server's task progress to the App preview.
+
 ### Host theme propagation
 
 Read the host's theme from `hostContext.styles.variables`. The bridge

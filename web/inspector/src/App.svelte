@@ -54,6 +54,7 @@
   } from './lib/api.js';
   import type { ElicitationResponseParams } from '@dockyard/bridge';
   import { ObsStream, type ObsEvent } from './lib/obs.js';
+  import { latestTaskProgress } from './lib/tasks.js';
   import type { RpcEntry } from './lib/rpc.js';
   import type { HostRpcLogEntry, CallToolFixtureResult } from './host/host-bridge.js';
   import type { ToolContract } from './lib/contracts.js';
@@ -93,6 +94,11 @@
   let errorCount = $state(0);
   let liveDot = $state(false);
   let stream: ObsStream | undefined;
+
+  // The latest task-progress point on the obs/v1 stream, forwarded to the App
+  // preview so its card renders a live "62%" (RFC §8.4). Undefined on a run
+  // with no task progress — the channel degrades by absence.
+  const currentTaskProgress = $derived(latestTaskProgress(events));
 
   // -- JSON-RPC log --
   let rpcEntries = $state<RpcEntry[]>([]);
@@ -474,6 +480,7 @@
         pushToolResult={invokeResult?.structuredContent ?? activeFixture?.structuredContent}
         onElicitationResponse={onElicitationResponse}
         taskIdMeta={extractTaskId(invokeResult?.structuredContent ?? activeFixture?.structuredContent)}
+        pushTaskProgress={currentTaskProgress}
       />
     {:else if appsState === 'loading'}
       <LoadingState message="Reading the attached server's ui:// App resources…" />

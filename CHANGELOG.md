@@ -21,7 +21,25 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-(No entries yet — the v1.4.0 surface will land here.)
+### Added
+
+- **Bridge View-side task-progress channel.** `@dockyard/bridge` exposes a
+  typed `bridge.onTaskProgress((p) => …)` subscription so an MCP App's card
+  can render a live progress value (e.g. "62%") for a long-running task,
+  fed by a new `ui/notifications/task-progress` host→View notification
+  (RFC §8.4). The Dockyard runtime emits each `TaskHandle.Progress` /
+  `TaskHandle.Status` call as an `obs/v1` `task.progress` `progress`-phase
+  event; the inspector forwards those to the App preview, so the channel is
+  demoable through `dockyard inspect`. A host that does not forward progress
+  degrades cleanly — the subscriber simply never fires (D-171).
+
+### Changed
+
+- **`obs/v1` `task.progress` payload gained an optional `fraction` field**
+  (the task's completion fraction in [0, 1] at a mid-flight progress point).
+  This is an **additive** change to the `obs/v1` contract — existing
+  consumers that do not read it are unaffected, the schema version stays
+  `dockyard.obs/v1`, and the golden tests pin the new shape (D-171).
 
 ## [1.3.0] - 2026-05-29
 

@@ -47,6 +47,7 @@ import {
   type JsonRpcRequest,
   type RequestDisplayModeParams,
   type RequestDisplayModeResult,
+  type TaskProgressParams,
 } from '@dockyard/bridge';
 
 /** The protocol revision the host half advertises (matches the View half). */
@@ -243,6 +244,17 @@ export class HostBridge {
   /** Notifies the View of a tool result (`structuredContent` + content). */
   sendToolResult(result: unknown): void {
     this.notify(HostNotification.toolResult, result);
+  }
+
+  /**
+   * Forwards a long-running task's progress point to the View (RFC §8.4).
+   * The inspector wires the attached server's `obs/v1` `task.progress`
+   * stream to this, so an App's card renders a live "62%" through
+   * `dockyard inspect`. It is host→View only and advisory — an App that
+   * does not subscribe (or a run with no tasks) is unaffected.
+   */
+  sendTaskProgress(params: TaskProgressParams): void {
+    this.notify(HostNotification.taskProgress, params);
   }
 
   /** Notifies the View that a host-context field changed (a partial patch). */

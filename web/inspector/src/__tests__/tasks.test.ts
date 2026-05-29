@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   TASK_STATUSES,
   foldTasks,
+  latestTaskProgress,
   lifecycleToTimeline,
   toneForStatus,
   isTerminal,
@@ -92,6 +93,52 @@ describe('lifecycleToTimeline', () => {
   it('annotates an input_required row with round-trip copy', () => {
     const [life] = foldTasks([progress('t', 'input_required', 'x')]);
     expect(lifecycleToTimeline(life)[0].detail).toContain('input_required');
+  });
+});
+
+function progressPoint(
+  taskId: string,
+  ts: string,
+  fraction?: number,
+  message?: string,
+): ObsEvent {
+  return {
+    schema_version: 'dockyard.obs/v1',
+    id: `${taskId}-${ts}`,
+    timestamp: ts,
+    server_id: 'srv',
+    trace_id: 't',
+    span_id: 's',
+    kind: 'task.progress',
+    phase: 'progress',
+    payload: { task_id: taskId, status: 'working', fraction, message },
+  };
+}
+
+describe('latestTaskProgress', () => {
+  it('returns the most recent progress point with fraction + message', () => {
+    const p = latestTaskProgress([
+      progressPoint('t', '2026-05-22T10:00:00Z', 0.2, 'starting'),
+      progressPoint('t', '2026-05-22T10:00:01Z', 0.62, 'halfway'),
+    ]);
+    expect(p).toEqual({ taskId: 't', fraction: 0.62, message: 'halfway', status: 'working' });
+  });
+
+  it('omits an absent fraction (a status-only point)', () => {
+    const p = latestTaskProgress([progressPoint('t', 'x', undefined, 'phase change')]);
+    expect(p).toEqual({ taskId: 't', message: 'phase change', status: 'working' });
+    expect(p && 'fraction' in p).toBe(false);
+  });
+
+  it('ignores start/end lifecycle events and non-task kinds', () => {
+    const start: ObsEvent = { ...progressPoint('t', 'x', 0.1), phase: 'start' };
+    const end: ObsEvent = { ...progressPoint('t', 'y', 1), phase: 'end' };
+    const toolCall: ObsEvent = { ...progressPoint('t', 'z', 0.5), kind: 'tool.call' };
+    expect(latestTaskProgress([start, end, toolCall])).toBeUndefined();
+  });
+
+  it('returns undefined when there is no progress point (clean degradation)', () => {
+    expect(latestTaskProgress([])).toBeUndefined();
   });
 });
 

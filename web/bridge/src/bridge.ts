@@ -39,6 +39,7 @@ import {
   type MessageRole,
   type RequestDisplayModeResult,
   type SizeChangedParams,
+  type TaskProgressParams,
   type ToolCancelledParams,
   type ToolInputParams,
   type UpdateModelContextParams,
@@ -287,6 +288,22 @@ export class BridgeShell {
     fn: (p: HostContextChangedParams) => void,
   ): Unsubscribe {
     return this.router.onHostContextChanged(fn);
+  }
+
+  /**
+   * Subscribes to a long-running task's progress (RFC §8.4). Fires once per
+   * `ui/notifications/task-progress` the host forwards — the Dockyard
+   * runtime emits one per `TaskHandle.Progress` / `TaskHandle.Status` call,
+   * and the host (the inspector, or a production host) pushes it to the
+   * View. An App renders the live percentage from `p.fraction` and/or the
+   * `p.message`.
+   *
+   * Degrades cleanly: a host that does not forward task progress simply
+   * never triggers this subscriber — capability-driven, never a host matrix
+   * (RFC §7.5). Subscribe regardless and render whatever arrives.
+   */
+  onTaskProgress(fn: (p: TaskProgressParams) => void): Unsubscribe {
+    return this.router.onTaskProgress(fn);
   }
 
   /* --- view → host helpers ------------------------------------------- */

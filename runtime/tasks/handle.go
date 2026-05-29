@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/hurtener/dockyard/internal/protocolcodec"
+	"github.com/hurtener/dockyard/runtime/obs"
 )
 
 // This file is the TaskHandle handler API (RFC §8.4). A tool handler doing
@@ -103,7 +104,12 @@ type taskHandle struct {
 
 // Progress records a completion fraction and message as the task's status
 // message. The fraction is clamped to [0,1]; the engine keeps the task in
-// working — Progress never transitions the lifecycle.
+// working — Progress never transitions the lifecycle. On a successful update
+// it emits a mid-flight obs/v1 task.progress event (PhaseProgress) carrying
+// the clamped fraction and the raw message, so the bridge's View-side
+// task-progress channel can render a live percentage (RFC §8.4, D-171). A
+// Progress call on a task that has left working returns an error and emits
+// nothing.
 func (h *taskHandle) Progress(ctx context.Context, fraction float64, message string) error {
 	if fraction < 0 {
 		fraction = 0
@@ -115,12 +121,37 @@ func (h *taskHandle) Progress(ctx context.Context, fraction float64, message str
 	if message != "" {
 		msg = fmt.Sprintf("%s — %s", msg, message)
 	}
-	return h.setStatusMessage(ctx, msg)
+	if err := h.setStatusMessage(ctx, msg); err != nil {
+		return err
+	}
+	frac := fraction
+	h.emitProgress(ctx, message, &frac)
+	return nil
 }
 
-// Status sets the task's status message verbatim.
+// Status sets the task's status message verbatim. On a successful update it
+// emits an obs/v1 task.progress event (PhaseProgress) with the message and no
+// fraction — a phase change a fraction cannot express (RFC §8.4, D-171).
 func (h *taskHandle) Status(ctx context.Context, message string) error {
-	return h.setStatusMessage(ctx, message)
+	if err := h.setStatusMessage(ctx, message); err != nil {
+		return err
+	}
+	h.emitProgress(ctx, message, nil)
+	return nil
+}
+
+// emitProgress emits a mid-flight obs/v1 task.progress event (PhaseProgress)
+// for the task. It is fire-and-forget — the emit path is non-blocking (P2), so
+// it never blocks the handler — and rides a child of the task's lifecycle span
+// so the progress point correlates with the start/end events (RFC §11.2). A
+// nil fraction is a status-only point.
+func (h *taskHandle) emitProgress(ctx context.Context, message string, fraction *float64) {
+	h.engine.rec.TaskEvent(ctx, h.engine.taskSpan(h.id).Child(), obs.PhaseProgress, obs.TaskProgressPayload{
+		TaskID:   h.id,
+		Status:   string(protocolcodec.TaskWorking),
+		Message:  message,
+		Fraction: fraction,
+	}, nil)
 }
 
 // setStatusMessage writes a status message by transitioning working→working —

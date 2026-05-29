@@ -100,6 +100,14 @@ type TaskProgressPayload struct {
 	Message string `json:"message,omitempty"`
 	// Tool is the task-augmented tool name, when the task wraps a tools/call.
 	Tool string `json:"tool,omitempty"`
+	// Fraction is the task's completion fraction in [0,1] at a mid-flight
+	// progress point — set on the [PhaseProgress] events that a
+	// TaskHandle.Progress call emits, omitted on lifecycle (start/end) events
+	// and on status-only updates (TaskHandle.Status). A consumer (the bridge's
+	// task-progress channel, RFC §8.4) renders it as a percentage. Additive,
+	// optional field on the obs/v1 contract (v1.3 wave B — D-171); a consumer
+	// that does not read it is unaffected.
+	Fraction *float64 `json:"fraction,omitempty"`
 }
 
 // ServerLifecyclePayload is the payload of a [KindServerLifecycle] event.
