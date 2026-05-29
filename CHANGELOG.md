@@ -43,6 +43,22 @@ deliberately deferred to V2.
 
 ### Fixed
 
+- **A framework-wide wiring audit (the same class as the `_meta.ui` bug) fixed
+  three declared-but-unwired seams:**
+  - **`require_spec_compliance` is now enforced.** The quality flag was
+    declared, scaffolded `true`, and documented "enforced by `dockyard
+    validate`", but no consumer read it — the spec-compliance check ran
+    unconditionally, so toggling the flag did nothing. It now gates the check
+    (opt-out), consistent with the other `quality.*` gates. All shipped
+    manifests set it `true`, so no real project changes behaviour. (D-175)
+  - **`@dockyard/bridge`'s `ui/resource-teardown` now tears the View down.**
+    The notification was documented as triggering `BridgeShell.close()` but was
+    never dispatched — a production host sending it would leak the bridge's
+    listeners/transport and leave `ready` stuck `true`. It now calls `close()`.
+  - **The bridge retains the negotiated `protocolVersion` + `hostInfo`** from
+    the `ui/initialize` result (exposed as `bridge.protocolVersion` /
+    `bridge.hostInfo`); `protocol.ts` promised retention but both were
+    discarded.
 - **`tool.New[...].UI(appName).Register(srv)` now emits the tool→App link.**
   The builder previously dropped it silently — the registered tool carried no
   `_meta.ui.resourceUri` (RFC §7.1), so a host that renders MCP Apps showed the

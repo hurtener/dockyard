@@ -5859,3 +5859,52 @@ to `dockyard-bridge` / `dockyard-ui`; the templates and the
 `attach-a-ui-resource` skill are updated in the same PR (§19). Because nothing
 was ever published under `@dockyard`, there is no npm deprecation/redirect to
 manage.
+
+---
+
+## D-175 — `require_spec_compliance` is enforced (it gates the spec-compliance check), closing a declared-but-dead quality gate
+
+**Date:** 2026-05-29
+**Status:** Settled (v1.5 wave A). Same enforcement class as D-168.
+**Where it lives:** `internal/validate/checks.go` (`checkSpecCompliance` early-returns
+when the flag is off); `internal/testgate` inherits it (the spec-compliance
+category delegates to `validate.Run`).
+
+**The finding (a wiring-audit sweep, the item-1 / D-168 class).** A framework-wide
+audit for "declared-but-never-wired" friction found that the
+`quality.require_spec_compliance` manifest flag was **inert**: the scaffold and both
+templates set it `true` and the `quality:` block is documented "enforced by
+`dockyard validate`" (RFC §9.4), but **no code read `Quality.RequireSpecCompliance`** —
+`checkSpecCompliance` ran *unconditionally*. So toggling the flag changed nothing in
+either direction: `false` did not opt out, `true` did nothing extra. This is exactly
+the gate-that-lies class D-168 fixed for `require_fixtures` / `require_contract_tests`.
+
+**The decision.** Enforce, do not remove (D-168's reasoning). `checkSpecCompliance`
+now early-returns when `Quality.RequireSpecCompliance` is false — making the flag an
+opt-out gate consistent with the other six `quality.*` gates (`checkUIStates` /
+`checkFixtures` / `checkContractTests` each respect their flag). `dockyard test`'s
+spec-compliance category delegates to `validate.Run`, so the gate propagates there
+for free.
+
+**Behaviour.** All eight in-repo manifests (scaffold, both templates, all five
+examples, the loader testdata) already set `require_spec_compliance: true`, so no real
+project changes behaviour. A manifest that omits the flag (zero value) now opts out of
+the spec-compliance check — matching the other gates, which also default off and are
+opted into by the scaffold. A project that sets it `false` genuinely opts out where
+before the check fired regardless. Proven by a gate-bites test
+(`TestRun_SpecComplianceGateRespectsFlag`): a withheld vendored spec is a `CheckSpec`
+Blocker with the flag on, and skipped with it off.
+
+**The audit's other findings (recorded, not all fixed here).** The same sweep
+confirmed the framework's core wiring is sound (every `runtime/apps.App` field reaches
+the wire; every CLI flag and `scaffold.Options` field is consumed). It also fixed two
+bridge wiring gaps in this wave (see CHANGELOG): `ui/resource-teardown` was documented
+as tearing the View down via `BridgeShell.close()` but was never dispatched; and the
+negotiated `protocolVersion` / `hostInfo` from `ui/initialize` were discarded despite
+`protocol.ts` promising retention. Deferred to `docs/V2-BACKLOG.md` (enhancements, not
+broken wires): populating `obs ToolCallPayload.ContractOK` (the doc allows nil =
+"not checked"; wiring it needs a `Recorder.ToolCall` API change across three packages),
+and surfacing `InputPrompt.Schema` to the requestor (no V1 wire surface carries it).
+The reserved `obs/v1` kinds `app.user_action` / `host.compat` / `app.bridge` have no
+V1 server-side producer by design ("Dockyard sees only its half of the iframe bridge")
+— reserved contract surfaces, left as-is.

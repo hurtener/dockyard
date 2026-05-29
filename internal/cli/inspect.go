@@ -22,9 +22,10 @@ import (
 //
 // The inspector is dev-mode-gated, localhost-only, and operator-initiated only
 // — `dockyard inspect` is the standalone entry into that surface. RFC §12 also
-// names an automatic attach inside `dockyard dev`; that auto-attach is a
-// deferred seam (D-101) and is not yet implemented — `dockyard inspect` is the
-// only shipping entry point. The inspector binds a loopback address only: a
+// names an automatic attach inside `dockyard dev`; that auto-attach shipped in
+// v1.1 (D-101 / D-161), so `dockyard dev` now supervises the inspector as a
+// child alongside the Go server and Vite — `dockyard inspect` remains the
+// standalone entry point. The inspector binds a loopback address only: a
 // non-loopback `--port` host is rejected by internal/inspector's
 // ErrNonLoopbackBind gate before the listener opens, the mechanical enforcement
 // of RFC §12 and the CVE-2025-49596 lesson.

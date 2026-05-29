@@ -95,4 +95,21 @@ else
   skip "release workflow still references @dockyard/* names"
 fi
 
+# --- Wiring audit (the same item-1 class, fixed across the framework) ------
+
+if [ -f internal/validate/checks.go ] && \
+   grep -q "RequireSpecCompliance" internal/validate/checks.go; then
+  ok "require_spec_compliance is enforced (checkSpecCompliance reads the flag)"
+else
+  skip "require_spec_compliance gate not enforced yet"
+fi
+
+if [ -f web/bridge/src/bridge.ts ] && \
+   grep -q "HostNotification.resourceTeardown" web/bridge/src/bridge.ts && \
+   grep -q "negotiatedProtocolVersion" web/bridge/src/bridge.ts; then
+  ok "bridge wires resource-teardown → close() and retains the negotiated protocolVersion"
+else
+  skip "bridge resource-teardown / protocolVersion retention not wired yet"
+fi
+
 smoke_summary
