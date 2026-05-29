@@ -219,6 +219,10 @@
     padding: var(--dy-space-2) var(--dy-space-3);
     border-bottom: 1px solid var(--dy-color-border);
     color: var(--dy-color-ink);
+    /* Break long unbreakable tokens (e.g. snake_case tool names like
+       `create_cinematic_image_video`) instead of forcing the column wide
+       and overflowing the container with a horizontal scrollbar. */
+    overflow-wrap: anywhere;
   }
 
   .dy-table__table tbody tr:last-child td {
