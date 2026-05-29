@@ -90,12 +90,7 @@ func substitutionsFor(opts scaffold.Options) []scaffold.Substitution {
 			opts.DockyardReplace,
 		)
 	}
-	bridgeSpec := "*"
-	uiSpec := "*"
-	if opts.DockyardWebPath != "" {
-		bridgeSpec = "file:" + opts.DockyardWebPath + "/bridge"
-		uiSpec = "file:" + opts.DockyardWebPath + "/ui"
-	}
+	bridgeSpec, uiSpec := scaffold.WebDepSpecs(opts)
 	// Same ordering rule as analytics-widgets: the in-tree import-path
 	// rewrite runs BEFORE the __MODULE_PATH__ rewrite.
 	return []scaffold.Substitution{

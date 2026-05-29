@@ -110,31 +110,33 @@ contracts under `internal/contracts/`, and the handlers under
 `internal/handlers/`. The manifest's `apps[]` block declares
 `display_modes: [inline]` and a deny-by-default CSP.
 
-## `--dockyard-path` — required for UI builds, optional for Go-only
+## `--dockyard-path` — a build-from-source convenience (optional)
 
-The Dockyard **Go module is published** — a **blank, no-UI server** resolves
-it from the proxy and needs nothing extra. But the **frontend packages
-`@dockyard/bridge` and `@dockyard/ui` are not yet on npm**, so any scaffold
-with a `web/` (every `--template`, or a blank server you later add a UI to)
-needs the **local checkout** to `npm install`. The CLI's hidden
-`--dockyard-path` flag wires both the `go.mod` `replace` (D-080) and the
-`web/package.json` workspace to that checkout:
+The Dockyard **Go module** and the frontend packages **`@dockyard/bridge`
+and `@dockyard/ui`** are all published, so every scaffold — a blank Go-only
+server or any `--template` with a `web/` — resolves its dependencies from
+npm + the Go proxy with **no local checkout**. `dockyard new --template
+analytics-widgets` then `cd web && npm install` just works.
+
+The CLI's hidden `--dockyard-path` flag remains a **build-from-source
+convenience**: it points the `go.mod` `replace` (D-080) and the
+`web/package.json` deps at a local Dockyard checkout via `file:` specs,
+for developing against an unreleased Dockyard.
 
 ```bash
 dockyard new my-widgets \
   --template analytics-widgets \
-  --dockyard-path /Users/me/code/dockyard   # required: the web/ npm install needs it
+  --dockyard-path /Users/me/code/dockyard   # optional: build against a local checkout
 ```
 
 | Scaffold | Needs `--dockyard-path`? |
 |---|---|
 | Blank, no UI (Go only) | No — the published Go module resolves from the proxy |
-| Any `--template`, or a server you'll add a `web/` UI to | **Yes** — until `@dockyard/bridge`/`@dockyard/ui` ship to npm |
+| Any `--template`, or a server you'll add a `web/` UI to | No — `@dockyard/bridge` / `@dockyard/ui` resolve from npm |
 
-The flag is hidden from `--help` (D-080 / D-140 filters hidden flags), but
-it is real and load-bearing for UI builds. Publishing the frontend packages
-to npm (which removes this requirement) is tracked in
-`docs/V2-BACKLOG.md`. See the `attach-a-ui-resource` skill's Prerequisites.
+The flag is hidden from `--help` (D-080 / D-140 filters hidden flags).
+Publishing the frontend packages to npm in v1.3 wave B (D-172) removed the
+earlier need to pass it when scaffolding a UI project.
 
 ## Other flags
 

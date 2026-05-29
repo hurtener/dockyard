@@ -70,9 +70,10 @@ else
 fi
 
 if [ -f internal/scaffold/templates.go ] && \
-   grep -q "DOCKYARD_BRIDGE_SPEC\|bridgeSpec" internal/scaffold/templates.go && \
-   ! grep -q 'bridgeSpec := "\*"' internal/scaffold/templates.go; then
-  ok "scaffold resolves the spec tokens to a published version (no '*')"
+   grep -q "func WebDepSpecs" internal/scaffold/templates.go && \
+   grep -q "npmCaretVersion" internal/scaffold/templates.go && \
+   ! grep -q 'bridgeSpec := "\*"' templates/approval-flows/builtin.go; then
+  ok "scaffold resolves the spec tokens to a published version (WebDepSpecs)"
 else
   skip "scaffold still emits '*' for the spec tokens"
 fi
