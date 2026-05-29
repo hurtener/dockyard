@@ -21,7 +21,35 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-(No entries yet — the v1.3.0 surface will land here.)
+### Added
+
+- `dockyard new --here` — scaffold into an existing **non-empty** directory
+  (e.g. one you already `git init`-ed). Existing files are left untouched;
+  a scaffold output that would overwrite a file is refused, never silently
+  overwritten.
+
+### Changed
+
+- **The `require_fixtures` and `require_contract_tests` quality gates are
+  now enforced** by `dockyard validate` (previously declared but inert).
+  `require_fixtures` is UI-scoped — each tool with a `ui:` app must ship
+  inspector fixtures (`fixtures/<tool>/*.json`); a non-UI tool needs none.
+  `require_contract_tests` requires the project to carry at least one
+  `*_test.go`. **Behaviour change:** a project that turned a gate on but
+  does not satisfy it (a UI tool with no fixtures, or a project with no
+  test) now fails `dockyard validate` where it previously passed. A freshly
+  scaffolded project — blank or template — stays green.
+- **`dockyard new` pins the CLI's version into the scaffolded `go.mod`**
+  (instead of the `v0.0.0` placeholder) when the CLI knows its release
+  version, so a project that drops the local `replace` directive resolves
+  the published module without a hand edit. Released binaries and
+  `go install …@vX.Y.Z` now also report their real version.
+
+### Fixed
+
+- `dockyard new`'s "directory not empty" error now **names the entries** it
+  found (so a hidden `.git/` or `.gitignore` is visible as the cause) and
+  points at `--here`.
 
 ## [1.2.0] - 2026-05-29
 

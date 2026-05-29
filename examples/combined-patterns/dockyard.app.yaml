@@ -79,6 +79,9 @@ quality:
   require_empty_state: true
   require_error_state: true
   require_permission_state: true
-  require_fixtures: true
+  # This worked-code demo does not ship inspector fixtures (the two V1
+  # templates are the fixture exemplars). require_fixtures is UI-scoped and
+  # enforced from v1.3 (D-169), so it is off here.
+  require_fixtures: false
   require_contract_tests: true
   require_spec_compliance: true

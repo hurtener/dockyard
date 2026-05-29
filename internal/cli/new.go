@@ -34,6 +34,7 @@ func newNewCmd() *cobra.Command {
 		templateName       string
 		exampleTaskSupport string
 		noPostgen          bool
+		here               bool
 	)
 
 	cmd := &cobra.Command{
@@ -74,6 +75,8 @@ optional product-pattern showcases; pass --template <name> to scaffold one.`,
 				DockyardReplace:        resolvedDockyard,
 				DockyardWebPath:        resolvedWeb,
 				ExampleToolTaskSupport: taskSupport,
+				DockyardVersion:        ResolvedVersion(),
+				Here:                   here,
 			}
 			var res scaffold.Result
 			if templateName == "" {
@@ -129,6 +132,11 @@ optional product-pattern showcases; pass --template <name> to scaffold one.`,
 	// where the module proxy is unreachable or the steps are run separately.
 	cmd.Flags().BoolVar(&noPostgen, "no-postgen", false,
 		"skip the post-scaffold `go mod tidy` + `dockyard generate` steps")
+	// --here scaffolds into an existing non-empty directory (e.g. one you
+	// already `git init`-ed). Existing files are left untouched; a scaffold
+	// output that would overwrite an existing file is still refused.
+	cmd.Flags().BoolVar(&here, "here", false,
+		"scaffold into the target directory even if it already has content (never overwrites a file)")
 
 	return cmd
 }
@@ -173,7 +181,9 @@ func mapScaffoldError(err error) error {
 	case errors.Is(err, scaffold.ErrInvalidName):
 		return errf("%w", err)
 	case errors.Is(err, scaffold.ErrTargetExists):
-		return errf("%w — choose another name or remove the directory", err)
+		return errf("%w — choose another name, remove the directory, or pass --here", err)
+	case errors.Is(err, scaffold.ErrFileCollision):
+		return errf("%w — move or remove the listed file(s), or scaffold elsewhere", err)
 	case errors.Is(err, scaffold.ErrUnknownTemplate):
 		return errf("%w — run `dockyard new --help` for the registered set", err)
 	default:

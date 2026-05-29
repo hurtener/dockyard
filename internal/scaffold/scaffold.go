@@ -18,8 +18,15 @@ import (
 var ErrInvalidName = errors.New("dockyard/internal/scaffold: invalid project name")
 
 // ErrTargetExists is the sentinel for a non-empty / pre-existing target
-// directory. `dockyard new` never overwrites an existing project.
+// directory. `dockyard new` never overwrites an existing project (pass
+// Options.Here to scaffold into a non-empty directory anyway).
 var ErrTargetExists = errors.New("dockyard/internal/scaffold: target directory already exists and is not empty")
+
+// ErrFileCollision is the sentinel for a scaffold output that would overwrite
+// an existing file in the target directory. It can only occur under
+// Options.Here (without it, a non-empty target is refused outright by
+// ErrTargetExists). `dockyard new` never silently overwrites a file.
+var ErrFileCollision = errors.New("dockyard/internal/scaffold: scaffold output would overwrite an existing file")
 
 // nameRE constrains a project name to a short kebab-case token: it becomes the
 // directory name, the manifest `name`, the Go module path tail and the MCP
@@ -66,6 +73,24 @@ type Options struct {
 	// is the corresponding read side that `dockyard run` consults at start time
 	// against the project's loaded manifest.
 	ExampleToolTaskSupport manifest.TaskSupport
+
+	// DockyardVersion is the version of the Dockyard runtime module to pin in
+	// the scaffolded go.mod's require directive — normally the version of the
+	// `dockyard` CLI doing the scaffolding (cli.ResolvedVersion()). When it is
+	// a real release version (vX.Y.Z) the require pins it, so a project that
+	// drops the local `replace` resolves the published module from the proxy
+	// without a hand edit. An empty value or the dev placeholder leaves the
+	// historical `v0.0.0` placeholder (only ever resolved through the replace
+	// directive — the build-from-source path).
+	DockyardVersion string
+
+	// Here permits scaffolding into a target directory that already has
+	// content (the `dockyard new --here` flag). With Here false (the
+	// default) a non-empty target is refused with ErrTargetExists. With
+	// Here true the existing content is left in place, but a scaffold output
+	// that would overwrite an existing file is still refused with
+	// ErrFileCollision — `dockyard new` never silently overwrites a file.
+	Here bool
 }
 
 // taskSupport returns the example tool's effective task_support declaration.
@@ -141,7 +166,7 @@ func Generate(opts Options) (Result, error) {
 	}
 
 	dir := opts.projectDir()
-	if err := checkTarget(dir); err != nil {
+	if err := checkTarget(dir, opts.Here); err != nil {
 		return Result{}, err
 	}
 
@@ -165,8 +190,11 @@ func Generate(opts Options) (Result, error) {
 // checkTarget rejects a target directory that already exists with content. A
 // missing directory is fine — Generate creates it. An empty directory is fine
 // — scaffolding into an empty dir is a common workflow. A directory with any
-// entry is refused: `dockyard new` never overwrites a project.
-func checkTarget(dir string) error {
+// entry is refused unless here is set: `dockyard new` never overwrites a
+// project. When it refuses, the error names the entries it found (so the
+// developer sees that a hidden `.git/` or `.gitignore` is what blocked it) and
+// points at --here.
+func checkTarget(dir string, here bool) error {
 	info, err := os.Stat(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -177,14 +205,40 @@ func checkTarget(dir string) error {
 	if !info.IsDir() {
 		return fmt.Errorf("%w: %s exists and is a file", ErrTargetExists, dir)
 	}
+	if here {
+		// A non-empty directory is permitted; file collisions are caught at
+		// write time (writeTree) so existing content is never overwritten.
+		return nil
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("dockyard/internal/scaffold: read target %s: %w", dir, err)
 	}
 	if len(entries) > 0 {
-		return fmt.Errorf("%w: %s", ErrTargetExists, dir)
+		return fmt.Errorf("%w: %s contains %s — pass --here to scaffold into it anyway",
+			ErrTargetExists, dir, listEntries(entries))
 	}
 	return nil
+}
+
+// listEntries renders up to the first few directory entries for an
+// actionable error message (so "contains .git, .gitignore, README.md" tells
+// the developer exactly what blocked the scaffold).
+func listEntries(entries []os.DirEntry) string {
+	const maxEntries = 5
+	names := make([]string, 0, maxEntries)
+	for i, e := range entries {
+		if i == maxEntries {
+			names = append(names, fmt.Sprintf("… (%d more)", len(entries)-maxEntries))
+			break
+		}
+		name := e.Name()
+		if e.IsDir() {
+			name += "/"
+		}
+		names = append(names, name)
+	}
+	return strings.Join(names, ", ")
 }
 
 // buildFiles assembles the full project file set in memory, keyed by
@@ -248,6 +302,22 @@ func generateContractArtifacts() (map[string][]byte, error) {
 // writeTree writes files (keyed by project-relative path) under dir, creating
 // parent directories as needed.
 func writeTree(dir string, files map[string][]byte) error {
+	// Never overwrite an existing file. Without --here this cannot trigger
+	// (checkTarget guarantees an empty/new dir); with --here it is the guard
+	// that keeps an existing file safe. Checked up front so a collision
+	// leaves the tree untouched rather than half-written.
+	var collisions []string
+	for rel := range files {
+		full := filepath.Join(dir, filepath.FromSlash(rel))
+		if _, err := os.Stat(full); err == nil {
+			collisions = append(collisions, rel)
+		}
+	}
+	if len(collisions) > 0 {
+		sort.Strings(collisions)
+		return fmt.Errorf("%w: %s", ErrFileCollision, strings.Join(collisions, ", "))
+	}
+
 	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // a project directory is browsable, not a secret
 		return fmt.Errorf("dockyard/internal/scaffold: create %s: %w", dir, err)
 	}

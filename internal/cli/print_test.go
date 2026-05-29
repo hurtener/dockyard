@@ -149,7 +149,7 @@ func TestMapScaffoldError(t *testing.T) {
 		"target exists": {
 			in:       fmt.Errorf("%w: ./srv", scaffold.ErrTargetExists),
 			wantWrap: scaffold.ErrTargetExists,
-			contains: "choose another name or remove the directory",
+			contains: "choose another name, remove the directory, or pass --here",
 		},
 		"other error": {
 			in:       errors.New("disk full"),

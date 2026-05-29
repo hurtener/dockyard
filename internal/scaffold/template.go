@@ -138,7 +138,7 @@ func GenerateFromTemplate(opts Options, templateName string) (Result, error) {
 	}
 
 	dir := opts.projectDir()
-	if err := checkTarget(dir); err != nil {
+	if err := checkTarget(dir, opts.Here); err != nil {
 		return Result{}, err
 	}
 

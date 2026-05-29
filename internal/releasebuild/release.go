@@ -193,7 +193,7 @@ func Release(ctx context.Context, opts Options) (Result, error) {
 			slog.String("target", t.String()),
 			slog.String("artifact", artifactName))
 
-		if err := compileTarget(ctx, projectDir, cmdPath, artifactPath, t); err != nil {
+		if err := compileTarget(ctx, projectDir, cmdPath, artifactPath, t, version); err != nil {
 			// A per-target failure is collected, not fatal to the
 			// whole matrix (mirrors internal/buildpkg.Build's
 			// D-087 behaviour). The aggregate error is returned
@@ -251,9 +251,14 @@ func Release(ctx context.Context, opts Options) (Result, error) {
 // Build output (stdout + stderr) is captured into the returned error on
 // failure so a CI step's log surfaces the underlying go build diagnostics
 // without artifact upload.
-func compileTarget(ctx context.Context, projectDir, cmdPath, outputPath string, t Target) error {
+func compileTarget(ctx context.Context, projectDir, cmdPath, outputPath string, t Target, version string) error {
+	// Stamp the CLI version so the released binary reports it (and so
+	// `dockyard new` pins it into a scaffolded go.mod's require directive —
+	// the v1.3 published-module path). The version carries no spaces, so it
+	// rides in the single `-ldflags=` value alongside the strip flags.
+	ldflags := goBuildLDFlags + " -X github.com/hurtener/dockyard/internal/cli.Version=" + version
 	cmd := exec.CommandContext(ctx, "go", "build", //nolint:gosec // a fixed `go build` of the dockyard CLI source
-		"-ldflags="+goBuildLDFlags,
+		"-ldflags="+ldflags,
 		"-o", outputPath,
 		cmdPath,
 	)

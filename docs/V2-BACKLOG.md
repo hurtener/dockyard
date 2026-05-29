@@ -214,6 +214,29 @@ recorded order in the decisions log. Each item carries:
   the conformance suite asserts the host-built policy honours the
   declaration.
 
+### Bridge View-side task-progress channel
+
+- **Origin.** Upstream-team feedback (2026-05-29). Related: D-119 / the
+  Tasks engine (`runtime/tasks.TaskHandle.Progress`).
+- **What was deferred + why.** A task handler can report progress
+  server-side via `TaskHandle.Progress`, but the Svelte bridge
+  (`web/bridge`) exposes **no View-side progress channel** — so an App's
+  card cannot render a live "62%". Progress only surfaces in the host's own
+  task UI, not inside the App's iframe. Closing it is a new bridge feature:
+  a `ui/` progress notification on the View↔host protocol plus a View-side
+  subscribe helper (mirroring `onToolResult` / `onHostContextChanged`), with
+  its own design (the notification shape, how it rides the `obs/v1` /
+  task-progress stream into the inspector host-bridge, and the
+  capability-negotiation story for hosts that do not forward it). It was not
+  on the v1.3 wave-A critical path.
+- **Definition of done.** `web/bridge` ships a typed View-side progress
+  subscription (e.g. `onTaskProgress`) fed by a `ui/` progress
+  notification; the inspector host-bridge forwards the runtime's task
+  progress to the View; an `approval-flows`-shaped App renders a live
+  progress value end to end through `dockyard inspect`; the bridge unit
+  suite covers the new channel; degradation is clean when a host does not
+  forward progress.
+
 ---
 
 ## CLI / DX

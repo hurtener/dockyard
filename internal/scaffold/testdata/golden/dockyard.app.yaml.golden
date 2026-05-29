@@ -33,7 +33,10 @@ quality:                  # RFC §9.4 — enforced by 'dockyard validate'.
   require_empty_state: false
   require_error_state: false
   require_permission_state: false
-  # Contract hygiene gates stay on — they apply to every server.
+  # require_contract_tests applies to every server (the project must carry a
+  # contract test); require_fixtures is UI-scoped (it requires inspector
+  # fixtures for UI-bearing tools only — this server has none, so it is a
+  # no-op until you attach a UI). Both are enforced by 'dockyard validate'.
   require_fixtures: true
   require_contract_tests: true
   require_spec_compliance: true
