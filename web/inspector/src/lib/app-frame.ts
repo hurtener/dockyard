@@ -10,7 +10,7 @@
  */
 
 import { HostBridge, type HostRpcLogEntry } from '../host/host-bridge.js';
-import type { HostCapabilities, HostContext } from '@dockyard/bridge';
+import type { HostCapabilities, HostContext } from 'dockyard-bridge';
 
 /**
  * The iframe `sandbox` token set for an MCP App preview. It is deny-by-default:

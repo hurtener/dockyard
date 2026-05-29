@@ -110,7 +110,7 @@ func requireVersion(v string) string {
 }
 
 // WebDepSpecs returns the npm dependency specs a scaffolded project's
-// web/package.json uses for @dockyard/bridge and @dockyard/ui — the values the
+// web/package.json uses for dockyard-bridge and dockyard-ui — the values the
 // __DOCKYARD_BRIDGE_SPEC__ / __DOCKYARD_UI_SPEC__ tokens resolve to. The two
 // UI templates share this one resolver so the consume-side policy lives in one
 // place.
@@ -119,7 +119,7 @@ func requireVersion(v string) string {
 // points each at the local Dockyard checkout via a file: spec. Otherwise it
 // pins the published packages with a caret range derived from the CLI's
 // resolved version — so a --template scaffold's web/ `npm install` resolves
-// @dockyard/bridge / @dockyard/ui from npm with no --dockyard-path and no local
+// dockyard-bridge / dockyard-ui from npm with no --dockyard-path and no local
 // checkout (v1.3 wave B — D-172; the @dockyard/* packages now publish under the
 // repo version, D-172). A dev CLI carrying no real version falls back to "*"
 // (latest published) — a corner case, since a dev build uses --dockyard-path.

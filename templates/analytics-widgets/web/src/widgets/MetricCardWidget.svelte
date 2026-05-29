@@ -8,7 +8,7 @@
   metric card needs (sparkline + breakdowns).
 -->
 <script lang="ts">
-  import { MetricCard, Sparkline, StatusChip } from '@dockyard/ui';
+  import { MetricCard, Sparkline, StatusChip } from 'dockyard-ui';
 
   type MetricPayload = {
     kind: 'metric_card';

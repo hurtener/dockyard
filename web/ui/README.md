@@ -1,4 +1,4 @@
-# @dockyard/ui
+# dockyard-ui
 
 Dockyard's shared UI design system: the design tokens and the `web/ui` Svelte
 component inventory that every Dockyard frontend surface — the inspector, the

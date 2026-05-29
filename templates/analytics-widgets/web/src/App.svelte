@@ -13,9 +13,9 @@
 -->
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { createBridge, type StyleVariables } from '@dockyard/bridge';
-  import { PageState } from '@dockyard/ui';
-  import type { PageStateValue } from '@dockyard/ui';
+  import { createBridge, type StyleVariables } from 'dockyard-bridge';
+  import { PageState } from 'dockyard-ui';
+  import type { PageStateValue } from 'dockyard-ui';
 
   import Chart from './widgets/Chart.svelte';
   import Table from './widgets/Table.svelte';

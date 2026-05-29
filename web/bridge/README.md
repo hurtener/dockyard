@@ -1,4 +1,4 @@
-# `@dockyard/bridge` — the Svelte bridge shell
+# `dockyard-bridge` — the Svelte bridge shell
 
 The View side of the MCP Apps `ui/` postMessage JSON-RPC dialect (RFC §7.2,
 §7.3). It is the one piece of client-shaped code Dockyard ships — a Svelte +
@@ -26,7 +26,7 @@ tokens of its own (it does not depend on the Phase 10a design system).
 ## Usage
 
 ```ts
-import { createBridge } from '@dockyard/bridge';
+import { createBridge } from 'dockyard-bridge';
 
 const bridge = createBridge({
   clientInfo: { name: 'customer-health', version: '1.0.0' },

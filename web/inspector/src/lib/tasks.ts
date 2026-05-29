@@ -9,8 +9,8 @@
  * lifecycle and maps each transition onto a web/ui `Timeline` row.
  */
 
-import type { StatusTone, TimelineEvent } from '@dockyard/ui';
-import type { TaskProgressParams } from '@dockyard/bridge';
+import type { StatusTone, TimelineEvent } from 'dockyard-ui';
+import type { TaskProgressParams } from 'dockyard-bridge';
 import type { ObsEvent } from './obs.js';
 
 /** The MCP Tasks five-status lifecycle (RFC §8.6, protocolcodec.TaskStatus). */

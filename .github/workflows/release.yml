@@ -25,7 +25,7 @@ name: release
 #                   GitHub Release with every artifact attached. The
 #                   action's update-on-existing behaviour is what makes
 #                   the workflow idempotent against re-runs.
-#   4. npm-publish — packs @dockyard/bridge + @dockyard/ui, verifies the
+#   4. npm-publish — packs dockyard-bridge + dockyard-ui, verifies the
 #                   tarballs build a freshly scaffolded --template UI
 #                   project, then publishes both to npm (`--access public`,
 #                   `NPM_TOKEN`). The version comes from the tag and an
@@ -231,7 +231,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   npm-publish:
-    name: publish @dockyard/bridge + @dockyard/ui to npm
+    name: publish dockyard-bridge + dockyard-ui to npm
     needs: build
     # Tag push only — the actual publish is the user-facing release moment.
     # A workflow_dispatch dry-run builds artifacts but never publishes (a
@@ -294,27 +294,27 @@ jobs:
       # ---- Publish (idempotent) ----
       # Set each package's version from the tag, then publish unless that
       # exact version is already on npm (a re-run, or a tag re-push, is safe).
-      - name: publish @dockyard/bridge
+      - name: publish dockyard-bridge
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           cd web/bridge
           npm version "${{ steps.ver.outputs.npm }}" --no-git-tag-version --allow-same-version
-          if npm view "@dockyard/bridge@${{ steps.ver.outputs.npm }}" version >/dev/null 2>&1; then
-            echo "@dockyard/bridge@${{ steps.ver.outputs.npm }} already published — skipping"
+          if npm view "dockyard-bridge@${{ steps.ver.outputs.npm }}" version >/dev/null 2>&1; then
+            echo "dockyard-bridge@${{ steps.ver.outputs.npm }} already published — skipping"
           else
             npm publish --access public
           fi
-      - name: publish @dockyard/ui
+      - name: publish dockyard-ui
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           cd web/ui
           npm version "${{ steps.ver.outputs.npm }}" --no-git-tag-version --allow-same-version
-          if npm view "@dockyard/ui@${{ steps.ver.outputs.npm }}" version >/dev/null 2>&1; then
-            echo "@dockyard/ui@${{ steps.ver.outputs.npm }} already published — skipping"
+          if npm view "dockyard-ui@${{ steps.ver.outputs.npm }}" version >/dev/null 2>&1; then
+            echo "dockyard-ui@${{ steps.ver.outputs.npm }} already published — skipping"
           else
             npm publish --access public
           fi

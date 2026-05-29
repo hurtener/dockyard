@@ -9,14 +9,14 @@
    * and hands it up so the App's `tools/call` is answered from the fixture —
    * UI states exercised without a backend.
    *
-   * Routes through the four-state `PageState`; composes only `@dockyard/ui`.
+   * Routes through the four-state `PageState`; composes only `dockyard-ui`.
    */
   import {
     PageState,
     StatusChip,
     JsonInspector,
     type PageStateValue,
-  } from '@dockyard/ui';
+  } from 'dockyard-ui';
   import type { ToolContract } from './contracts.js';
   import {
     FIXTURE_KINDS,

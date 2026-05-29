@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { mountAppFrame, APP_SANDBOX, APP_PREVIEW_CSP } from '../lib/app-frame.js';
-import { createBridge, type MessageSink } from '@dockyard/bridge';
+import { createBridge, type MessageSink } from 'dockyard-bridge';
 
 describe('app-frame constants', () => {
   it('the App sandbox is deny-by-default (scripts only, no same-origin)', () => {

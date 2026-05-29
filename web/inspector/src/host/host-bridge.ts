@@ -8,7 +8,7 @@
  * (RFC §12, §7.3).
  *
  * The protocol contract — every method name and wire shape — is NOT redefined
- * here: it is imported verbatim from `@dockyard/bridge`'s `protocol.ts`, so the
+ * here: it is imported verbatim from `dockyard-bridge`'s `protocol.ts`, so the
  * host half and the View half can never drift (CLAUDE.md §6 / P3 — the `ui/`
  * dialect lives in one place). This module owns only the host-side *behaviour*:
  *
@@ -48,7 +48,7 @@ import {
   type RequestDisplayModeParams,
   type RequestDisplayModeResult,
   type TaskProgressParams,
-} from '@dockyard/bridge';
+} from 'dockyard-bridge';
 
 /** The protocol revision the host half advertises (matches the View half). */
 export const HOST_PROTOCOL_VERSION = '2026-01-26';

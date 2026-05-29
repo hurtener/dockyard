@@ -283,8 +283,8 @@ release-prep PR usually:
 - [ ] bumps any version constants (e.g. an `internal/version` package
   if one lands post-V1);
 - [ ] bumps the `version` field in `web/bridge/package.json` and
-  `web/ui/package.json` to match the tag (the `@dockyard/bridge` /
-  `@dockyard/ui` npm packages track the repo version; D-172). The
+  `web/ui/package.json` to match the tag (the `dockyard-bridge` /
+  `dockyard-ui` npm packages track the repo version; D-172). The
   `npm-publish` job also sets the version from the tag at publish time, so
   this keeps the in-tree value honest rather than being load-bearing;
 - [ ] updates the docs site's release callout if the release is a

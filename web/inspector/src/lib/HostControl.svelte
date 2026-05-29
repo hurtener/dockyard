@@ -10,16 +10,16 @@
    * It is a capability toggle set, NEVER a hardcoded per-host capability matrix
    * (CLAUDE.md §6 / §13). The named presets are convenience starting points
    * that only seed the toggles; the handshake is driven by the resulting
-   * `CapabilitySet`, never a host name. Composes only `@dockyard/ui`.
+   * `CapabilitySet`, never a host name. Composes only `dockyard-ui`.
    */
-  import { StatusChip } from '@dockyard/ui';
+  import { StatusChip } from 'dockyard-ui';
   import {
     ALL_DISPLAY_MODES,
     CAPABILITY_PRESETS,
     summarize,
     type CapabilitySet,
   } from './capability.js';
-  import type { DisplayMode } from '@dockyard/bridge';
+  import type { DisplayMode } from 'dockyard-bridge';
 
   interface Props {
     /** The current emulated capability set. */

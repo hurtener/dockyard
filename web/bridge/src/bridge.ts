@@ -93,7 +93,7 @@ export class DisplayModeUnavailableError extends Error {
   }
 }
 
-const DEFAULT_CLIENT = { name: '@dockyard/bridge', version: '0.1.0' };
+const DEFAULT_CLIENT = { name: 'dockyard-bridge', version: '0.1.0' };
 
 /**
  * Builds the default host peer — a sink that posts to `window.parent` with

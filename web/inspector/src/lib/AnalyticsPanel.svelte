@@ -5,7 +5,7 @@
    * Derived purely from the `obs/v1` event stream the inspector consumes (P2 —
    * `analytics.ts`): a `MetricCard` row of aggregate totals and a `DataTable`
    * of per-tool latency / error rate / call volume. Routes through the
-   * four-state `PageState`; composes only `@dockyard/ui`.
+   * four-state `PageState`; composes only `dockyard-ui`.
    */
   import {
     PageState,
@@ -14,7 +14,7 @@
     type Column,
     type PageStateValue,
     type Row,
-  } from '@dockyard/ui';
+  } from 'dockyard-ui';
   import type { ObsEvent } from './obs.js';
   import { foldAnalytics, totalsOf, formatRate } from './analytics.js';
 

@@ -1,7 +1,7 @@
 <!--
   EditsForm — renders a propose_with_edits proposal as a typed form.
 
-  Each field is composed from the shared @dockyard/ui FieldDiff component
+  Each field is composed from the shared dockyard-ui FieldDiff component
   (Phase 25) — the editable current → proposed pair. The user edits any
   proposed value; on Approve, the App posts the final edits map back
   through the bridge's elicitation-response notification.
@@ -12,7 +12,7 @@
    - rejected:  a "Decision: rejected" summary with the user's reason.
 -->
 <script lang="ts">
-  import { ActionBar, FieldDiff, StatusChip } from '@dockyard/ui';
+  import { ActionBar, FieldDiff, StatusChip } from 'dockyard-ui';
 
   type FieldOption = { value: string; label: string };
   type Field = {

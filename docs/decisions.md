@@ -5806,3 +5806,56 @@ an ephemeral-server run (D-081) and is a V2-BACKLOG follow-up.
 `.UI("typo")` now errors at `Register`. A correctly-ordered project (App before
 tool) is unaffected and newly gets the `_meta.ui` it always should have had.
 Called out in `CHANGELOG.md`.
+
+---
+
+## D-174 — `@dockyard/bridge` / `@dockyard/ui` are renamed to unscoped `dockyard-bridge` / `dockyard-ui` (supersedes D-172's naming)
+
+**Date:** 2026-05-29
+**Status:** Settled (v1.5 wave A). Supersedes the **package-naming** part of
+D-172 (the packaging-as-source, version-policy, and gated-publish-job
+decisions of D-172 stand unchanged).
+**Where it lives:** `web/bridge/package.json`, `web/ui/package.json` (the
+`name` fields), every live consumer (`web/inspector`, both templates' `web/`,
+`web/{bridge,ui}/src`), `.github/workflows/release.yml` (the publish job),
+`docs/RELEASING.md`, the skills, and the docs-site pages.
+
+**The problem.** D-172 published the packages under the **`@dockyard` scope**.
+The v1.4.0 release built binaries + a GitHub Release successfully, but the
+`npm-publish` job **404'd**: `@dockyard` is an npm **org** the maintainer
+cannot create, and npm masks an unauthorized scoped publish as a 404. (The
+`NPM_TOKEN` secret had also expired — the other half of the failure.) So the
+packages never published.
+
+**The decision.** Rename both to **unscoped** names — `@dockyard/bridge` →
+`dockyard-bridge`, `@dockyard/ui` → `dockyard-ui` — which publish under the
+maintainer's personal npm account (`hurtener`) with **no scope/org to own**.
+`@dockyard/inspector` is **not** renamed: the inspector frontend is never
+published to npm (it is bundled into the `dockyard` binary), so it keeps its
+internal `@dockyard/inspector` workspace name.
+
+**Verified before committing to the rename (the friction that prompted the
+check):** the names `dockyard-bridge` / `dockyard-ui` are free on npm, and the
+personal token authenticates as `hurtener` — any authenticated account can
+create a new unscoped public package with a free name, so the publish will
+succeed. (A scoped `@hurtener/...` personal-scope name would also have worked
+since `hurtener` is the username; unscoped was chosen for simplicity and to be
+robust against the username/scope-ownership class of failure entirely.)
+
+**Why not keep `@dockyard` and create the org.** The maintainer cannot create
+the `@dockyard` org, and an org publish needs the token's account to own the
+scope. Unscoped sidesteps scope ownership completely — the exact failure mode
+that blocked v1.4.0.
+
+**History is not rewritten.** D-172 keeps its `@dockyard/*` names as the record
+of what was decided then; the past phase/wave plans, the v1.0.0 release
+transcript, and the 1.3.0/1.4.0 `CHANGELOG` sections keep the old names too.
+This entry is the supersession of record. The v1.4.0 npm publish that 404'd is
+simply abandoned (nothing was published under `@dockyard`); v1.5 is the first
+successful npm release, under the unscoped names.
+
+**A downstream App's imports change** from `@dockyard/bridge` / `@dockyard/ui`
+to `dockyard-bridge` / `dockyard-ui`; the templates and the
+`attach-a-ui-resource` skill are updated in the same PR (§19). Because nothing
+was ever published under `@dockyard`, there is no npm deprecation/redirect to
+manage.

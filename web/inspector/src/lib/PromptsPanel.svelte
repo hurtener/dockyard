@@ -24,7 +24,7 @@
     type Column,
     type PageStateValue,
     type Row,
-  } from '@dockyard/ui';
+  } from 'dockyard-ui';
   import type {
     PromptInfo,
     PromptArgumentInfo,

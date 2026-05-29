@@ -23,7 +23,7 @@
 // `/api/contracts` surfaces the generated tool contract the fixture switcher
 // derives fixtures from (P1); (5) the host-half bridge's `ui/initialize`
 // handshake — including capability-set emulation degrading an App — is exercised
-// against the real `@dockyard/bridge` View half (driven by the `web/inspector`
+// against the real `dockyard-bridge` View half (driven by the `web/inspector`
 // Vitest suite — see the note below); (6) a non-localhost `--port` bind is
 // refused before any listener opens (P4, the CVE-2025-49596 lesson).
 //
@@ -42,7 +42,7 @@
 //
 // Scope note. The host-half ↔ View-half `ui/initialize` handshake is a
 // browser-side postMessage seam: the host half (`web/inspector/src/host/
-// host-bridge.ts`) and the real `@dockyard/bridge` View half complete a real
+// host-bridge.ts`) and the real `dockyard-bridge` View half complete a real
 // handshake over a `MessageChannel` in the `web/inspector` Vitest suite
 // (`host-bridge.test.ts` — "no mock at the protocol seam"), which `make web`
 // runs in the same checkpoint gate. The Go wave8 surface is the inspector

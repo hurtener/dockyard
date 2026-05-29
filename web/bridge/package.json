@@ -1,5 +1,5 @@
 {
-  "name": "@dockyard/bridge",
+  "name": "dockyard-bridge",
   "version": "1.4.0",
   "description": "Dockyard Svelte bridge shell — the View side of the MCP Apps ui/ postMessage dialect.",
   "license": "Apache-2.0",

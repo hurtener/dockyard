@@ -17,7 +17,7 @@
  *     `--dy-*` CSS custom properties end up on the App root.
  */
 
-import type { StyleVariables } from '@dockyard/bridge';
+import type { StyleVariables } from 'dockyard-bridge';
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
 

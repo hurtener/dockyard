@@ -14,17 +14,17 @@
   (the runtime stamps it via the related-task association — RFC §8.6),
   so the App always answers the right task.
 
-  Composes only `@dockyard/ui` primitives — every renderer routes
+  Composes only `dockyard-ui` primitives — every renderer routes
   through `PageState` (the four-state page rule, CLAUDE.md §20). The
   only template-local components are ApprovalCard and EditsForm.
 -->
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { createBridge } from '@dockyard/bridge';
+  import { createBridge } from 'dockyard-bridge';
   import {
     PageState,
     type PageStateValue,
-  } from '@dockyard/ui';
+  } from 'dockyard-ui';
 
   import ApprovalCard from './ApprovalCard.svelte';
   import EditsForm from './EditsForm.svelte';

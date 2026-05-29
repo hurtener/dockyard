@@ -3,7 +3,7 @@
  *
  * Confirms the Fixtures / Tools / Verdicts / Tasks / Analytics panels and the
  * HostControl render through the four-state PageState and compose the
- * @dockyard/ui inventory (CLAUDE.md §20 — empty + error states mandatory).
+ * dockyard-ui inventory (CLAUDE.md §20 — empty + error states mandatory).
  */
 import { describe, expect, it } from 'vitest';
 import { render, fireEvent } from '@testing-library/svelte';
