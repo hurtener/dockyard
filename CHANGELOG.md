@@ -21,6 +21,10 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
+(No entries yet — the v1.4.0 surface will land here.)
+
+## [1.3.0] - 2026-05-29
+
 ### Added
 
 - `dockyard new --here` — scaffold into an existing **non-empty** directory
@@ -571,7 +575,8 @@ Vite, [tygo](https://github.com/gzuidhof/tygo),
 [modernc.org/sqlite](https://gitlab.com/cznic/sqlite), and
 [VitePress](https://vitepress.dev). Apache-2.0 licensed.
 
-[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/hurtener/dockyard/releases/tag/v1.3.0
 [1.2.0]: https://github.com/hurtener/dockyard/releases/tag/v1.2.0
 [1.1.0]: https://github.com/hurtener/dockyard/releases/tag/v1.1.0
 [1.0.0]: https://github.com/hurtener/dockyard/releases/tag/v1.0.0
