@@ -130,7 +130,10 @@
   }
 
   .dy-shell__body--railed .dy-shell__rail {
-    width: 340px;
+    /* Responsive: wide enough for a two-column data panel (the inspector's
+       Tools / Resources table), capped so it never dominates a wide
+       viewport. A fixed 340px starved the description column. */
+    width: clamp(400px, 34vw, 620px);
     flex-shrink: 0;
     border-left: 1px solid var(--dy-color-border);
     background: var(--dy-color-surface);
