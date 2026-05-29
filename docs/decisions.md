@@ -5422,8 +5422,9 @@ fuller list.
 ## D-168 — the `require_fixtures` / `require_contract_tests` manifest gates must be enforced (they are currently declared-but-dead)
 
 **Date:** 2026-05-29
-**Status:** Settled (direction); implementation tracked in
-`docs/plans/v1.3-wave-A-dx-feedback-fixes.md`.
+**Status:** Settled; **implemented in v1.3 wave A** (`internal/validate`
+now enforces both gates — see D-169 for the scoping the implementation
+resolved).
 **Where it lives (today):** `internal/manifest/manifest.go` (the
 `RequireFixtures` / `RequireContractTests` fields),
 `internal/scaffold/templates.go` (the blank scaffold sets both `true`),
@@ -5475,3 +5476,114 @@ project stays green.
 documented guarantee; rejected. (b) *Leave as documentation-only* — a
 gate that never bites is worse than no gate (it manufactures false
 confidence); rejected.
+
+---
+
+## D-169 — `require_fixtures` is UI-scoped; `require_contract_tests` is project-wide (the enforcement semantics for D-168)
+
+**Date:** 2026-05-29
+**Status:** Settled (v1.3 wave A).
+**Where it lives:** `internal/validate/checks.go` (`checkFixtures`,
+`checkContractTests`), `internal/validate/validate.go` (the `CheckFixtures`
+/ `CheckContractTests` constants + wiring), `internal/scaffold/templates.go`
+(the blank scaffold's clarified quality comment),
+`examples/combined-patterns/dockyard.app.yaml` (reconciled).
+
+**The open question.** D-168 settled that the two dead gates must be
+enforced; it left "does `require_fixtures` apply to every tool or only
+UI-bearing tools?" to implementation. The deciding constraints, found by
+auditing every in-repo manifest:
+
+- Fixtures (`fixtures/<tool>/<state>.json`) are the **inspector's
+  App-preview inputs** (D-130) — they exist to drive a UI-bearing tool's
+  rendered states. A non-UI tool has no App to preview.
+- The blank scaffold's `greet` tool is non-UI and ships no fixtures; the
+  no-UI examples (`backend-tools-only`, `prompts-demo`) ship none either.
+  Enforcing fixtures for *every* tool would fail a fresh blank scaffold
+  (regressing D-166's green-on-first-validate) and would demand
+  conceptually-meaningless fixtures for backend-only tools.
+
+**The decision.**
+
+- **`require_fixtures` is UI-scoped.** Each tool that declares a `ui:` app
+  must ship ≥1 `fixtures/<tool>/*.json`; a non-UI tool requires none. So a
+  blank no-UI server stays green with the gate on (the gate is primed for
+  when a UI is attached), and the two V1 templates' UI tools (which ship
+  the six-state fixtures) satisfy it. A UI-bearing tool missing fixtures is
+  a Blocker.
+- **`require_contract_tests` is project-wide.** The project must carry ≥1
+  `*_test.go` (the `web/`, `vendor`, `node_modules` and dot-directories are
+  skipped). A static validator cannot prove a test *exercises* a given
+  tool, but it can prove the project is not test-free — the exact
+  regression the gate guards (the downstream report: deleting the
+  scaffold's `greet_test.go` and `validate` still passing). Absence is a
+  Blocker.
+
+**Reconciliation.** Auditing the gate-setting manifests surfaced two that
+declared `require_fixtures: true` with UI tools but shipped no fixtures:
+`examples/combined-patterns` (a shipped composition demo) and
+`examples/customer-health` (a manifest-only loader test fixture, never
+validated). `combined-patterns` is set to `require_fixtures: false` (a
+worked-code demo is not a fixture showcase — the two templates are);
+`customer-health` is left untouched (it is loader test data, not a
+validated project). No test in the suite runs `validate` against the
+examples, so the enforcement breaks no CI; the scaffold and both templates
+were already coherent.
+
+**Behaviour change (semver, per D-168).** A project that set
+`require_contract_tests: true` and carries no test — or
+`require_fixtures: true` with a UI tool and no fixtures — now fails
+`dockyard validate` where it previously passed. Called out in
+`CHANGELOG.md`. A freshly scaffolded project (blank or template) stays
+green.
+
+---
+
+## D-170 — `dockyard new` pins the CLI's resolved version into the scaffolded go.mod (closes the `v0.0.0` + replace sharp edge)
+
+**Date:** 2026-05-29
+**Status:** Settled (v1.3 wave A). Extends D-080.
+**Where it lives:** `internal/cli/root.go` (`ResolvedVersion`),
+`internal/releasebuild/release.go` (the `-X …/internal/cli.Version` ldflags
+stamp), `internal/scaffold/templates.go` (`renderGoMod` /
+`requireVersion`), `internal/scaffold/scaffold.go`
+(`Options.DockyardVersion`), `internal/cli/new.go`.
+
+**The sharp edge.** The scaffold wrote `require github.com/hurtener/dockyard
+v0.0.0` — a placeholder that only resolves behind the local `replace`
+directive (D-080). A developer dropping the replace to use the published
+module hit `go get …@v1.2.0: v0.0.0: unknown revision` and had to hand-edit
+the require line. Worse, a released `dockyard new` *without*
+`--dockyard-path` wrote `v0.0.0` + no replace → `go mod tidy` failed
+outright (the D-166 post-step could not be green on the published path).
+
+**Root cause found.** `cli.Version`'s comment claimed an `-ldflags -X`
+stamp, but **nothing actually stamped it** (`internal/releasebuild` passed
+only `-s -w`) and there was no `ReadBuildInfo` fallback — so every binary,
+released or `go install`-ed, reported `0.0.0-dev`.
+
+**The decision.**
+
+- `cli.ResolvedVersion()` resolves the version in order: the `-ldflags -X`
+  stamp (release-pipeline binaries) → `debug.ReadBuildInfo().Main.Version`
+  (a `go install …@vX.Y.Z` binary, which carries no stamp but records the
+  module version) → the `0.0.0-dev` placeholder (a `go build` /
+  `make build` from a checkout).
+- `internal/releasebuild` now stamps
+  `-X github.com/hurtener/dockyard/internal/cli.Version=<canonical version>`,
+  so released binaries report the real version too.
+- `dockyard new` passes `ResolvedVersion()` into
+  `scaffold.Options.DockyardVersion`; `renderGoMod` pins it in the require
+  directive when it is a real release version (vX.Y.Z), else falls back to
+  `v0.0.0` (only ever resolved through the replace — the build-from-source
+  path). Both real install paths (release binary, `go install @vX.Y.Z`)
+  therefore pin a clean tag, so a project that drops the replace resolves
+  the published module without a hand edit, and the published-path
+  `dockyard new` is green on the first `validate`.
+
+**Determinism.** The scaffold golden test passes no `DockyardVersion`, so
+the golden go.mod keeps `v0.0.0` (byte-stable); the pin is exercised by a
+dedicated unit test. A `make build` checkout binary may pin a pseudo-version
+(its build-info version) on a no-replace scaffold — a dev corner case
+(dev builds use `--dockyard-path`, where the replace wins regardless), not
+a regression over the prior `v0.0.0`.

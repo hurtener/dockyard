@@ -2,6 +2,7 @@ package scaffold
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -59,7 +60,10 @@ quality:                  # RFC §9.4 — enforced by 'dockyard validate'.
   require_empty_state: false
   require_error_state: false
   require_permission_state: false
-  # Contract hygiene gates stay on — they apply to every server.
+  # require_contract_tests applies to every server (the project must carry a
+  # contract test); require_fixtures is UI-scoped (it requires inspector
+  # fixtures for UI-bearing tools only — this server has none, so it is a
+  # no-op until you attach a UI). Both are enforced by 'dockyard validate'.
   require_fixtures: true
   require_contract_tests: true
   require_spec_compliance: true
@@ -75,11 +79,34 @@ func renderGoMod(o Options) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "module %s\n\n", o.modulePath())
 	fmt.Fprintf(&b, "go %s\n\n", goVersion)
-	fmt.Fprintf(&b, "require %s v0.0.0\n", dockyardModule)
+	fmt.Fprintf(&b, "require %s %s\n", dockyardModule, requireVersion(o.DockyardVersion))
 	if o.DockyardReplace != "" {
 		fmt.Fprintf(&b, "\nreplace %s => %s\n", dockyardModule, o.DockyardReplace)
 	}
 	return b.String()
+}
+
+// releaseVersionRE matches a release-shaped module version (major.minor.patch,
+// optional v-prefix, optional pre-release / build metadata).
+var releaseVersionRE = regexp.MustCompile(`^v?\d+\.\d+\.\d+([-+].*)?$`)
+
+// requireVersion is the version the scaffolded go.mod pins for the Dockyard
+// module. A real release version (vX.Y.Z — normally the scaffolding CLI's own
+// version) is pinned so a project that drops the local `replace` resolves the
+// published module from the proxy without a hand edit (the v1.3 fix for the
+// `v0.0.0: unknown revision` sharp edge). Anything else — empty, or the
+// `0.0.0-dev` placeholder a `go build` / `make build` carries — falls back to
+// `v0.0.0`, which is only ever resolved through the `replace` directive (the
+// build-from-source path).
+func requireVersion(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || v == "0.0.0-dev" || v == "(devel)" || !releaseVersionRE.MatchString(v) {
+		return "v0.0.0"
+	}
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	return v
 }
 
 // renderMainGo renders main.go — the runnable entrypoint. It constructs a

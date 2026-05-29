@@ -40,8 +40,15 @@ The checks (RFC §9.4):
 | MIME               | an App's resource MIME is not `text/html;profile=mcp-app`   |
 | spec compliance    | the Apps/Tasks shapes deviate from the vendored MCP specs   |
 | four-state UI rule | a fixture is missing for a required UI state (§20)          |
+| fixtures           | `require_fixtures` on + a UI-bearing tool ships no `fixtures/<tool>/*.json` (D-169) |
+| contract tests     | `require_contract_tests` on + the project carries no `*_test.go` (D-168) |
 | stale-codegen      | the generated `*.gen.*` files no longer match the Go source |
 | CrossCheck (D-113) | the generated TS would differ from on-disk if regenerated   |
+
+The `fixtures` and `contract tests` gates are opt-in via the manifest's
+`quality.require_fixtures` / `quality.require_contract_tests` and enforced
+from v1.3. `require_fixtures` is **UI-scoped** — it only requires fixtures
+for tools that declare a `ui:` app (a non-UI server needs none).
 
 A blocker exits non-zero (`validate: build blockers found`); a warning
 reports inline but does not change the exit code.

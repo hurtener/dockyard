@@ -60,6 +60,12 @@ const (
 	CheckUIStates Check = "ui-states"
 	// CheckStaleCodegen — generated output drift from the Go contract structs.
 	CheckStaleCodegen Check = "stale-codegen"
+	// CheckFixtures — quality.require_fixtures: a UI-bearing tool must ship
+	// inspector fixtures (D-168, D-169).
+	CheckFixtures Check = "fixtures"
+	// CheckContractTests — quality.require_contract_tests: the project must
+	// carry a contract test (D-168).
+	CheckContractTests Check = "contract-tests"
 )
 
 // Diagnostic is one quality finding.
@@ -166,6 +172,8 @@ func Run(opts Options) (*Report, error) {
 		checkMIME(rp, m)
 		checkSpecCompliance(rp, opts.ProjectDir, m)
 		checkUIStates(rp, opts.ProjectDir, m)
+		checkFixtures(rp, opts.ProjectDir, m)
+		checkContractTests(rp, opts.ProjectDir, m)
 		checkStaleCodegen(rp, opts.ProjectDir, m)
 		checkCrossCodegen(rp, opts.ProjectDir, m)
 	}

@@ -3,6 +3,7 @@ package validate
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -220,6 +221,69 @@ func checkUIStates(rp *reporter, projectDir string, lm loadedManifest) {
 					a.ID, a.Entry, sm.name, sm.name)
 			}
 		}
+	}
+}
+
+// checkFixtures enforces quality.require_fixtures (D-168, D-169). Fixtures are
+// the inspector's App-preview inputs (D-130) — they exist to drive a UI-bearing
+// tool's rendered states. So the gate is UI-scoped: each tool that declares a
+// `ui:` app must ship at least one fixtures/<tool>/<state>.json. A non-UI tool
+// has no App to preview and requires no fixtures (this is why a blank
+// no-UI server stays green with the gate on). A missing fixture set for a
+// UI-bearing tool is a Blocker.
+func checkFixtures(rp *reporter, projectDir string, lm loadedManifest) {
+	if !lm.m.Quality.RequireFixtures {
+		return
+	}
+	for _, t := range lm.m.Tools {
+		if strings.TrimSpace(t.UI) == "" {
+			continue // non-UI tool: nothing to preview, no fixtures required.
+		}
+		matches, _ := filepath.Glob(filepath.Join(projectDir, "fixtures", t.Name, "*.json"))
+		if len(matches) == 0 {
+			rp.block(CheckFixtures,
+				"tool %q drives a UI app but ships no fixtures — quality.require_fixtures is on; "+
+					"add at least one fixtures/%s/<state>.json (the inspector App-preview states, "+
+					"CLAUDE.md §20)",
+				t.Name, t.Name)
+		}
+	}
+}
+
+// checkContractTests enforces quality.require_contract_tests (D-168): the
+// project must carry at least one Go test (a contract test). It is a
+// project-wide existence check — a static validator cannot prove a test
+// *exercises* a given tool, but it can prove the project is not test-free,
+// which is the regression the gate guards (a developer deleting the scaffold's
+// contract test and `validate` still passing). The web/, vendor, node_modules
+// and dot-directories are skipped. Absence is a Blocker.
+func checkContractTests(rp *reporter, projectDir string, lm loadedManifest) {
+	if !lm.m.Quality.RequireContractTests {
+		return
+	}
+	found := false
+	_ = filepath.WalkDir(projectDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil //nolint:nilerr // a walk error on one entry must not abort the gate
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if path != projectDir && (name == "web" || name == "vendor" ||
+				name == "node_modules" || strings.HasPrefix(name, ".")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), "_test.go") {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if !found {
+		rp.block(CheckContractTests,
+			"project carries no Go contract test (no *_test.go) — quality.require_contract_tests "+
+				"is on (RFC §9.4); add a test that exercises the tool contract")
 	}
 }
 

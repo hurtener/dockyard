@@ -141,6 +141,11 @@ to npm (which removes this requirement) is tracked in
 - `--dir <path>` — parent directory for the project (default: cwd).
 - `--module <go-module>` — Go module path for `go.mod` (default:
   `example.com/<name>`).
+- `--here` — scaffold into the target directory even if it already has
+  content (e.g. a dir you already `git init`-ed). Existing files are left
+  untouched; a scaffold output that would overwrite a file is refused, not
+  silently overwritten. Without it, a non-empty target is rejected and the
+  error names the entries it found.
 - `--no-postgen` — skip the post-scaffold `go mod tidy` + `dockyard
   generate` steps. Default is to run both so a fresh scaffold is green
   under `dockyard validate` on the first try. Use it for hermetic /

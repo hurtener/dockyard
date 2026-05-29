@@ -6,14 +6,41 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"runtime/debug"
 
 	"github.com/spf13/cobra"
 )
 
 // Version is the dockyard CLI version. It is overridden at build time via
-// -ldflags by the release pipeline (Phase 30, RFC §14); the in-tree default is
-// a dev placeholder.
+// -ldflags -X by the release pipeline (internal/releasebuild); the in-tree
+// default is a dev placeholder. Prefer ResolvedVersion() over reading this
+// directly — it also recovers the module version from the build info for a
+// `go install …@vX.Y.Z` binary, which carries no ldflags stamp.
 var Version = "0.0.0-dev"
+
+// devVersion is the in-tree placeholder — anything else is a real build.
+const devVersion = "0.0.0-dev"
+
+// ResolvedVersion returns the best-known CLI version, in order of confidence:
+//  1. the -ldflags -X stamp (the release-pipeline cross-compiled binaries);
+//  2. the module version from the build info (a `go install …@vX.Y.Z` binary —
+//     it has no ldflags stamp but Go records the module version);
+//  3. the dev placeholder (a `make build` / `go build` from a checkout).
+//
+// It is what `dockyard --version` reports and what `dockyard new` pins into a
+// scaffolded go.mod's require directive (so the published-module path resolves
+// without a hand edit).
+func ResolvedVersion() string {
+	if Version != "" && Version != devVersion {
+		return Version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	return Version
+}
 
 // rootLong is the `dockyard` root command's long help. It states the product
 // shape — one CGo-free binary, server-side only (P4) — and the verb roadmap so
@@ -47,7 +74,7 @@ func NewRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		// a genuine failure is not buried under a usage dump.
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Version:       Version,
+		Version:       ResolvedVersion(),
 	}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
