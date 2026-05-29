@@ -36,6 +36,28 @@ canonical examples — start from one when you can.
 5. **Build** — `dockyard build` runs Vite then `go build`, embedding the
    freshly built HTML.
 
+## Prerequisites — the `web/` toolchain needs `--dockyard-path` (for now)
+
+> **Read this before scaffolding a UI project.** The Dockyard **Go module**
+> is published (`go install …@vX.Y.Z` works with no local checkout), but the
+> frontend packages **`@dockyard/bridge` and `@dockyard/ui` are not yet on
+> npm** — they are workspace packages (`main: ./src/index.ts`). A UI
+> project's `web/` resolves them from a **local Dockyard checkout**, wired by
+> the `--dockyard-path` flag:
+>
+> ```bash
+> dockyard new my-ui-server --template analytics-widgets \
+>   --dockyard-path /path/to/dockyard      # required for the web/ npm install
+> ```
+>
+> Without `--dockyard-path` (and the checkout it points at), the `web/`
+> `npm install` breaks — there is no published `@dockyard/bridge` /
+> `@dockyard/ui` to resolve. The Go side is unaffected; this is a
+> **frontend-only** constraint. It goes away once the bridge/ui ship to npm
+> (tracked in `docs/V2-BACKLOG.md` → "Publish `@dockyard/bridge` +
+> `@dockyard/ui` to npm"). The `--dockyard-path` flag is hidden from
+> `--help`, but it is real and load-bearing for UI builds.
+
 ## 1. Manifest declaration
 
 In `dockyard.app.yaml`:
@@ -65,6 +87,24 @@ quality:
 The `quality` block turns on the §20 four-state page rule —
 loading/empty/error/permission states are mandatory and `dockyard
 validate` will fail your build if any tool fixture is missing.
+
+### Media in the App (`data:` / `blob:`, images, video)
+
+The `csp` block models **domain allowlists**, not raw CSP directives:
+`connect` → `connect-src`, `resource` → the static-asset directives
+(`img-src` / `media-src` / `script-src` / `style-src` / `font-src`),
+`frame` → `frame-src`, `base-uri` → `base-uri`. The **literal CSP string**
+the iframe runs under — and in particular whether **`data:` and `blob:`**
+URLs are permitted for images/video — is **built by the host**, not
+declared by Dockyard. There is currently **no manifest knob to declare
+`data:`/`blob:` media intent**.
+
+Practical consequence for an image/video App: a single-file bundle inlines
+small assets as `data:` URIs, but a host's deny-by-default CSP may block
+`data:`/`blob:` media. **Design to degrade** — render a placeholder / empty
+state when a `data:` thumbnail or `blob:` stream can't load, rather than
+assuming it will. A first-class manifest declaration for this is tracked in
+`docs/V2-BACKLOG.md` → "Apps `media-src` / `data:` / `blob:` declaration".
 
 ## 2. Wire the tool
 
@@ -187,6 +227,15 @@ The inspector's App preview reads the live `ui://` resource via a
 short-lived, operator-initiated MCP client session (D-103, D-144).
 You should see your App render the tool result with realistic
 synthetic data from the fixture switcher (D-130).
+
+> **Don't "tidy" the generated Vite config.** It emits `format: 'iife'`
+> and applies a small `stripModuleType` plugin on purpose: the App renders
+> in a **sandboxed iframe without `allow-same-origin`**, where browsers
+> refuse to execute `<script type="module">`. An IIFE bundle with the
+> `type="module"` attribute stripped is the one shape that runs in that
+> sandbox. Switching the config back to an ES-module build (or dropping the
+> plugin) silently breaks the App in the host with **no build error** — it
+> just won't execute. Leave both in place.
 
 ## Common pitfalls
 

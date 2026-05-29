@@ -440,6 +440,15 @@ AGENTS.md §7. D-040, D-041.
 
 ## I
 
+**IIFE iframe bundle** — the shape an App's Vite build must emit: an
+immediately-invoked function expression (`format: 'iife'`) with the
+`<script type="module">` attribute stripped (the generated config's
+`stripModuleType` plugin). An MCP App renders in a **sandboxed iframe
+without `allow-same-origin`**, where browsers refuse to execute module
+scripts; the IIFE form is the one that runs there. Switching the App's Vite
+config to an ES-module build silently breaks rendering with no build error.
+RFC §7.3, §14.
+
 **Inspector** — Dockyard's local, test-only debug surface; the lone client-shaped
 component. It implements the host half of the `ui/` bridge to render Apps locally,
 surfaces the Logbook stream, fixtures, latency analytics, drift verdicts, and
