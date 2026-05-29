@@ -21,7 +21,51 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-(No entries yet — the next release surface will land here.)
+### Changed
+
+- **The frontend packages are renamed to unscoped names: `@dockyard/bridge` →
+  `dockyard-bridge`, `@dockyard/ui` → `dockyard-ui`.** They publish under an
+  unscoped personal-account name (the `@dockyard` org scope was unownable and
+  blocked the v1.4.0 npm publish). An App's imports change accordingly
+  (`import { createBridge } from 'dockyard-bridge'`); the templates and the
+  `attach-a-ui-resource` skill are updated to match. Nothing was ever published
+  under `@dockyard`, so there is no deprecation to manage. The internal
+  inspector frontend keeps its `@dockyard/inspector` workspace name (it is never
+  published). (D-174)
+
+- **`Builder.UI` gained an optional visibility variadic** —
+  `.UI(appName, tool.VisibilityApp)` sets `_meta.ui.visibility` for a UI-only
+  action tool; omitting it keeps the spec default (model + app). New
+  `tool.VisibilityModel` / `tool.VisibilityApp` consts. **Behaviour change:** a
+  `.UI("name")` that references no registered App now returns a typed error at
+  `Register` (previously a silent no-op) — register the App (`apps.Register`)
+  before the tool. A correctly-ordered project is unaffected. (D-173)
+
+### Fixed
+
+- **A framework-wide wiring audit (the same class as the `_meta.ui` bug) fixed
+  three declared-but-unwired seams:**
+  - **`require_spec_compliance` is now enforced.** The quality flag was
+    declared, scaffolded `true`, and documented "enforced by `dockyard
+    validate`", but no consumer read it — the spec-compliance check ran
+    unconditionally, so toggling the flag did nothing. It now gates the check
+    (opt-out), consistent with the other `quality.*` gates. All shipped
+    manifests set it `true`, so no real project changes behaviour. (D-175)
+  - **`@dockyard/bridge`'s `ui/resource-teardown` now tears the View down.**
+    The notification was documented as triggering `BridgeShell.close()` but was
+    never dispatched — a production host sending it would leak the bridge's
+    listeners/transport and leave `ready` stuck `true`. It now calls `close()`.
+  - **The bridge retains the negotiated `protocolVersion` + `hostInfo`** from
+    the `ui/initialize` result (exposed as `bridge.protocolVersion` /
+    `bridge.hostInfo`); `protocol.ts` promised retention but both were
+    discarded.
+- **`tool.New[...].UI(appName).Register(srv)` now emits the tool→App link.**
+  The builder previously dropped it silently — the registered tool carried no
+  `_meta.ui.resourceUri` (RFC §7.1), so a host that renders MCP Apps showed the
+  text fallback instead of the App. The builder now resolves the App's name to
+  its `ui://` URI (via a new `server.AppLink` seam recorded by `apps.Register`)
+  and emits `_meta.ui` at `Register`. The `analytics-widgets` template is fixed
+  automatically (no template change). (D-173)
 
 ## [1.4.0] - 2026-05-29
 

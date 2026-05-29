@@ -10,7 +10,7 @@
    *
    * Phase 22 built the Events + RPC tabs and the App frame; Phase 23 fills the
    * Fixtures / Tools / Verdicts / Tasks / Analytics tabs and the Host control.
-   * Every component is composed from `@dockyard/ui` — none is re-implemented
+   * Every component is composed from `dockyard-ui` — none is re-implemented
    * (CLAUDE.md §20). Every async region routes through `PageState`.
    */
   import { onMount, onDestroy } from 'svelte';
@@ -25,7 +25,7 @@
     LoadingState,
     ErrorState,
     type PageStateValue,
-  } from '@dockyard/ui';
+  } from 'dockyard-ui';
   import EventsPanel from './lib/EventsPanel.svelte';
   import RpcPanel from './lib/RpcPanel.svelte';
   import AppFrame from './lib/AppFrame.svelte';
@@ -52,7 +52,7 @@
     type PromptInfo,
     type ToolInvokeResult,
   } from './lib/api.js';
-  import type { ElicitationResponseParams } from '@dockyard/bridge';
+  import type { ElicitationResponseParams } from 'dockyard-bridge';
   import { ObsStream, type ObsEvent } from './lib/obs.js';
   import { latestTaskProgress } from './lib/tasks.js';
   import type { RpcEntry } from './lib/rpc.js';

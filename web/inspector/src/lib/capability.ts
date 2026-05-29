@@ -19,7 +19,7 @@ import type {
   DisplayMode,
   HostCapabilities,
   HostContext,
-} from '@dockyard/bridge';
+} from 'dockyard-bridge';
 import { defaultHostContext } from '../host/host-bridge.js';
 
 /** The display modes the inspector can emulate granting. */

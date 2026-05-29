@@ -1,5 +1,5 @@
 /**
- * @dockyard/ui — the public barrel.
+ * dockyard-ui — the public barrel.
  *
  * The shared design system: design tokens and the web/ui component inventory
  * every Dockyard frontend surface composes (docs/design/CONVENTIONS.md §3,

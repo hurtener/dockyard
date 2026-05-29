@@ -171,3 +171,57 @@ func TestReporterWarn(t *testing.T) {
 		t.Errorf("warn message not formatted: %q", rp.diagnostics[0].Message)
 	}
 }
+
+// TestRun_SpecComplianceGateRespectsFlag proves the require_spec_compliance
+// quality gate is enforced (D-175) — previously it was declared-but-dead: the
+// spec check ran unconditionally and toggling the flag changed nothing (the
+// D-168 class). A docs/specifications/ tree with a withheld spec makes the
+// spec check a Blocker when the flag is on; flipping it off opts out.
+func TestRun_SpecComplianceGateRespectsFlag(t *testing.T) {
+	t.Parallel()
+	dir := scaffoldAndGenerate(t, "val-spec-gate")
+
+	// Induce the spec-absence Blocker: a docs/specifications/ tree present but
+	// missing one vendored spec (the exact regression checkSpecCompliance guards).
+	specsDir := filepath.Join(dir, "docs", "specifications")
+	if err := os.MkdirAll(specsDir, 0o750); err != nil {
+		t.Fatalf("mkdir specs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(specsDir, "mcp-apps-2026-01-26.mdx"),
+		[]byte("vendored spec snapshot\n"), 0o600); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+
+	// Flag on (the scaffold default) → the withheld spec is a CheckSpec Blocker.
+	on, err := Run(Options{ProjectDir: dir})
+	if err != nil {
+		t.Fatalf("Run (flag on): %v", err)
+	}
+	if !hasDiagnostic(on, CheckSpec, Blocker) {
+		t.Fatalf("require_spec_compliance: true must enforce the spec check; got %v", on.Diagnostics)
+	}
+
+	// Flip require_spec_compliance → false: the gate opts out, no CheckSpec
+	// diagnostic. Before D-175 this flag was inert and the Blocker still fired.
+	manifestPath := filepath.Join(dir, "dockyard.app.yaml")
+	raw, err := os.ReadFile(manifestPath) //nolint:gosec // test temp dir
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	flipped := strings.Replace(string(raw),
+		"require_spec_compliance: true", "require_spec_compliance: false", 1)
+	if flipped == string(raw) {
+		t.Fatal("scaffold manifest did not contain require_spec_compliance: true to flip")
+	}
+	if err := os.WriteFile(manifestPath, []byte(flipped), 0o600); err != nil { //nolint:gosec // test temp dir
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	off, err := Run(Options{ProjectDir: dir})
+	if err != nil {
+		t.Fatalf("Run (flag off): %v", err)
+	}
+	if hasDiagnostic(off, CheckSpec, Blocker) {
+		t.Fatalf("require_spec_compliance: false must skip the spec check (D-175); got %v", off.Diagnostics)
+	}
+}

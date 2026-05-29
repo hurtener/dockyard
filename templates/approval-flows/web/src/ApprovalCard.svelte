@@ -13,7 +13,7 @@
   component — CLAUDE.md §20).
 -->
 <script lang="ts">
-  import { StatusChip, ActionBar } from '@dockyard/ui';
+  import { StatusChip, ActionBar } from 'dockyard-ui';
 
   type ApprovalPayload = {
     kind: 'approval';

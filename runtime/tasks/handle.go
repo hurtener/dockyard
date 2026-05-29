@@ -59,8 +59,15 @@ type InputPrompt struct {
 	// Message is the human-readable prompt shown to the requestor.
 	Message string
 	// Schema is an optional opaque JSON Schema describing the expected input
-	// shape; an empty value asks for free-form input. The engine forwards it
-	// verbatim — it is contract data, not a protocol envelope.
+	// shape; an empty value asks for free-form input. It is contract data, not a
+	// protocol envelope. The engine records it verbatim with the outstanding
+	// elicitation and exposes it through Engine.PendingInput for a host to read
+	// and render a form. NOTE (v1.5): no V1 wire/transport surface yet pushes the
+	// schema to the requestor — only Message reaches a poller (as the task
+	// StatusMessage). Surfacing Schema to the App/inspector is a tracked
+	// follow-up (docs/V2-BACKLOG.md); until then a handler should not rely on the
+	// requestor receiving the schema. Message must carry enough for a free-form
+	// reply.
 	Schema []byte
 }
 

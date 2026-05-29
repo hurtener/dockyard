@@ -36,7 +36,7 @@ fi
 #    not fork the protocol constants.
 HOST=web/inspector/src/host/host-bridge.ts
 if [ -f "$HOST" ]; then
-  if grep -q "@dockyard/bridge" "$HOST" \
+  if grep -q "dockyard-bridge" "$HOST" \
      && grep -q "ui/initialize" "$HOST" 2>/dev/null \
      || grep -q "ViewMethod" "$HOST"; then
     ok "host-half bridge exists and reuses the web/bridge ui/ dialect"
@@ -76,13 +76,13 @@ else
   skip "web/inspector frontend project not built"
 fi
 
-# 6. The web/inspector frontend composes @dockyard/ui — it does not re-implement
+# 6. The web/inspector frontend composes dockyard-ui — it does not re-implement
 #    a shared component (CLAUDE.md §20).
 if [ -f web/inspector/src/App.svelte ]; then
-  if grep -rq "@dockyard/ui" web/inspector/src/; then
-    ok "web/inspector composes the @dockyard/ui design system"
+  if grep -rq "dockyard-ui" web/inspector/src/; then
+    ok "web/inspector composes the dockyard-ui design system"
   else
-    fail "web/inspector does not compose @dockyard/ui (violates §20)"
+    fail "web/inspector does not compose dockyard-ui (violates §20)"
   fi
 else
   skip "web/inspector App not built"

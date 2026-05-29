@@ -2,7 +2,7 @@
  * components.test.ts — the inspector's own composed views.
  *
  * These confirm the Events panel, the RPC panel, and the App-frame wrapper
- * render through the four-state PageState and compose the @dockyard/ui
+ * render through the four-state PageState and compose the dockyard-ui
  * inventory (CLAUDE.md §20 — empty + error states are mandatory).
  */
 import { describe, expect, it } from 'vitest';

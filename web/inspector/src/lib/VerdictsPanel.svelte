@@ -8,14 +8,14 @@
    * `dockyard validate` engine — so the inspector never reimplements the
    * checks. The panel routes through the four-state `PageState` (CLAUDE.md
    * §20): a real empty state and an error state with a working retry. Every
-   * component is composed from `@dockyard/ui`.
+   * component is composed from `dockyard-ui`.
    */
   import {
     PageState,
     StatusChip,
     type PageStateValue,
     type StatusTone,
-  } from '@dockyard/ui';
+  } from 'dockyard-ui';
   import type { VerdictRow } from './api.js';
 
   interface Props {

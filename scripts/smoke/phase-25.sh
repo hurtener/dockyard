@@ -133,12 +133,12 @@ if [ ! -f templates/approval-flows/web/src/FieldDiff.svelte ]; then
 else
   fail "FieldDiff is duplicated under the template — must be composed from web/ui"
 fi
-# The App composes the shared FieldDiff (it imports from @dockyard/ui).
+# The App composes the shared FieldDiff (it imports from dockyard-ui).
 if grep -q "FieldDiff" templates/approval-flows/web/src/EditsForm.svelte \
-   && grep -q "@dockyard/ui" templates/approval-flows/web/src/EditsForm.svelte; then
-  ok "the EditsForm composes FieldDiff from @dockyard/ui"
+   && grep -q "dockyard-ui" templates/approval-flows/web/src/EditsForm.svelte; then
+  ok "the EditsForm composes FieldDiff from dockyard-ui"
 else
-  fail "the EditsForm does not compose FieldDiff from @dockyard/ui"
+  fail "the EditsForm does not compose FieldDiff from dockyard-ui"
 fi
 
 # --- the bridge ships the elicitation-response message (D-134) --------------

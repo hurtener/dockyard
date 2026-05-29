@@ -7,7 +7,7 @@
  * `TimelineEvent` shape, plus event filtering by kind.
  */
 
-import type { TimelineEvent } from '@dockyard/ui';
+import type { TimelineEvent } from 'dockyard-ui';
 import type { ObsEvent } from './obs.js';
 
 /** The `StatusTone` web/ui's Timeline marker uses. */

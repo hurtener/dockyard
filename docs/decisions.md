@@ -5739,3 +5739,172 @@ latest-published, which silently floats a UI project across majors; a caret
 pinned to the CLI version is the honest spec. (c) *Publish on merge to
 `main`* — a publish must be a deliberate "release this" act (the tag), never
 a merge side-effect (mirrors D-159 / the GitHub-Release gate).
+
+---
+
+## D-173 — the runtime/tool builder wires `_meta.ui` via a server `AppLink` seam (fail-loud), with per-tool visibility
+
+**Date:** 2026-05-29
+**Status:** Settled (v1.5 wave A).
+**Where it lives:** `runtime/server/server.go` (`AppLink`, `RegisterAppLink`,
+`AppLinkByName`, `appLinks`), `runtime/apps/apps.go` (`Register` records the
+link), `runtime/tool/builder.go` (`UI(name, visibility...)`, `Register` sets
+`def.Meta`, `VisibilityModel`/`VisibilityApp`).
+
+**The bug.** `tool.New[...].UI(appName).Register(srv)` **silently dropped the
+UI link**: `Builder.Register` built `server.ToolDef{Name, Description}` with no
+`Meta`, and `b.uiResource` was read only by the `UIResource()` getter. So the
+registered tool carried no `_meta.ui.resourceUri` (RFC §7.1). The `ui://`
+resource registered fine; only the tool→resource link was missing — so a host
+that renders MCP Apps (Claude Desktop) had nothing linking the tool result to
+its App and rendered the text fallback. The plumbing existed
+(`apps.ToolMetaFor` → `internal/protocolcodec`, emitting the nested
+`{resourceUri, visibility}` form) but was never called from the builder, even
+though `ToolDef.Meta`'s and `UI()`'s own doc comments said the Apps layer wires
+it here. The canonical `analytics-widgets` template used the same
+`.UI(appName).Register(srv)` path, so it carried the bug too. Upstream feedback
+(go-video-mcp, 2026-05-29).
+
+**The decision — Option B (a server seam), not a URI convention.**
+
+- `runtime/server` records a name→link map: `RegisterAppLink(name, AppLink{URI})`
+  / `AppLinkByName(name)`. `runtime/apps.Register` records one per App after the
+  resource is installed. `tool.Builder.Register`, when `.UI()` was called,
+  resolves the name to the App's URI and sets `def.Meta =
+  apps.ToolMetaFor(ToolLink{ResourceURI, Visibility})`.
+- **Fail-loud.** An unresolved `.UI(name)` (no App registered under that name)
+  is a typed error at `Register` that names the tool, the missing App, and the
+  fix — never a silent no-op (the trap that cost the upstream debugging
+  session). This imposes an **apps-before-tools ordering** rule, which the
+  templates and real projects already satisfy (`registerApp` before
+  `registerTools`).
+- **Per-tool visibility.** `UI(name, visibility ...string)` gains an optional
+  visibility variadic; `tool.VisibilityModel` / `tool.VisibilityApp` are
+  re-exported so an author need not import `runtime/apps`. Omitted → the
+  `visibility` key is absent (a host treats it as both — the spec default);
+  `VisibilityApp` alone marks a UI-only action tool.
+
+**Why Option B over the convention (Option A).** Option A reconstructs the URI
+as `ui://<server.Info().Name>/<uiResource>`. But `apps.App.URI` is developer-set
+and only validated for the `ui://` scheme — a custom URI would silently
+mismatch, re-introducing exactly the silent-failure class being fixed. The seam
+handles any URI and matches the "Apps layer consumes it" doc intent. The import
+direction is safe: `apps`→`server`, `tool`→`server`, and `tool`→`apps` adds no
+cycle (`apps` does not import `tool`).
+
+**The guard is a framework regression test, not a new user gate.** The bug was
+a *framework* defect; a user's `dockyard validate` passed because their manifest
+was correct, so no user-facing gate "would have caught it." The regression
+guard is the new `runtime/tool` builder test (`.UI().Register()` emits
+`_meta.ui.resourceUri`, exercising the builder path that `TestRegisterAndDiscover`
+skipped by calling `server.AddTool` with hand-built meta) + the fail-loud
+`Register` + the existing static `checkToolUIMappings`. `validate`/`testgate`
+stay static by design (D-082); a runtime `_meta.ui`-present assertion would need
+an ephemeral-server run (D-081) and is a V2-BACKLOG follow-up.
+
+**Behaviour change (semver — minor, per D-159).** A previously silent
+`.UI("typo")` now errors at `Register`. A correctly-ordered project (App before
+tool) is unaffected and newly gets the `_meta.ui` it always should have had.
+Called out in `CHANGELOG.md`.
+
+---
+
+## D-174 — `@dockyard/bridge` / `@dockyard/ui` are renamed to unscoped `dockyard-bridge` / `dockyard-ui` (supersedes D-172's naming)
+
+**Date:** 2026-05-29
+**Status:** Settled (v1.5 wave A). Supersedes the **package-naming** part of
+D-172 (the packaging-as-source, version-policy, and gated-publish-job
+decisions of D-172 stand unchanged).
+**Where it lives:** `web/bridge/package.json`, `web/ui/package.json` (the
+`name` fields), every live consumer (`web/inspector`, both templates' `web/`,
+`web/{bridge,ui}/src`), `.github/workflows/release.yml` (the publish job),
+`docs/RELEASING.md`, the skills, and the docs-site pages.
+
+**The problem.** D-172 published the packages under the **`@dockyard` scope**.
+The v1.4.0 release built binaries + a GitHub Release successfully, but the
+`npm-publish` job **404'd**: `@dockyard` is an npm **org** the maintainer
+cannot create, and npm masks an unauthorized scoped publish as a 404. (The
+`NPM_TOKEN` secret had also expired — the other half of the failure.) So the
+packages never published.
+
+**The decision.** Rename both to **unscoped** names — `@dockyard/bridge` →
+`dockyard-bridge`, `@dockyard/ui` → `dockyard-ui` — which publish under the
+maintainer's personal npm account (`hurtener`) with **no scope/org to own**.
+`@dockyard/inspector` is **not** renamed: the inspector frontend is never
+published to npm (it is bundled into the `dockyard` binary), so it keeps its
+internal `@dockyard/inspector` workspace name.
+
+**Verified before committing to the rename (the friction that prompted the
+check):** the names `dockyard-bridge` / `dockyard-ui` are free on npm, and the
+personal token authenticates as `hurtener` — any authenticated account can
+create a new unscoped public package with a free name, so the publish will
+succeed. (A scoped `@hurtener/...` personal-scope name would also have worked
+since `hurtener` is the username; unscoped was chosen for simplicity and to be
+robust against the username/scope-ownership class of failure entirely.)
+
+**Why not keep `@dockyard` and create the org.** The maintainer cannot create
+the `@dockyard` org, and an org publish needs the token's account to own the
+scope. Unscoped sidesteps scope ownership completely — the exact failure mode
+that blocked v1.4.0.
+
+**History is not rewritten.** D-172 keeps its `@dockyard/*` names as the record
+of what was decided then; the past phase/wave plans, the v1.0.0 release
+transcript, and the 1.3.0/1.4.0 `CHANGELOG` sections keep the old names too.
+This entry is the supersession of record. The v1.4.0 npm publish that 404'd is
+simply abandoned (nothing was published under `@dockyard`); v1.5 is the first
+successful npm release, under the unscoped names.
+
+**A downstream App's imports change** from `@dockyard/bridge` / `@dockyard/ui`
+to `dockyard-bridge` / `dockyard-ui`; the templates and the
+`attach-a-ui-resource` skill are updated in the same PR (§19). Because nothing
+was ever published under `@dockyard`, there is no npm deprecation/redirect to
+manage.
+
+---
+
+## D-175 — `require_spec_compliance` is enforced (it gates the spec-compliance check), closing a declared-but-dead quality gate
+
+**Date:** 2026-05-29
+**Status:** Settled (v1.5 wave A). Same enforcement class as D-168.
+**Where it lives:** `internal/validate/checks.go` (`checkSpecCompliance` early-returns
+when the flag is off); `internal/testgate` inherits it (the spec-compliance
+category delegates to `validate.Run`).
+
+**The finding (a wiring-audit sweep, the item-1 / D-168 class).** A framework-wide
+audit for "declared-but-never-wired" friction found that the
+`quality.require_spec_compliance` manifest flag was **inert**: the scaffold and both
+templates set it `true` and the `quality:` block is documented "enforced by
+`dockyard validate`" (RFC §9.4), but **no code read `Quality.RequireSpecCompliance`** —
+`checkSpecCompliance` ran *unconditionally*. So toggling the flag changed nothing in
+either direction: `false` did not opt out, `true` did nothing extra. This is exactly
+the gate-that-lies class D-168 fixed for `require_fixtures` / `require_contract_tests`.
+
+**The decision.** Enforce, do not remove (D-168's reasoning). `checkSpecCompliance`
+now early-returns when `Quality.RequireSpecCompliance` is false — making the flag an
+opt-out gate consistent with the other six `quality.*` gates (`checkUIStates` /
+`checkFixtures` / `checkContractTests` each respect their flag). `dockyard test`'s
+spec-compliance category delegates to `validate.Run`, so the gate propagates there
+for free.
+
+**Behaviour.** All eight in-repo manifests (scaffold, both templates, all five
+examples, the loader testdata) already set `require_spec_compliance: true`, so no real
+project changes behaviour. A manifest that omits the flag (zero value) now opts out of
+the spec-compliance check — matching the other gates, which also default off and are
+opted into by the scaffold. A project that sets it `false` genuinely opts out where
+before the check fired regardless. Proven by a gate-bites test
+(`TestRun_SpecComplianceGateRespectsFlag`): a withheld vendored spec is a `CheckSpec`
+Blocker with the flag on, and skipped with it off.
+
+**The audit's other findings (recorded, not all fixed here).** The same sweep
+confirmed the framework's core wiring is sound (every `runtime/apps.App` field reaches
+the wire; every CLI flag and `scaffold.Options` field is consumed). It also fixed two
+bridge wiring gaps in this wave (see CHANGELOG): `ui/resource-teardown` was documented
+as tearing the View down via `BridgeShell.close()` but was never dispatched; and the
+negotiated `protocolVersion` / `hostInfo` from `ui/initialize` were discarded despite
+`protocol.ts` promising retention. Deferred to `docs/V2-BACKLOG.md` (enhancements, not
+broken wires): populating `obs ToolCallPayload.ContractOK` (the doc allows nil =
+"not checked"; wiring it needs a `Recorder.ToolCall` API change across three packages),
+and surfacing `InputPrompt.Schema` to the requestor (no V1 wire surface carries it).
+The reserved `obs/v1` kinds `app.user_action` / `host.compat` / `app.bridge` have no
+V1 server-side producer by design ("Dockyard sees only its half of the iframe bridge")
+— reserved contract surfaces, left as-is.

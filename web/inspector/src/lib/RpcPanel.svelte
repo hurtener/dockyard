@@ -6,7 +6,7 @@
    * as a web/ui `DataTable`, method-filterable, with the selected message's
    * payload in a web/ui `JsonInspector`. Routes through the four-state
    * `PageState` — a real empty state, an error state with retry. Composes
-   * `@dockyard/ui` only.
+   * `dockyard-ui` only.
    */
   import {
     PageState,
@@ -17,7 +17,7 @@
     type PageStateValue,
     type Column,
     type Row,
-  } from '@dockyard/ui';
+  } from 'dockyard-ui';
   import type { RpcEntry } from './rpc.js';
   import { methodsIn, filterByMethod } from './rpc.js';
 

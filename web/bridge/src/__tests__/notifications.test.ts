@@ -203,3 +203,46 @@ describe('BridgeShell — notification fan-out end-to-end', () => {
     expect(seen).toEqual([]);
   });
 });
+
+describe('BridgeShell — handshake retention + resource teardown (wiring audit)', () => {
+  let harnesses: HostHarness[] = [];
+  afterEach(() => {
+    harnesses.forEach((h) => h.close());
+    harnesses = [];
+  });
+  function harness() {
+    const h = new HostHarness({ hostContext: { theme: 'light' } });
+    harnesses.push(h);
+    return h;
+  }
+
+  it('retains the negotiated protocolVersion and hostInfo from ui/initialize', async () => {
+    const h = harness();
+    const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+    await bridge.connect();
+    // protocol.ts promises the negotiated value is retained for forward-compat;
+    // it was previously discarded.
+    expect(bridge.protocolVersion).toBe('2026-01-26');
+    expect(get(bridge.hostInfo)).toEqual({ name: 'test-host', version: '0.0.0' });
+  });
+
+  it('ui/resource-teardown closes the bridge (drops subscribers, clears ready)', async () => {
+    const h = harness();
+    const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+    await bridge.connect();
+    expect(get(bridge.ready)).toBe(true);
+
+    const seen: unknown[] = [];
+    bridge.onSizeChanged((s) => seen.push(s));
+
+    // The host tears the resource down — the View must release its listeners.
+    h.notify(HostNotification.resourceTeardown, {});
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(get(bridge.ready)).toBe(false);
+    // A notification after teardown reaches no subscriber.
+    h.notify(HostNotification.sizeChanged, { width: 1, height: 1 });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen).toEqual([]);
+  });
+});

@@ -1,7 +1,7 @@
 {
   "name": "@dockyard/inspector",
   "version": "0.1.0",
-  "description": "Dockyard inspector frontend — the local test/debug surface; the host half of the ui/ bridge and the obs/v1 stream view, composing the @dockyard/ui design system.",
+  "description": "Dockyard inspector frontend — the local test/debug surface; the host half of the ui/ bridge and the obs/v1 stream view, composing the dockyard-ui design system.",
   "license": "Apache-2.0",
   "type": "module",
   "private": true,
@@ -15,8 +15,8 @@
     "gate": "npm run check && npm run coverage"
   },
   "dependencies": {
-    "@dockyard/bridge": "file:../bridge",
-    "@dockyard/ui": "file:../ui"
+    "dockyard-bridge": "file:../bridge",
+    "dockyard-ui": "file:../ui"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",

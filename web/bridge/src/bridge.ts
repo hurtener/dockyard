@@ -25,6 +25,7 @@ import type { ContractInput, ContractOutput, ToolContract } from './contracts.js
 import { HostContextState, type HostContextStores, type StyleTarget } from './host-context.js';
 import { NotificationRouter, type Unsubscribe } from './notifications.js';
 import {
+  HostNotification,
   PROTOCOL_VERSION,
   ViewMethod,
   ViewNotification,
@@ -93,7 +94,7 @@ export class DisplayModeUnavailableError extends Error {
   }
 }
 
-const DEFAULT_CLIENT = { name: '@dockyard/bridge', version: '0.1.0' };
+const DEFAULT_CLIENT = { name: 'dockyard-bridge', version: '0.1.0' };
 
 /**
  * Builds the default host peer — a sink that posts to `window.parent` with
@@ -135,6 +136,13 @@ export class BridgeShell {
 
   private readonly _ready: Writable<boolean> = writable(false);
   private readonly _hostCapabilities: Writable<HostCapabilities> = writable({});
+  // The host identity and the negotiated protocol version from the
+  // `ui/initialize` result. The View advertises PROTOCOL_VERSION; the host's
+  // value is retained for forward-compatibility (protocol.ts) so an App can
+  // read who it is talking to and which revision was negotiated.
+  private readonly _hostInfo: Writable<{ name: string; version: string } | undefined> =
+    writable(undefined);
+  private negotiatedProtocolVersion = '';
   private connectPromise: Promise<void> | undefined;
   private initialized = false;
   private closed = false;
@@ -209,6 +217,13 @@ export class BridgeShell {
       );
       this.hostCtx.set(result.hostContext ?? {});
       this._hostCapabilities.set(result.hostCapabilities ?? {});
+      // Retain the negotiated protocol version + host identity (protocol.ts:
+      // "the negotiated value from the host's ui/initialize result is retained
+      // for forward-compatibility"). Both were previously discarded.
+      if (typeof result.protocolVersion === 'string' && result.protocolVersion !== '') {
+        this.negotiatedProtocolVersion = result.protocolVersion;
+      }
+      this._hostInfo.set(result.hostInfo);
       // The View must wait for `ui/notifications/initialized` before assuming
       // readiness (brief 01 §2.4).
       await initializedReceived;
@@ -249,6 +264,20 @@ export class BridgeShell {
   /** The host capabilities advertised in the handshake result. */
   get hostCapabilities(): Readable<HostCapabilities> {
     return this._hostCapabilities;
+  }
+
+  /** The host identity from the `ui/initialize` result, or undefined. */
+  get hostInfo(): Readable<{ name: string; version: string } | undefined> {
+    return this._hostInfo;
+  }
+
+  /**
+   * The protocol version the host negotiated in `ui/initialize` (retained for
+   * forward-compatibility), or "" before the handshake completes. The View
+   * advertises {@link PROTOCOL_VERSION}; this is what the host answered with.
+   */
+  get protocolVersion(): string {
+    return this.negotiatedProtocolVersion;
   }
 
   /* --- host → View notification subscriptions ------------------------- */
@@ -443,6 +472,13 @@ export class BridgeShell {
       typeof params === 'object'
     ) {
       this.hostCtx.patch(params as HostContextChangedParams);
+    }
+    // `ui/resource-teardown` tears the bridge down (drop subscribers, close the
+    // transport, set ready=false). The host sends it when the App's resource is
+    // being torn down; the View must release its listeners rather than leak
+    // them. close() is idempotent, so a duplicate teardown is safe.
+    if (method === HostNotification.resourceTeardown) {
+      this.close();
     }
   }
 }

@@ -55,7 +55,7 @@ type Options struct {
 	DockyardReplace string
 	// DockyardWebPath is the web/ sibling of DockyardReplace — an absolute path
 	// to the Dockyard checkout's web/ directory. Templates that depend on the
-	// in-repo @dockyard/bridge and @dockyard/ui packages substitute it into
+	// in-repo dockyard-bridge and dockyard-ui packages substitute it into
 	// their package.json `file:` dependencies so a scaffolded project can
 	// `npm install` before the packages are published to npm. Empty leaves
 	// published-version fallbacks in place (post-publish workflow).

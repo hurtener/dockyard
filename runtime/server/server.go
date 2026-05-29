@@ -156,6 +156,13 @@ type Server struct {
 	resourceTemplates []string      // registered resource-template URI templates, in registration order
 	prompts           []string      // registered prompt names, in registration order (Phase 28)
 
+	// appLinks maps an App's programmatic name to its ui:// link, recorded by
+	// runtime/apps.Register so the runtime/tool builder can resolve a tool's
+	// .UI(name) to the App's URI and emit _meta.ui (RFC §7.1; D-173). Like the
+	// slices above it is populated during single-threaded registration. nil
+	// until the first RegisterAppLink.
+	appLinks map[string]AppLink
+
 	// tasksMount routes tasks/* JSON-RPC frames into the attached Tasks engine
 	// ahead of the SDK server (RFC §8.2). It is nil unless a Tasks engine was
 	// attached via Options.Tasks or WithTasks; a nil mount means the server is
@@ -265,6 +272,44 @@ func (s *Server) Recorder() *obs.Recorder { return s.rec }
 
 // Info returns the server identity.
 func (s *Server) Info() Info { return s.info }
+
+// AppLink is the server-recorded link from an App's programmatic name to its
+// ui:// resource. runtime/apps.Register records one per App; the runtime/tool
+// builder reads it to resolve a tool's .UI(name) to the App's URI and emit
+// _meta.ui (RFC §7.1; D-173). It is a small, protocol-agnostic value — the
+// server stores no Apps wire types (P3).
+type AppLink struct {
+	// URI is the App's ui:// resource URI.
+	URI string
+}
+
+// RegisterAppLink records the link from an App's name to its ui:// resource.
+// runtime/apps.Register calls it after the App's resource is installed, so a
+// tool registered later can resolve .UI(name) → URI. It returns a typed error
+// on a duplicate name — two Apps registered under one name is a programming
+// error caught at registration, not a silent overwrite. Like tool/resource
+// registration it is called during single-threaded setup.
+func (s *Server) RegisterAppLink(name string, link AppLink) error {
+	if name == "" {
+		return errors.New("dockyard/runtime/server: RegisterAppLink with empty name")
+	}
+	if _, dup := s.appLinks[name]; dup {
+		return fmt.Errorf("dockyard/runtime/server: App name %q already registered", name)
+	}
+	if s.appLinks == nil {
+		s.appLinks = make(map[string]AppLink)
+	}
+	s.appLinks[name] = link
+	return nil
+}
+
+// AppLinkByName returns the link recorded for an App name, or ok=false when no
+// App was registered under that name. The runtime/tool builder uses it to wire
+// a tool's _meta.ui and to fail loud when .UI(name) references no App.
+func (s *Server) AppLinkByName(name string) (AppLink, bool) {
+	link, ok := s.appLinks[name]
+	return link, ok
+}
 
 // Tools returns the names of registered tools, in registration order. The
 // returned slice is a copy and safe for the caller to retain.

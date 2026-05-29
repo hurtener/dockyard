@@ -101,7 +101,7 @@ the canonical setup.
 
 ```svelte
 <script lang="ts">
-  import { hostContext, onToolResult } from '@dockyard/bridge';
+  import { hostContext, onToolResult } from 'dockyard-bridge';
   import Chart from './widgets/Chart.svelte';
   import Table from './widgets/Table.svelte';
 

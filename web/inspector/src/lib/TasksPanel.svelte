@@ -6,14 +6,14 @@
    * round-trips (RFC §12, §8.6) as a web/ui `Timeline`. The lifecycle is
    * folded from the `obs/v1` `task.progress` event stream the inspector
    * already consumes (P2 — `tasks.ts`). Routes through the four-state
-   * `PageState`; composes only `@dockyard/ui`.
+   * `PageState`; composes only `dockyard-ui`.
    */
   import {
     PageState,
     Timeline,
     StatusChip,
     type PageStateValue,
-  } from '@dockyard/ui';
+  } from 'dockyard-ui';
   import type { ObsEvent } from './obs.js';
   import {
     foldTasks,

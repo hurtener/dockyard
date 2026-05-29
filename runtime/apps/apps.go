@@ -218,6 +218,13 @@ func Register(s *server.Server, app App) error {
 	if err := s.AddResource(def, read); err != nil {
 		return fmt.Errorf("dockyard/runtime/apps: register App %q: %w", app.URI, err)
 	}
+	// Record the name→URI link so a tool registered later can resolve
+	// .UI(app.Name) to this App's URI and emit _meta.ui (RFC §7.1; D-173).
+	// This is what makes tool.New[...].UI(name).Register(srv) link the tool to
+	// its App without the caller hand-building _meta.
+	if err := s.RegisterAppLink(app.Name, server.AppLink{URI: app.URI}); err != nil {
+		return fmt.Errorf("dockyard/runtime/apps: register App %q: %w", app.URI, err)
+	}
 	return nil
 }
 

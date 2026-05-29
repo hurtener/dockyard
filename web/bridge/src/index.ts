@@ -1,11 +1,11 @@
 /**
- * @dockyard/bridge — the Svelte bridge shell.
+ * dockyard-bridge — the Svelte bridge shell.
  *
  * The View side of the MCP Apps `ui/` postMessage JSON-RPC dialect (RFC §7.2,
  * §7.3). An MCP App author imports `createBridge`, `await`s `connect()`, and
  * binds the resulting Svelte stores — never hand-writing protocol code.
  *
- *   import { createBridge } from '@dockyard/bridge';
+ *   import { createBridge } from 'dockyard-bridge';
  *   const bridge = createBridge({ displayModes: ['inline', 'fullscreen'] });
  *   await bridge.connect();
  *   bridge.onToolResult<MyOutput>((r) => render(r.structuredContent));

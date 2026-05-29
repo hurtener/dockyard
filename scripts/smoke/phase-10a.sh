@@ -20,11 +20,11 @@ else
   fail "web/ui package or a config file is missing"
 fi
 
-# 2. The package is named @dockyard/ui and carries the `gate` script.
+# 2. The package is named dockyard-ui and carries the `gate` script.
 if [ -f "$UI/package.json" ] \
-   && grep -q '"@dockyard/ui"' "$UI/package.json" \
+   && grep -q '"dockyard-ui"' "$UI/package.json" \
    && grep -q '"gate"' "$UI/package.json"; then
-  ok "web/ui is @dockyard/ui with a gate script"
+  ok "web/ui is dockyard-ui with a gate script"
 else
   fail "web/ui package.json missing name or gate script"
 fi

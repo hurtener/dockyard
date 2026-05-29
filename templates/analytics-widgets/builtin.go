@@ -98,7 +98,7 @@ func substitutionsFor(opts scaffold.Options) []scaffold.Substitution {
 	}
 	// Web sibling of the pre-publish go.mod replace: when --dockyard-web-path
 	// is set (or derived from --dockyard-path), the template's web/package.json
-	// resolves @dockyard/bridge and @dockyard/ui to absolute file:// paths into
+	// resolves dockyard-bridge and dockyard-ui to absolute file:// paths into
 	// the local checkout. Otherwise the scaffold pins the published packages by
 	// a caret range derived from the CLI version (v1.3 wave B — D-172), so a
 	// scaffold with no --dockyard-path resolves them from npm with no checkout.

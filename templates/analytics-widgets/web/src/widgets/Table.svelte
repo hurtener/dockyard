@@ -7,8 +7,8 @@
   internals; the empty fixture is handled upstream by PageState.
 -->
 <script lang="ts">
-  import { DataTable } from '@dockyard/ui';
-  import type { Column, Row } from '@dockyard/ui';
+  import { DataTable } from 'dockyard-ui';
+  import type { Column, Row } from 'dockyard-ui';
 
   type TablePayload = {
     kind: 'table';

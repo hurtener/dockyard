@@ -107,7 +107,7 @@ by `Kind`. Sketch:
 
 ```svelte
 <script lang="ts">
-  import { onToolResult } from '@dockyard/bridge';
+  import { onToolResult } from 'dockyard-bridge';
   import Chart from './widgets/Chart.svelte';
   import Table from './widgets/Table.svelte';
   import MetricCardWidget from './widgets/MetricCardWidget.svelte';

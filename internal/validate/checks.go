@@ -137,6 +137,17 @@ var vendoredSpecs = []string{
 // validated against an absent spec is validated against nothing) and the
 // Tasks-construct cross-check the manifest cannot localise.
 func checkSpecCompliance(rp *reporter, projectDir string, lm loadedManifest) {
+	// The require_spec_compliance quality gate is opt-out, exactly like the
+	// other quality.* gates (checkUIStates / checkFixtures / checkContractTests
+	// each respect their flag). The scaffold sets it true, so a fresh project's
+	// behaviour is unchanged; a project that sets it false opts out of the
+	// spec-compliance check rather than the flag being a silent no-op (D-175;
+	// the same enforcement class as D-168). Default-zero (a manifest with no
+	// quality block) leaves it false — a bare manifest opts out, matching the
+	// other gates which also default off.
+	if !lm.m.Quality.RequireSpecCompliance {
+		return
+	}
 	// The vendored specs live in the Dockyard repo, not a scaffolded project;
 	// only flag their absence when validating from within the Dockyard tree.
 	for _, rel := range vendoredSpecs {

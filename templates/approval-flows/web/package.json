@@ -9,8 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@dockyard/bridge": "__DOCKYARD_BRIDGE_SPEC__",
-    "@dockyard/ui": "__DOCKYARD_UI_SPEC__"
+    "dockyard-bridge": "__DOCKYARD_BRIDGE_SPEC__",
+    "dockyard-ui": "__DOCKYARD_UI_SPEC__"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",

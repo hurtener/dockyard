@@ -6,7 +6,7 @@
    * selected event's full payload in a web/ui `JsonInspector`. The panel routes
    * through the four-state `PageState` (CLAUDE.md §20): a real empty state
    * ("No events yet — call a tool to see traffic") and an error state with a
-   * working retry. Every component here is composed from `@dockyard/ui` — none
+   * working retry. Every component here is composed from `dockyard-ui` — none
    * is re-implemented.
    */
   import {
@@ -16,7 +16,7 @@
     FilterBar,
     type PageStateValue,
     type TimelineEvent,
-  } from '@dockyard/ui';
+  } from 'dockyard-ui';
   import type { ObsEvent } from './obs.js';
   import { toTimelineEvent, kindsIn, filterByKind } from './timeline.js';
 

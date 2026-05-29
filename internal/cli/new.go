@@ -58,7 +58,7 @@ optional product-pattern showcases; pass --template <name> to scaffold one.`,
 			}
 			// When --dockyard-path is set, default the web sibling to
 			// <dockyard-path>/web — every template that needs the in-repo
-			// @dockyard/bridge / @dockyard/ui packages then resolves them.
+			// dockyard-bridge / dockyard-ui packages then resolves them.
 			// Pre-publish only: a released Dockyard leaves both empty.
 			resolvedWeb := ""
 			if resolvedDockyard != "" {

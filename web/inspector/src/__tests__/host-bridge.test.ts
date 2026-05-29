@@ -2,12 +2,12 @@
  * host-bridge.test.ts — the host half of the ui/ bridge.
  *
  * The binding RFC §12 acceptance criterion is exercised end-to-end here: the
- * real @dockyard/bridge View half (BridgeShell) completes its ui/initialize
+ * real dockyard-bridge View half (BridgeShell) completes its ui/initialize
  * handshake against this phase's HostBridge over a MessageChannel — no mock at
  * the protocol seam.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { createBridge, type MessageSink } from '@dockyard/bridge';
+import { createBridge, type MessageSink } from 'dockyard-bridge';
 import { HostBridge, defaultHostContext } from '../host/host-bridge.js';
 
 /** A MessageChannel-backed source the HostBridge / BridgeShell can both drive. */

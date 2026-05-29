@@ -237,7 +237,7 @@ export async function invokeTool(
 
 /**
  * The shape the bridge posts as an elicitation-response notification —
- * mirrors `@dockyard/bridge`'s `ElicitationResponseParams`. The inspector
+ * mirrors `dockyard-bridge`'s `ElicitationResponseParams`. The inspector
  * frontend forwards this verbatim to its backend; the backend translates
  * it into a raw `tasks/result` JSON-RPC frame against the attached
  * server.

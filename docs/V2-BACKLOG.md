@@ -237,6 +237,48 @@ recorded order in the decisions log. Each item carries:
   suite covers the new channel; degradation is clean when a host does not
   forward progress.
 
+### Surface a task's `input_required` schema to the requestor
+
+- **Origin.** v1.5 wave A wiring audit (2026-05-29). Related: D-134 (the
+  elicitation-response channel), D-175.
+- **What was deferred + why.** `runtime/tasks.InputPrompt.Schema` lets a
+  handler attach a JSON Schema to an `input_required` elicitation so the
+  requestor can render a typed form. The engine records it and exposes it via
+  `Engine.PendingInput`, but **no V1 wire/transport surface pushes it to the
+  requestor** — only the prompt `Message` reaches a poller (as the task
+  `StatusMessage`). Building the surface (a `tasks/get`-borne elicitation
+  requirement, or an inspector `GET pending-input` endpoint the App-frame
+  renders) is a genuine protocol/host-surface addition, not a one-line wire,
+  so v1.5 corrected the field's doc to stop over-promising rather than build
+  it. The `Declined` reply path is fully wired; only the prompt **schema**
+  delivery is missing.
+- **Definition of done.** A host surface carries `InputPrompt.Schema` to the
+  requestor (`internal/protocolcodec` behind the seam, P3); the inspector
+  renders a schema-driven elicitation form through `dockyard inspect`; an
+  `approval-flows`-shaped App round-trips a typed `input_required` reply; the
+  `InputPrompt.Schema` doc drops the "no V1 surface" caveat.
+
+### Populate `obs/v1` `ToolCallPayload.ContractOK`
+
+- **Origin.** v1.5 wave A wiring audit (2026-05-29). Related: P1 (contract-
+  first), the `obs/v1` contract.
+- **What was deferred + why.** `ToolCallPayload.ContractOK *bool` is documented
+  to report whether a tool's input/output validated against the generated
+  contract schema (P1); `nil` means "not checked". The contract-first handler
+  runtime *does* validate input at the catalog edge, but the validation
+  outcome is never threaded into the `obs/v1` `tool.call` event — so
+  `ContractOK` is always `nil` ("not checked") and the OTel
+  `dockyard.obs.contract_ok` attribute is never emitted. This is within the
+  documented contract (`nil` is valid) — an unfulfilled opportunity, not a
+  broken promise — and wiring it cleanly needs a `Recorder.ToolCall` signature
+  change rippling through `runtime/server` and `runtime/tool`, larger than a
+  friction fix. Deferred rather than churned into the v1.5 wiring PR.
+- **Definition of done.** The handler runtime surfaces its input/output
+  contract-validation result to the `tool.call` end event; `Recorder.ToolCall`
+  carries it; `ContractOK` is non-nil on a real `tool.call` event and the OTel
+  adapter emits the attribute; a test asserts a contract-valid and a
+  contract-invalid call set it true/false.
+
 ---
 
 ## CLI / DX

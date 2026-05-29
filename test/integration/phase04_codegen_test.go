@@ -17,6 +17,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/hurtener/dockyard/internal/codegen"
+	"github.com/hurtener/dockyard/runtime/apps"
 	"github.com/hurtener/dockyard/runtime/server"
 	"github.com/hurtener/dockyard/runtime/tool"
 )
@@ -55,6 +56,16 @@ func TestPhase04_CodegenBuilderServerWiring(t *testing.T) {
 	srv, err := server.New(server.Info{Name: "order-app", Version: "1.0.0"}, nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
+	}
+
+	// The tool links the "order_card" App, so register it first — the builder
+	// resolves the name to its ui:// URI and emits _meta.ui at Register (D-173).
+	if err := apps.Register(srv, apps.App{
+		URI:  "ui://order-app/order_card",
+		Name: "order_card",
+		HTML: []byte("<html><body>order</body></html>"),
+	}); err != nil {
+		t.Fatalf("apps.Register: %v", err)
 	}
 
 	if err := tool.New[orderInput, orderOutput]("get_order").

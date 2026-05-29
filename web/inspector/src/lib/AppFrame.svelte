@@ -13,7 +13,7 @@
     ErrorState,
     StatusChip,
     type PageStateValue,
-  } from '@dockyard/ui';
+  } from 'dockyard-ui';
   import {
     mountAppFrame,
     APP_SANDBOX,
@@ -29,7 +29,7 @@
     HostCapabilities,
     HostContext,
     TaskProgressParams,
-  } from '@dockyard/bridge';
+  } from 'dockyard-bridge';
 
   interface Props {
     /** The App's HTML document — set as the iframe `srcdoc`. */
