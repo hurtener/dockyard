@@ -187,6 +187,33 @@ recorded order in the decisions log. Each item carries:
   the conformance suite verifies signed-origin derivation continues to
   hold for every shipped host profile.
 
+### Apps `media-src` / `data:` / `blob:` declaration
+
+- **Origin.** Downstream feedback (first external MCP-Apps builder, an
+  image/video App). Surfaced that the `_meta.ui.csp` model
+  (`internal/protocolcodec/apps.go`) declares **domain allowlists**
+  (`connect`/`resource`/`frame`/`base-uri`) but offers no way to declare
+  intent for inline media — `data:` thumbnails, `blob:` video.
+- **What was deferred + why.** Dockyard's manifest models the CSP as
+  domain allowlists; the **literal CSP string** (including whether `data:`
+  / `blob:` are permitted for `img-src` / `media-src`) is **host-built**,
+  per the MCP Apps spec, and Dockyard does not model it. For a single-file
+  bundle that inlines assets as `data:` URIs — or a media App that streams
+  a `blob:` — there is no manifest knob to declare that the App needs
+  `data:`/`blob:` media, so a builder must "design to degrade" and cannot
+  state the requirement. A first-class declaration is a genuine model
+  addition that needs its own design (a new `csp` sub-shape vs a
+  host-profile derivation; how a host that refuses `data:`/`blob:` is
+  surfaced) and was not on any V1 critical path.
+- **Definition of done.** The manifest's `csp` block (or an explicit
+  `media` declaration) lets a UI-bearing App declare `data:` / `blob:` /
+  per-origin `media-src` / `img-src` intent; `internal/protocolcodec`
+  carries the shape behind the seam (P3); the `attach-a-ui-resource` skill
+  documents it (dropping the "design to degrade" caveat); a worked
+  media/image example exercises it end to end through `dockyard inspect`;
+  the conformance suite asserts the host-built policy honours the
+  declaration.
+
 ---
 
 ## CLI / DX
@@ -254,6 +281,54 @@ recorded order in the decisions log. Each item carries:
   operator-initiated tool selection via a configured LLM; the P4
   framing remains intact (the inspector is still test-only,
   dev-mode-gated, localhost-bound).
+
+### Publish `@dockyard/bridge` + `@dockyard/ui` to npm
+
+- **Origin.** Downstream feedback (first external MCP-Apps builder).
+  Called out as the gap "most likely to bite a new MCP-Apps builder."
+  Related: D-080 (the pre-publish `replace` workflow).
+- **What was deferred + why.** The Dockyard **Go module is published**
+  (`go install …@vX.Y.Z` works with no checkout), but the **frontend
+  packages `@dockyard/bridge` and `@dockyard/ui` are workspace packages**
+  (`main: ./src/index.ts`), not on npm. So a UI project's `web/` can only
+  resolve them from a **local Dockyard checkout** via `--dockyard-path`; a
+  template scaffold without it (and without the checkout) fails at
+  `npm install` with no obvious cause. The Go/npm asymmetry is invisible —
+  the Go half "just works" from the proxy while the frontend half silently
+  requires the checkout. Publishing the two packages (build/versioning/
+  release-pipeline work for the npm side, mirroring the Go module's
+  release) was not on a V1 critical path. **Interim mitigation shipped:**
+  the `scaffold-a-server` and `attach-a-ui-resource` skills now call the
+  requirement out loudly (the `--dockyard-path`-for-UI note).
+- **Near-term candidate (maintainer has an npm token).** As of 2026-05-29
+  the maintainer has an npm publish token and floated wiring an npm-publish
+  job into the release CI on the next tagged version. Grounding from the
+  current package shapes: the two packages have **no interdependency**
+  (simplifies); the templates' `web/package.json` already reference them
+  through a substitution token (`__DOCKYARD_BRIDGE_SPEC__` /
+  `__DOCKYARD_UI_SPEC__`), so flipping the consuming side to a published
+  version is contained. The **publish mechanism** is a genuine quick win
+  (a tag-triggered `npm publish --access public` job + `publishConfig`),
+  but two things must be right first: (1) the packages currently publish
+  **raw `./src/index.ts` / `.svelte` source** with no build and no `svelte`
+  export condition — a downstream Svelte/Vite consumer needs either a
+  proper build (`@sveltejs/package` for ui, `tsup` for bridge) or the
+  correct `exports` conditions; (2) the **version policy** (both are
+  `0.1.0`; the Go module is `1.2.0`) — pin them to the repo version and
+  bump in the release-prep step. First publish is semi-irreversible, so
+  verify with `npm pack` + an install-into-a-fresh-scaffold smoke before
+  enabling auto-publish.
+- **Definition of done.** `@dockyard/bridge` and `@dockyard/ui` are
+  published to npm under a versioning + release flow that ages with the Go
+  module's tags; their `exports` (or a build) make them consumable by a
+  downstream Svelte/Vite build; the release workflow publishes them on a
+  tag push using the `NPM_TOKEN` secret, gated behind an `npm pack` /
+  install verification; the scaffold's `web/package.json` token resolves to
+  the published versions (no `file:` workspace path) when `--dockyard-path`
+  is omitted; a `--template` scaffold's `web/` `npm install` succeeds with
+  **no** `--dockyard-path` and no local checkout; the skills drop the
+  "`--dockyard-path` required for UI builds" caveat in the same PR (§19);
+  `--dockyard-path` reverts to a pure build-from-source convenience.
 
 ---
 

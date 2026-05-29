@@ -5416,3 +5416,62 @@ subject fold into Changed as a safe catch-all. The `git log --no-merges`
 invocation keeps merge commits out of the catch-all. This is tunable in
 one place (the pure `classify` function) if a future release wants a
 fuller list.
+
+---
+
+## D-168 — the `require_fixtures` / `require_contract_tests` manifest gates must be enforced (they are currently declared-but-dead)
+
+**Date:** 2026-05-29
+**Status:** Settled (direction); implementation tracked in
+`docs/plans/v1.3-wave-A-dx-feedback-fixes.md`.
+**Where it lives (today):** `internal/manifest/manifest.go` (the
+`RequireFixtures` / `RequireContractTests` fields),
+`internal/scaffold/templates.go` (the blank scaffold sets both `true`),
+`skills/attach-a-ui-resource/SKILL.md` (documents validate failing on a
+missing fixture). **No consumer in `internal/validate` or
+`internal/testgate`.**
+
+**The finding.** Downstream feedback (the first external Dockyard user)
+reported that a no-UI server with `require_fixtures: true` and
+`require_contract_tests: true` passed `dockyard validate` / `dockyard
+test` green **with no fixtures present and after the scaffold's
+`greet_test.go` was deleted**. Verified: both fields exist on the
+manifest and the blank scaffold sets them `true`, but **nothing in the
+validate or test gates reads either field** — they are advertised quality
+gates that never bite. The `attach-a-ui-resource` skill even documents
+`dockyard validate` failing on a missing fixture, so the **docs already
+promise the behaviour the code does not deliver**. This is a correctness
+gap, not a design open question: a gate a user turns on must enforce, or
+not exist.
+
+**The decision.** Enforce, do not remove. The two flags are wired into
+the quality gates:
+
+- `require_fixtures: true` — `dockyard validate` reports a **Blocker** for
+  any tool (or, per the manifest's existing semantics, any UI-bearing
+  tool) that lacks its fixture set; `dockyard test`'s contract category
+  fails likewise.
+- `require_contract_tests: true` — the gate asserts the project carries a
+  contract test for the declared tools; a project that has deleted /
+  omitted them is a Blocker.
+
+**Why enforce, not remove.** The flags were a deliberate, documented part
+of the contract-first quality story (the scaffold opts in by default and
+the UI skill documents the failure mode). Removing them would walk back an
+advertised guarantee and quietly weaken the "gates that bite" ethos that
+the same downstream review praised. The honest fix is to make the code
+match the long-standing documented intent.
+
+**Behaviour-change note (semver).** Enforcing a previously-dead gate can
+turn a project that was green red (a project that legitimately had no
+fixtures while the gate was a no-op). Per D-159 this is treated as a
+**bug fix** (the gate was always advertised as enforcing), but the
+implementing PR calls it out prominently in `CHANGELOG.md` and the release
+notes so an existing user is not surprised. The default-on scaffold has
+always shipped its fixtures + contract test, so a freshly scaffolded
+project stays green.
+
+**Considered and rejected.** (a) *Remove the flags* — walks back a
+documented guarantee; rejected. (b) *Leave as documentation-only* — a
+gate that never bites is worse than no gate (it manufactures false
+confidence); rejected.
