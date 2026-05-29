@@ -99,18 +99,10 @@ func substitutionsFor(opts scaffold.Options) []scaffold.Substitution {
 	// Web sibling of the pre-publish go.mod replace: when --dockyard-web-path
 	// is set (or derived from --dockyard-path), the template's web/package.json
 	// resolves @dockyard/bridge and @dockyard/ui to absolute file:// paths into
-	// the local checkout. Empty means the published-npm fallback (a released
-	// Dockyard will pin a version number; for now the template ships the
-	// `*` version which would only resolve once published).
-	bridgeSpec := "*"
-	uiSpec := "*"
-	if opts.DockyardWebPath != "" {
-		// `file:` paths in package.json may be absolute (npm honours them).
-		// Wrap in double-quote-friendly JSON-escaped form — the substitution
-		// happens inside a JSON string literal in the rendered package.json.
-		bridgeSpec = "file:" + opts.DockyardWebPath + "/bridge"
-		uiSpec = "file:" + opts.DockyardWebPath + "/ui"
-	}
+	// the local checkout. Otherwise the scaffold pins the published packages by
+	// a caret range derived from the CLI version (v1.3 wave B — D-172), so a
+	// scaffold with no --dockyard-path resolves them from npm with no checkout.
+	bridgeSpec, uiSpec := scaffold.WebDepSpecs(opts)
 	// IMPORTANT — substitution ORDER matters. The in-tree import-path
 	// rewrite must run BEFORE the __MODULE_PATH__ rewrite, because the
 	// in-tree path is the form the template author writes in real .go

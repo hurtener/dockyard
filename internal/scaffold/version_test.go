@@ -30,6 +30,35 @@ func TestRequireVersion(t *testing.T) {
 	}
 }
 
+// TestWebDepSpecs covers the v1.3 wave B consume-side resolution (item 4,
+// D-172): with --dockyard-path the specs are file: paths into the local
+// checkout; without it, the published @dockyard/* packages are pinned by a
+// caret derived from the CLI version (not "*").
+func TestWebDepSpecs(t *testing.T) {
+	t.Parallel()
+
+	// --dockyard-path set: file: specs into the local checkout's web siblings.
+	bridge, ui := WebDepSpecs(Options{DockyardWebPath: "/abs/dockyard/web"})
+	if bridge != "file:/abs/dockyard/web/bridge" {
+		t.Errorf("bridge file spec = %q", bridge)
+	}
+	if ui != "file:/abs/dockyard/web/ui" {
+		t.Errorf("ui file spec = %q", ui)
+	}
+
+	// No --dockyard-path, a real release version: a caret range, no "v".
+	bridge, ui = WebDepSpecs(Options{DockyardVersion: "v1.3.0"})
+	if bridge != "^1.3.0" || ui != "^1.3.0" {
+		t.Errorf("published specs = %q, %q, want ^1.3.0 both", bridge, ui)
+	}
+
+	// No version (a dev build with no --dockyard-path): falls back to "*".
+	bridge, ui = WebDepSpecs(Options{DockyardVersion: "0.0.0-dev"})
+	if bridge != "*" || ui != "*" {
+		t.Errorf("dev fallback specs = %q, %q, want * both", bridge, ui)
+	}
+}
+
 func TestGenerate_PinsReleaseVersion(t *testing.T) {
 	t.Parallel()
 	parent := t.TempDir()

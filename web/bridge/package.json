@@ -1,23 +1,34 @@
 {
   "name": "@dockyard/bridge",
-  "version": "0.1.0",
+  "version": "1.3.0",
   "description": "Dockyard Svelte bridge shell — the View side of the MCP Apps ui/ postMessage dialect.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "svelte": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "svelte": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
   },
   "files": [
     "src"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "check": "svelte-check --tsconfig ./tsconfig.json && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "gate": "npm run check && npm run coverage"
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",

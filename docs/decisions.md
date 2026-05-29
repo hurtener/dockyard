@@ -5653,3 +5653,89 @@ already degrades cleanly, and a flag would invite a per-host matrix the
 project forbids (§6). (c) *Emit a brand-new `obs/v1` event kind rather than
 reusing `task.progress`/`PhaseProgress`* — `PhaseProgress` was reserved for
 exactly this; a new kind would be a larger, unneeded contract change.
+
+---
+
+## D-172 — `@dockyard/bridge` + `@dockyard/ui` publish to npm as source with a `svelte` export condition (not a `dist` build), versioned to the repo
+
+**Date:** 2026-05-29
+**Status:** Settled (v1.3 wave B). Closes the V2-BACKLOG "Publish
+`@dockyard/bridge` + `@dockyard/ui` to npm" item; extends D-080 / D-170.
+**Where it lives:** `web/bridge/package.json`, `web/ui/package.json`
+(`publishConfig`, version, `svelte`/`exports` conditions, `peerDependencies`),
+`.github/workflows/release.yml` (the gated `npm-publish` job),
+`internal/scaffold/templates.go` (`WebDepSpecs`), the two
+`templates/*/builtin.go` (consume it), `docs/RELEASING.md` (the version-bump
+step), `skills/scaffold-a-server` + `skills/attach-a-ui-resource` (caveat
+dropped).
+
+**The gap.** The Dockyard Go module is published, but `@dockyard/bridge` and
+`@dockyard/ui` were workspace-only (`main: ./src/index.ts`, version `0.1.0`,
+no `publishConfig`), so every UI scaffold needed the hidden `--dockyard-path`
+flag + a local checkout — the top downstream-reported friction. The Go/npm
+asymmetry was invisible: the Go half "just works" from the proxy while the
+frontend half silently required a checkout.
+
+**The packaging decision — publish source, not a `dist` build.** The task
+left the choice open between a build (`@sveltejs/package` for `ui`,
+`tsup`/`tsc` for `bridge`) and the correct `exports` conditions. We ship
+**source** with a `svelte` export condition, because:
+
+- The `--dockyard-path` `file:` workflow **already proves the source shape
+  builds** — it points the template's `web/` at the source dirs and the
+  template's Vite + `@sveltejs/vite-plugin-svelte` build (the only Apps
+  toolchain Dockyard supports, D-006) compiles it. Publishing the same
+  source is therefore sufficient by construction; the only thing missing was
+  the npm presence.
+- A `dist` build would **break the internal consumer**: `web/inspector`
+  resolves `@dockyard/bridge` / `@dockyard/ui` via `file:` symlinks to
+  `./src/index.ts`, and the `make web` gate type-checks + builds it. Pointing
+  `exports` at a `dist/` that only exists after a build step would force a
+  build-before-anything ordering and a parallel resolution path for dev vs
+  publish — cost and risk for no consumer benefit.
+- Each package adds `"svelte": "./src/index.ts"` + an `exports` map with
+  `types` / `svelte` / `default` conditions (all pointing at the source
+  entry, so internal resolution is unchanged), `publishConfig.access:
+  "public"` (scoped packages default to restricted), `svelte` as a
+  `peerDependency`, and `files: ["src"]` (the published tarball is the
+  source tree). `bridge` is pure TS (no `.svelte`), so its `default`/`svelte`
+  entry transpiles via the consumer's esbuild; `ui`'s `.svelte` files are
+  compiled by the consumer's svelte plugin via the `svelte` condition.
+
+**The version policy.** Both bump off `0.1.0` to **track the repo / Go-module
+version** (set to `1.3.0` in this PR). The `npm-publish` job derives the
+version **from the git tag** at publish time (`npm version <tag>
+--no-git-tag-version --allow-same-version`), so the tag is the single source
+of truth (as for the Go build, D-170) and a missed release-prep bump cannot
+publish a mismatched version. `docs/RELEASING.md` records the release-prep
+package.json bump for honesty in-tree.
+
+**The publish job (gated + idempotent).** A tag-push-only `npm-publish` job
+in `release.yml`: `npm pack` both packages, scaffold a real `--template`
+project, install the **packed tarballs** into its `web/` and run the
+template's build (the acceptance gate — proves the published shape builds a
+downstream UI project), then `npm publish --access public` each, **skipping
+a version already on npm** (`npm view <pkg>@<v>`), so a re-run or tag re-push
+is safe. The token is referenced only as `secrets.NPM_TOKEN` →
+`NODE_AUTH_TOKEN`; the value is never in the workflow (§7). `workflow_dispatch`
+dry-runs never publish — a scoped public publish is semi-irreversible, so the
+first real publish is a maintainer-driven tag.
+
+**The consume side.** `scaffold.WebDepSpecs` resolves the
+`__DOCKYARD_BRIDGE_SPEC__` / `__DOCKYARD_UI_SPEC__` tokens to a caret
+`^X.Y.Z` (derived from the CLI's resolved version) when `--dockyard-path` is
+omitted, and to `file:` specs when it is set. So a `--template` scaffold's
+`web/` `npm install` resolves the packages from npm with no checkout;
+`--dockyard-path` reverts to a pure build-from-source convenience. The two
+UI templates share the one resolver, and the skills drop the
+"`--dockyard-path` required for UI builds" caveat (§19).
+
+**Considered and rejected.** (a) *`@sveltejs/package` + `tsup` dist builds* —
+the spec-blessed path for a standalone library, but it breaks the internal
+`file:` consumer and adds a build-ordering burden the source-publish path
+avoids; the `file:` workflow already proves source consumption, so a build
+is gold-plating here. (b) *Leave the scaffold emitting `*`* — `*` resolves to
+latest-published, which silently floats a UI project across majors; a caret
+pinned to the CLI version is the honest spec. (c) *Publish on merge to
+`main`* — a publish must be a deliberate "release this" act (the tag), never
+a merge side-effect (mirrors D-159 / the GitHub-Release gate).

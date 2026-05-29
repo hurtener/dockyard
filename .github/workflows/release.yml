@@ -25,11 +25,18 @@ name: release
 #                   GitHub Release with every artifact attached. The
 #                   action's update-on-existing behaviour is what makes
 #                   the workflow idempotent against re-runs.
+#   4. npm-publish — packs @dockyard/bridge + @dockyard/ui, verifies the
+#                   tarballs build a freshly scaffolded --template UI
+#                   project, then publishes both to npm (`--access public`,
+#                   `NPM_TOKEN`). The version comes from the tag and an
+#                   already-published version is skipped, so it is
+#                   idempotent. Tag push only — a scoped public publish is
+#                   semi-irreversible (D-172, v1.3 wave B).
 #
-# The workflow only creates a GitHub Release when the trigger is a tag
-# push — `workflow_dispatch` runs stop after building artifacts and
-# uploading them as a workflow run artifact (a maintainer downloads them
-# from the run page to audit).
+# The workflow only creates a GitHub Release / publishes to npm when the
+# trigger is a tag push — `workflow_dispatch` runs stop after building
+# artifacts and uploading them as a workflow run artifact (a maintainer
+# downloads them from the run page to audit).
 #
 # Pinned versions match .github/workflows/ci.yml so the release and the
 # rest of the toolchain age together.
@@ -222,3 +229,92 @@ jobs:
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  npm-publish:
+    name: publish @dockyard/bridge + @dockyard/ui to npm
+    needs: build
+    # Tag push only — the actual publish is the user-facing release moment.
+    # A workflow_dispatch dry-run builds artifacts but never publishes (a
+    # scoped public publish is semi-irreversible; D-172, v1.3 wave B).
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+      # registry-url makes setup-node write an .npmrc that reads the token
+      # from NODE_AUTH_TOKEN — the token VALUE is never in the workflow, only
+      # the secret reference (CLAUDE.md §7 — no hardcoded secrets).
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      # Derive the version from the tag — the single source of truth, exactly
+      # as the Go build does (D-170). The package.json version field is a
+      # default; the tag wins, so a missed release-prep bump cannot publish a
+      # mismatched version, and `--allow-same-version` keeps it idempotent.
+      - id: ver
+        run: |
+          set -euo pipefail
+          v="${{ needs.build.outputs.version }}"
+          v="${v#v}"
+          echo "npm=${v}" >> "$GITHUB_OUTPUT"
+          echo "npm version: ${v}"
+      # ---- Verify before publish (the acceptance gate) ----
+      # Pack both packages, scaffold a real --template project against the
+      # local checkout (so the Go half resolves), then install the packed
+      # TARBALLS into web/ in place of the workspace deps and build the UI —
+      # proving the about-to-be-published tarball shape builds a downstream
+      # Svelte/Vite project. The publish steps below run only if this passes.
+      - name: pack tarballs
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/tarballs"
+          (cd web/bridge && npm pack --pack-destination "${RUNNER_TEMP}/tarballs")
+          (cd web/ui && npm pack --pack-destination "${RUNNER_TEMP}/tarballs")
+          ls -la "${RUNNER_TEMP}/tarballs"
+      - name: verify tarballs build a scaffolded UI project
+        run: |
+          set -euo pipefail
+          go build -o "${RUNNER_TEMP}/dockyard" ./cmd/dockyard
+          proj="${RUNNER_TEMP}/verify"
+          "${RUNNER_TEMP}/dockyard" new demo \
+            --template analytics-widgets \
+            --dockyard-path "${PWD}" \
+            --dir "${proj}"
+          cd "${proj}/demo/web"
+          # Swap the workspace deps for the packed tarballs — the published
+          # shape under test. Then a clean install + the template's build.
+          npm install --no-save \
+            "${RUNNER_TEMP}"/tarballs/dockyard-bridge-*.tgz \
+            "${RUNNER_TEMP}"/tarballs/dockyard-ui-*.tgz
+          npm install
+          npm run build
+      # ---- Publish (idempotent) ----
+      # Set each package's version from the tag, then publish unless that
+      # exact version is already on npm (a re-run, or a tag re-push, is safe).
+      - name: publish @dockyard/bridge
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd web/bridge
+          npm version "${{ steps.ver.outputs.npm }}" --no-git-tag-version --allow-same-version
+          if npm view "@dockyard/bridge@${{ steps.ver.outputs.npm }}" version >/dev/null 2>&1; then
+            echo "@dockyard/bridge@${{ steps.ver.outputs.npm }} already published — skipping"
+          else
+            npm publish --access public
+          fi
+      - name: publish @dockyard/ui
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd web/ui
+          npm version "${{ steps.ver.outputs.npm }}" --no-git-tag-version --allow-same-version
+          if npm view "@dockyard/ui@${{ steps.ver.outputs.npm }}" version >/dev/null 2>&1; then
+            echo "@dockyard/ui@${{ steps.ver.outputs.npm }} already published — skipping"
+          else
+            npm publish --access public
+          fi

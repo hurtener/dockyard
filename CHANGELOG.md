@@ -23,6 +23,14 @@ deliberately deferred to V2.
 
 ### Added
 
+- **`@dockyard/bridge` and `@dockyard/ui` are published to npm.** A
+  scaffolded UI project's `web/` now resolves them from npm with **no
+  `--dockyard-path` and no local Dockyard checkout** — `dockyard new
+  --template analytics-widgets` then `cd web && npm install` just works. The
+  packages set `publishConfig.access: "public"`, track the repo version, and
+  publish from a gated, idempotent tag-push job (verified by `npm pack` + a
+  scaffold-install build first). `--dockyard-path` reverts to a pure
+  build-from-source convenience (D-172).
 - **Bridge View-side task-progress channel.** `@dockyard/bridge` exposes a
   typed `bridge.onTaskProgress((p) => …)` subscription so an MCP App's card
   can render a live progress value (e.g. "62%") for a long-running task,

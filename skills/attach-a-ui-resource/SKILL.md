@@ -36,27 +36,15 @@ canonical examples — start from one when you can.
 5. **Build** — `dockyard build` runs Vite then `go build`, embedding the
    freshly built HTML.
 
-## Prerequisites — the `web/` toolchain needs `--dockyard-path` (for now)
+## Prerequisites — the `web/` toolchain
 
-> **Read this before scaffolding a UI project.** The Dockyard **Go module**
-> is published (`go install …@vX.Y.Z` works with no local checkout), but the
-> frontend packages **`@dockyard/bridge` and `@dockyard/ui` are not yet on
-> npm** — they are workspace packages (`main: ./src/index.ts`). A UI
-> project's `web/` resolves them from a **local Dockyard checkout**, wired by
-> the `--dockyard-path` flag:
->
-> ```bash
-> dockyard new my-ui-server --template analytics-widgets \
->   --dockyard-path /path/to/dockyard      # required for the web/ npm install
-> ```
->
-> Without `--dockyard-path` (and the checkout it points at), the `web/`
-> `npm install` breaks — there is no published `@dockyard/bridge` /
-> `@dockyard/ui` to resolve. The Go side is unaffected; this is a
-> **frontend-only** constraint. It goes away once the bridge/ui ship to npm
-> (tracked in `docs/V2-BACKLOG.md` → "Publish `@dockyard/bridge` +
-> `@dockyard/ui` to npm"). The `--dockyard-path` flag is hidden from
-> `--help`, but it is real and load-bearing for UI builds.
+The Dockyard **Go module** and the frontend packages **`@dockyard/bridge`
+and `@dockyard/ui`** are all published, so a scaffolded UI project resolves
+everything from npm + the Go proxy with no local checkout — `dockyard new
+--template analytics-widgets` then `cd web && npm install` just works. The
+hidden `--dockyard-path` flag remains a **build-from-source convenience**
+(it points `web/` at a local Dockyard checkout via `file:` specs and adds
+the `go.mod` `replace`); it is no longer required for a UI build.
 
 ## 1. Manifest declaration
 

@@ -109,6 +109,41 @@ func requireVersion(v string) string {
 	return v
 }
 
+// WebDepSpecs returns the npm dependency specs a scaffolded project's
+// web/package.json uses for @dockyard/bridge and @dockyard/ui — the values the
+// __DOCKYARD_BRIDGE_SPEC__ / __DOCKYARD_UI_SPEC__ tokens resolve to. The two
+// UI templates share this one resolver so the consume-side policy lives in one
+// place.
+//
+// With DockyardWebPath set (the --dockyard-path build-from-source workflow) it
+// points each at the local Dockyard checkout via a file: spec. Otherwise it
+// pins the published packages with a caret range derived from the CLI's
+// resolved version — so a --template scaffold's web/ `npm install` resolves
+// @dockyard/bridge / @dockyard/ui from npm with no --dockyard-path and no local
+// checkout (v1.3 wave B — D-172; the @dockyard/* packages now publish under the
+// repo version, D-172). A dev CLI carrying no real version falls back to "*"
+// (latest published) — a corner case, since a dev build uses --dockyard-path.
+func WebDepSpecs(opts Options) (bridge, ui string) {
+	if opts.DockyardWebPath != "" {
+		return "file:" + opts.DockyardWebPath + "/bridge",
+			"file:" + opts.DockyardWebPath + "/ui"
+	}
+	spec := npmCaretVersion(opts.DockyardVersion)
+	return spec, spec
+}
+
+// npmCaretVersion turns the CLI's resolved version into the npm caret range the
+// scaffold pins for the @dockyard/* frontend packages. A real release version
+// (vX.Y.Z) becomes "^X.Y.Z" (npm specs carry no leading v); anything else — the
+// 0.0.0-dev placeholder a checkout build carries — falls back to "*".
+func npmCaretVersion(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || v == "0.0.0-dev" || v == "(devel)" || !releaseVersionRE.MatchString(v) {
+		return "*"
+	}
+	return "^" + strings.TrimPrefix(v, "v")
+}
+
 // renderMainGo renders main.go — the runnable entrypoint. It constructs a
 // Dockyard server, registers the example tool, and serves the transport
 // selected by the DOCKYARD_TRANSPORT environment variable. The blank scaffold's
