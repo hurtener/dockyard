@@ -5703,7 +5703,7 @@ left the choice open between a build (`@sveltejs/package` for `ui`,
   compiled by the consumer's svelte plugin via the `svelte` condition.
 
 **The version policy.** Both bump off `0.1.0` to **track the repo / Go-module
-version** (set to `1.3.0` in this PR). The `npm-publish` job derives the
+version** (set to `1.4.0`, the release that first publishes them). The `npm-publish` job derives the
 version **from the git tag** at publish time (`npm version <tag>
 --no-git-tag-version --allow-same-version`), so the tag is the single source
 of truth (as for the Go build, D-170) and a missed release-prep bump cannot
