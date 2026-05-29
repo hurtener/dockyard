@@ -179,7 +179,7 @@ jobs:
             -out dist/release/RELEASE_NOTES.md -append
           tail -40 dist/release/RELEASE_NOTES.md
       - name: upload artifacts (workflow run artifact)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dockyard-${{ steps.version.outputs.version }}
           path: dist/release/
