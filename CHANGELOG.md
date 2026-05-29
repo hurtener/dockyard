@@ -21,8 +21,20 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
+(No entries yet — the next release surface will land here.)
+
+## [1.4.0] - 2026-05-29
+
 ### Added
 
+- **`@dockyard/bridge` and `@dockyard/ui` are published to npm.** A
+  scaffolded UI project's `web/` now resolves them from npm with **no
+  `--dockyard-path` and no local Dockyard checkout** — `dockyard new
+  --template analytics-widgets` then `cd web && npm install` just works. The
+  packages set `publishConfig.access: "public"`, track the repo version, and
+  publish from a gated, idempotent tag-push job (verified by `npm pack` + a
+  scaffold-install build first). `--dockyard-path` reverts to a pure
+  build-from-source convenience (D-172).
 - **Bridge View-side task-progress channel.** `@dockyard/bridge` exposes a
   typed `bridge.onTaskProgress((p) => …)` subscription so an MCP App's card
   can render a live progress value (e.g. "62%") for a long-running task,
@@ -593,7 +605,8 @@ Vite, [tygo](https://github.com/gzuidhof/tygo),
 [modernc.org/sqlite](https://gitlab.com/cznic/sqlite), and
 [VitePress](https://vitepress.dev). Apache-2.0 licensed.
 
-[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/hurtener/dockyard/releases/tag/v1.4.0
 [1.3.0]: https://github.com/hurtener/dockyard/releases/tag/v1.3.0
 [1.2.0]: https://github.com/hurtener/dockyard/releases/tag/v1.2.0
 [1.1.0]: https://github.com/hurtener/dockyard/releases/tag/v1.1.0

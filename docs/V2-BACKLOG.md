@@ -307,6 +307,19 @@ recorded order in the decisions log. Each item carries:
 
 ### Publish `@dockyard/bridge` + `@dockyard/ui` to npm
 
+> **Status:** **Claimed by v1.3 wave B (D-172).** Both packages set
+> `publishConfig.access: "public"`, track the repo version (off `0.1.0`),
+> and publish from a gated tag-push `npm-publish` job in
+> `.github/workflows/release.yml` (`NPM_TOKEN`, `--access public`,
+> idempotent — verified by `npm pack` + a scaffold-install build before the
+> publish). The scaffold's `__DOCKYARD_*_SPEC__` tokens now resolve to the
+> published versions (a caret `^X.Y.Z`) when `--dockyard-path` is omitted, so
+> a `--template` scaffold's `web/` `npm install` succeeds with no checkout;
+> the `scaffold-a-server` / `attach-a-ui-resource` skills dropped the
+> `--dockyard-path`-for-UI caveat in the same PR. See
+> `docs/plans/v1.3-wave-B-npm-and-bridge-progress.md`. The entry stays here
+> as the audit trail of what was deferred and when it shipped.
+
 - **Origin.** Downstream feedback (first external MCP-Apps builder).
   Called out as the gap "most likely to bite a new MCP-Apps builder."
   Related: D-080 (the pre-publish `replace` workflow).
