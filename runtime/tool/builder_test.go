@@ -5,15 +5,44 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/hurtener/dockyard/internal/codegen"
+	"github.com/hurtener/dockyard/runtime/apps"
 	"github.com/hurtener/dockyard/runtime/server"
 	"github.com/hurtener/dockyard/runtime/tool"
 )
+
+// registerRevenueApp registers the App that the revenue tool's .UI() links, so
+// .UI("revenue_card").Register resolves the link (D-173 — an unregistered name
+// is a loud error). Returns the App's ui:// URI for _meta.ui assertions.
+func registerRevenueApp(t *testing.T, s *server.Server) string {
+	t.Helper()
+	const uri = "ui://test/revenue_card"
+	if err := apps.Register(s, apps.App{
+		URI:  uri,
+		Name: "revenue_card",
+		HTML: []byte("<html><body>revenue</body></html>"),
+	}); err != nil {
+		t.Fatalf("apps.Register: %v", err)
+	}
+	return uri
+}
+
+// toolUIMeta extracts _meta.ui from a discovered tool's Meta, failing if it is
+// absent or not the nested object form.
+func toolUIMeta(t *testing.T, meta map[string]any) map[string]any {
+	t.Helper()
+	ui, ok := meta["ui"].(map[string]any)
+	if !ok {
+		t.Fatalf("tool _meta.ui missing or not an object: %#v", meta)
+	}
+	return ui
+}
 
 // --- contract fixtures -----------------------------------------------------
 
@@ -91,6 +120,7 @@ func connect(t *testing.T, s *server.Server) *mcpsdk.ClientSession {
 func TestBuilderRegistersWithGeneratedSchema(t *testing.T) {
 	t.Parallel()
 	s := newServer(t)
+	uri := registerRevenueApp(t, s)
 	err := tool.New[revenueInput, revenueOutput]("show_revenue").
 		Describe("Render the revenue dashboard").
 		UI("revenue_card").
@@ -114,6 +144,17 @@ func TestBuilderRegistersWithGeneratedSchema(t *testing.T) {
 		t.Fatalf("ListTools = %d tools, want 1", len(list.Tools))
 	}
 	got := list.Tools[0]
+
+	// The builder's .UI() must have emitted _meta.ui.resourceUri linking the
+	// tool to its App (RFC §7.1; D-173) — the headline fix. The pre-D-173
+	// builder dropped this silently, so a host rendered the text fallback.
+	ui := toolUIMeta(t, got.Meta)
+	if ui["resourceUri"] != uri {
+		t.Errorf("tool _meta.ui.resourceUri = %v, want %q", ui["resourceUri"], uri)
+	}
+	if _, flat := got.Meta["ui/resourceUri"]; flat {
+		t.Error("tool _meta carries the deprecated flat ui/resourceUri key")
+	}
 
 	// The registered input/output schema must equal the generated schema.
 	wantIn, err := codegen.SchemaFor[revenueInput]()
@@ -308,4 +349,81 @@ func TestHandlerErrorSurfacesAsToolError(t *testing.T) {
 	if !res.IsError {
 		t.Fatal("a handler error should surface as a tool error (IsError)")
 	}
+}
+
+// TestBuilderUILink_FailsLoudOnUnregisteredApp is the D-173 fail-loud contract:
+// .UI(name) with no App registered under name is a typed error at Register, not
+// a silently dropped link (the trap that cost an upstream debugging session).
+func TestBuilderUILink_FailsLoudOnUnregisteredApp(t *testing.T) {
+	t.Parallel()
+	s := newServer(t)
+	err := tool.New[revenueInput, revenueOutput]("show_revenue").
+		Describe("revenue").
+		UI("nope"). // never registered
+		Handler(revenueHandler).
+		Register(s)
+	if err == nil {
+		t.Fatal("Register must error when .UI() names an unregistered App")
+	}
+	if !strings.Contains(err.Error(), "nope") || !strings.Contains(err.Error(), "apps.Register") {
+		t.Errorf("error should name the App and the fix; got: %v", err)
+	}
+	if len(s.Tools()) != 0 {
+		t.Errorf("a failed Register must not install the tool; tools = %v", s.Tools())
+	}
+}
+
+// TestBuilderUILink_Visibility covers the per-tool visibility control (D-173):
+// an explicit VisibilityApp renders _meta.ui.visibility == ["app"] (a UI-only
+// action tool); omitting visibility omits the key (the host defaults to both).
+func TestBuilderUILink_Visibility(t *testing.T) {
+	t.Parallel()
+
+	t.Run("app-only", func(t *testing.T) {
+		t.Parallel()
+		s := newServer(t)
+		registerRevenueApp(t, s)
+		if err := tool.New[revenueInput, revenueOutput]("save_edits").
+			Describe("app-only action").
+			UI("revenue_card", tool.VisibilityApp).
+			Handler(revenueHandler).
+			Register(s); err != nil {
+			t.Fatalf("Register: %v", err)
+		}
+		ui := toolUIMeta(t, discoverOne(t, s).Meta)
+		vis, ok := ui["visibility"].([]any)
+		if !ok || len(vis) != 1 || vis[0] != tool.VisibilityApp {
+			t.Errorf("_meta.ui.visibility = %#v, want [\"app\"]", ui["visibility"])
+		}
+	})
+
+	t.Run("unspecified-omits-visibility", func(t *testing.T) {
+		t.Parallel()
+		s := newServer(t)
+		registerRevenueApp(t, s)
+		if err := tool.New[revenueInput, revenueOutput]("show_revenue").
+			Describe("default visibility").
+			UI("revenue_card").
+			Handler(revenueHandler).
+			Register(s); err != nil {
+			t.Fatalf("Register: %v", err)
+		}
+		ui := toolUIMeta(t, discoverOne(t, s).Meta)
+		if _, present := ui["visibility"]; present {
+			t.Errorf("omitted visibility must not emit the key; got %#v", ui["visibility"])
+		}
+	})
+}
+
+// discoverOne connects to s and returns its single discovered tool.
+func discoverOne(t *testing.T, s *server.Server) *mcpsdk.Tool {
+	t.Helper()
+	list, err := connect(t, s).ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(list.Tools) != 1 {
+		t.Fatalf("ListTools = %d tools, want 1", len(list.Tools))
+	}
+	return list.Tools[0]
 }

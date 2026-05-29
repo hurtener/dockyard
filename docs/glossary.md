@@ -937,6 +937,13 @@ contract structs, then `Describe`/`UI`/`Handler` set the rest and `Register`
 installs the tool on a server with its generated schema. The contract-first
 app-facing surface (RFC §6, brief 04 §3). D-029.
 
+**tool→App link** — the `_meta.ui.resourceUri` (and optional
+`_meta.ui.visibility`) on a tool definition that tells a host which `ui://` App
+resource renders the tool's result (RFC §7.1). The `runtime/tool` builder's
+`.UI(appName)` resolves the App's name to its URI via the server's `AppLink`
+seam and emits it at `Register`; an unregistered name is a loud error, never a
+silently dropped link. RFC §7.1. D-173.
+
 **Traceparent extractor** — the W3C TraceContext middleware on the streamable-
 HTTP transport (`runtime/server.traceparentMiddleware`) that parses the
 inbound `Traceparent` header and stamps the parsed parent `SpanContext` onto

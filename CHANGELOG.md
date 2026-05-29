@@ -21,7 +21,25 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-(No entries yet — the next release surface will land here.)
+### Fixed
+
+- **`tool.New[...].UI(appName).Register(srv)` now emits the tool→App link.**
+  The builder previously dropped it silently — the registered tool carried no
+  `_meta.ui.resourceUri` (RFC §7.1), so a host that renders MCP Apps showed the
+  text fallback instead of the App. The builder now resolves the App's name to
+  its `ui://` URI (via a new `server.AppLink` seam recorded by `apps.Register`)
+  and emits `_meta.ui` at `Register`. The `analytics-widgets` template is fixed
+  automatically (no template change). (D-173)
+
+### Changed
+
+- **`Builder.UI` gained an optional visibility variadic** —
+  `.UI(appName, tool.VisibilityApp)` sets `_meta.ui.visibility` for a UI-only
+  action tool; omitting it keeps the spec default (model + app). New
+  `tool.VisibilityModel` / `tool.VisibilityApp` consts. **Behaviour change:** a
+  `.UI("name")` that references no registered App now returns a typed error at
+  `Register` (previously a silent no-op) — register the App (`apps.Register`)
+  before the tool. A correctly-ordered project is unaffected. (D-173)
 
 ## [1.4.0] - 2026-05-29
 

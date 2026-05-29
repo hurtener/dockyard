@@ -36,6 +36,7 @@ import (
 
 	"github.com/hurtener/dockyard/internal/codegen"
 	"github.com/hurtener/dockyard/internal/manifest"
+	"github.com/hurtener/dockyard/runtime/apps"
 	"github.com/hurtener/dockyard/runtime/server"
 	"github.com/hurtener/dockyard/runtime/tool"
 )
@@ -235,6 +236,19 @@ func TestWave2ContractFirstPipeline(t *testing.T) {
 		t.Errorf("builder output schema differs from the manifest-resolved schema")
 	}
 
+	// The tool links a UI App (tl.UI), so the App must be registered first —
+	// the builder resolves the name to its ui:// URI and emits _meta.ui at
+	// Register (D-173). This is the manifest-driven shape a scaffolded server
+	// uses (registerApp before registerTools).
+	appURI := "ui://" + m.Name + "/" + tl.UI
+	if err := apps.Register(srv, apps.App{
+		URI:  appURI,
+		Name: tl.UI,
+		HTML: []byte("<html><body>customer health</body></html>"),
+	}); err != nil {
+		t.Fatalf("apps.Register: %v", err)
+	}
+
 	if err := builder.Register(srv); err != nil {
 		t.Fatalf("builder.Register: %v", err)
 	}
@@ -251,6 +265,13 @@ func TestWave2ContractFirstPipeline(t *testing.T) {
 	}
 	if len(list.Tools) != 1 || list.Tools[0].Name != tl.Name {
 		t.Fatalf("ListTools = %+v, want one tool %s", list.Tools, tl.Name)
+	}
+
+	// End-to-end (§17): the manifest's ui: mapping flows through the builder to
+	// the live tool definition's _meta.ui.resourceUri (RFC §7.1; D-173) — the
+	// link a real host needs to render the App instead of the text fallback.
+	if ui, ok := list.Tools[0].Meta["ui"].(map[string]any); !ok || ui["resourceUri"] != appURI {
+		t.Errorf("tool _meta.ui.resourceUri = %v, want %q", list.Tools[0].Meta["ui"], appURI)
 	}
 
 	// The registered tool carries the generated schema — not whatever the SDK

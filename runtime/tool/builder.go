@@ -7,7 +7,19 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/hurtener/dockyard/internal/codegen"
+	"github.com/hurtener/dockyard/runtime/apps"
 	"github.com/hurtener/dockyard/runtime/server"
+)
+
+// Visibility values for a tool's _meta.ui.visibility (RFC §7.1, brief 01 §2.3),
+// re-exported from runtime/apps so a tool author sets visibility through the
+// builder without importing runtime/apps. VisibilityModel makes a tool callable
+// by the agent/model; VisibilityApp restricts it to same-server App-initiated
+// calls (a UI-only action tool). Passing neither to UI leaves visibility
+// unspecified — a host treats that as both.
+const (
+	VisibilityModel = apps.VisibilityModel
+	VisibilityApp   = apps.VisibilityApp
 )
 
 // Handler is a contract-first tool handler: it receives the typed, decoded and
@@ -23,10 +35,11 @@ type Handler[In, Out any] func(ctx context.Context, in In) (Result[Out], error)
 // then discard the Builder; independent Builders on independent servers may run
 // concurrently.
 type Builder[In, Out any] struct {
-	name        string
-	description string
-	uiResource  string
-	handler     Handler[In, Out]
+	name         string
+	description  string
+	uiResource   string
+	uiVisibility []string
+	handler      Handler[In, Out]
 
 	// runtime is the per-tool handler runtime, created by Register. It is the
 	// seam Flags reads. nil before Register.
@@ -51,13 +64,24 @@ func (b *Builder[In, Out]) Describe(desc string) *Builder[In, Out] {
 	return b
 }
 
-// UI associates the tool with a ui:// resource by its convention name (the
-// .svelte file stem). Phase 04 records the association; the Apps layer (Phase
-// 09) consumes it to wire _meta.ui. Recording it on the builder keeps the
-// tool-to-UI mapping explicit rather than hidden behind file-drop convention
-// alone (brief 04 §4).
-func (b *Builder[In, Out]) UI(resourceName string) *Builder[In, Out] {
+// UI associates the tool with a ui:// App resource by the App's programmatic
+// name (the name passed to apps.Register / the manifest app name). At Register
+// time the builder resolves the name to the App's ui:// URI and emits
+// _meta.ui.resourceUri on the tool definition (RFC §7.1) — so a host that
+// renders MCP Apps links the tool result to its App. The App MUST be
+// registered (apps.Register) before the tool, or Register fails loud rather
+// than dropping the link silently (D-173).
+//
+// Optional visibility (VisibilityModel / VisibilityApp) sets
+// _meta.ui.visibility: who may invoke the tool. Passing none leaves it
+// unspecified, which a host treats as both — the spec default. Pass
+// VisibilityApp alone for a UI-only action tool (brief 01 §2.3).
+//
+//	tool.New[In, Out]("create_chart").UI("widgets")                  // model + app
+//	tool.New[In, Out]("save_edits").UI("widgets", tool.VisibilityApp) // app-only
+func (b *Builder[In, Out]) UI(resourceName string, visibility ...string) *Builder[In, Out] {
 	b.uiResource = resourceName
+	b.uiVisibility = visibility
 	return b
 }
 
@@ -123,6 +147,25 @@ func (b *Builder[In, Out]) Register(s *server.Server) error {
 	b.runtime = rt
 
 	def := server.ToolDef{Name: b.name, Description: b.description}
+
+	// When the tool declares a UI link, resolve the App's name to its ui://
+	// URI and emit _meta.ui on the tool definition (RFC §7.1; D-173). The App
+	// must already be registered (apps.Register before tool registration) — an
+	// unresolved name is a loud error, never a silently dropped link (the trap
+	// that pre-D-173 .UI() fell into).
+	if b.uiResource != "" {
+		link, ok := s.AppLinkByName(b.uiResource)
+		if !ok {
+			return fmt.Errorf("dockyard/runtime/tool: tool %q: .UI(%q) references no registered App — "+
+				"register the App with apps.Register before registering the tool", b.name, b.uiResource)
+		}
+		meta, err := apps.ToolMetaFor(apps.ToolLink{ResourceURI: link.URI, Visibility: b.uiVisibility})
+		if err != nil {
+			return fmt.Errorf("dockyard/runtime/tool: tool %q: wire _meta.ui: %w", b.name, err)
+		}
+		def.Meta = meta
+	}
+
 	if err := server.AddToolWithSchemas(s, def, in, out, rt.serve); err != nil {
 		return fmt.Errorf("dockyard/runtime/tool: register tool %q: %w", b.name, err)
 	}

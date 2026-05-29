@@ -119,6 +119,28 @@ return tool.New[contracts.CreateChartInput, contracts.CreateChartOutput]("create
 ```
 
 `appName` is the same id you declared in the manifest (`widgets` above).
+`.UI(appName)` is **sufficient** — at `Register` the builder resolves the
+name to the App's `ui://` URI and emits `_meta.ui.resourceUri` on the tool
+definition (RFC §7.1), the link a host needs to render the App. You never
+hand-build `_meta`.
+
+> **Ordering: register the App before the tools.** `.UI(appName)` resolves
+> the name against the Apps registered on the server, so `registerApp(srv)`
+> must run **before** `registerTools(srv)` in `main()` (the templates already
+> do this). A `.UI("name")` that names no registered App is a **loud error**
+> at `Register` — never a silent no-op — so a typo surfaces immediately.
+
+**Visibility (optional).** Pass `tool.VisibilityApp` for a UI-only action
+tool the model should not call directly (e.g. a "save edits" the App
+invokes); omit it for the default (the host treats the tool as callable by
+both the model and the App):
+
+```go
+tool.New[In, Out]("save_edits").
+    UI(appName, tool.VisibilityApp).   // _meta.ui.visibility = ["app"]
+    Handler(handlers.SaveEdits).
+    Register(srv)
+```
 
 ## 3. Embed the bundle + register
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"github.com/hurtener/dockyard/runtime/apps"
 	"github.com/hurtener/dockyard/runtime/tool"
 )
 
@@ -42,6 +43,19 @@ func TestConcurrentBuildAndRegister(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			s := newServer(t)
+			// The tool links a UI App, so the App must be registered on this
+			// server first (D-173 — .UI() resolves the name to the App URI at
+			// Register; an unregistered name is a loud error, not a silent
+			// no-op). Each goroutine owns its own server, so this also exercises
+			// the AppLink seam under the independent-servers concurrency contract.
+			if err := apps.Register(s, apps.App{
+				URI:  "ui://test/revenue_card",
+				Name: "revenue_card",
+				HTML: []byte("<html></html>"),
+			}); err != nil {
+				errs <- fmt.Errorf("goroutine %d: register app: %w", i, err)
+				return
+			}
 			name := fmt.Sprintf("show_revenue_%d", i)
 			if err := tool.New[revenueInput, revenueOutput](name).
 				Describe("revenue").

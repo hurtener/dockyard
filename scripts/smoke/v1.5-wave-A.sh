@@ -43,12 +43,18 @@ else
   skip "builder has no visibility control yet"
 fi
 
-# --- Secondary: dockyard test guard ----------------------------------------
+# --- Guard: the framework regression test (builder emits _meta.ui) ----------
+# The upstream bug was a framework defect (the builder never emitted _meta.ui),
+# not a user-project mistake — so no user-facing gate could have caught it; the
+# guard is Dockyard's own regression test. (validate/testgate are static by
+# design — D-082 — so a live "_meta.ui present" assertion has no cheap home
+# there; see the plan's deviation note.)
 
-if grep -rq "resourceUri\|_meta.ui\|MetaUI\|ui.resourceUri" internal/testgate/*.go 2>/dev/null; then
-  ok "dockyard test guards that a UI tool emits _meta.ui"
+if [ -f runtime/tool/builder_test.go ] && \
+   grep -q "resourceUri" runtime/tool/builder_test.go; then
+  ok "builder regression test asserts .UI().Register() emits _meta.ui.resourceUri"
 else
-  skip "testgate has no _meta.ui guard yet"
+  skip "no builder _meta.ui regression test yet"
 fi
 
 # --- §19: skill documents the ordering rule --------------------------------
