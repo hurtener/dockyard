@@ -2,7 +2,6 @@ package apps_test
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 
@@ -34,24 +33,22 @@ func TestHostProfileRegistry_ConcurrentReuse(t *testing.T) {
 				return
 			}
 
-			// Concurrent lookups of the built-in profiles.
-			if _, err := apps.HostProfileFor("claude"); err != nil {
-				errs <- err
-				return
-			}
+			// Concurrent lookups of the built-in profile.
 			if _, err := apps.HostProfileFor("generic"); err != nil {
 				errs <- err
 				return
 			}
 
-			// Concurrent derivation through the seam.
-			got, err := apps.DerivedDomain("claude", "main", "https://x.example.com/mcp")
+			// Concurrent derivation through the seam — the built-in registry
+			// carries only the verbatim "generic" profile (D-176), so the
+			// derived origin equals the label.
+			got, err := apps.DerivedDomain("", "main", "https://x.example.com/mcp")
 			if err != nil {
 				errs <- err
 				return
 			}
-			if !strings.HasSuffix(got, ".claudemcpcontent.com") {
-				errs <- fmt.Errorf("derived %q is not a claude origin", got)
+			if got != "main" {
+				errs <- fmt.Errorf("derived %q is not the verbatim label", got)
 				return
 			}
 

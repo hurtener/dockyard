@@ -46,7 +46,12 @@
 // internal/manifest.WriteDiscoveredApps, so the convention never hides the
 // architecture (RFC §7.6).
 //
-// Out of scope for this package: the Svelte bridge shell (Phase 11) and
-// host-profile derivation of _meta.ui.domain (Phase 12 — this package only
-// carries the domain field verbatim).
+// _meta.ui.domain is the host-supplied dedicated origin (App.Domain), carried
+// VERBATIM — the host mints the value and a server copies it; Dockyard never
+// synthesises a host's signed origin (D-176, supersedes D-062/D-063). The
+// pluggable host-profile seam (hostprofile.go) is retained for a future
+// host-blessed transform but ships only the generic verbatim profile.
+//
+// Out of scope for this package: the Svelte bridge shell (the View-half ui/
+// dialect).
 package apps

@@ -7,9 +7,10 @@
 // convention auto-discovery lifting files under `web/src/apps/` into
 // registrable Apps backed by a `//go:embed all:dist` bundle, with the
 // discovered wiring written back into `dockyard.app.yaml` (Phase 10); and the
-// pluggable host-profile seam that auto-derives `_meta.ui.domain` — the generic
-// verbatim profile and Claude's SHA-256 signed `claudemcpcontent.com` origin
-// (Phase 12). `web/bridge` (the View-half `ui/` dialect, Phase 11) and `web/ui`
+// pluggable host-profile seam behind `_meta.ui.domain`. As of D-176 `domain` is
+// a host-supplied value emitted VERBATIM — the synthesising Claude profile
+// (D-062/D-063) is retired; the seam keeps its generic verbatim profile for a
+// future host-blessed transform. `web/bridge` (the View-half `ui/` dialect, Phase 11) and `web/ui`
 // (the design system, Phase 10a) are frontend artifacts gated by `make web`;
 // this Go E2E does not drive them — see the checkpoint audit for the bridge's
 // View-half contract reconciliation.
@@ -22,10 +23,9 @@
 // each App from the real embedded bundle; and the resources/read `_meta.ui`
 // choke point is exercised through both the generic and the Claude host
 // profiles — the whole 09→10→12 chain as one wired path. It covers a failure
-// mode on each seam (an invalid `ui://` App, a missing bundle entry, a Claude
-// profile handed an empty ServerURL → typed ErrInvalidApp per D-064, an unknown
-// host id), proves capability-driven Apps negotiation and host-profile
-// selection, and runs an N>=10 concurrency stress under -race against the
+// mode on each seam (an invalid `ui://` App, a missing bundle entry, an unknown
+// host id), proves capability-driven Apps negotiation and verbatim
+// host-supplied `_meta.ui.domain` emission, and runs an N>=10 concurrency stress under -race against the
 // shared Server and Apps registry with a post-teardown goroutine-leak
 // assertion. See decision D-068.
 package integration
@@ -36,7 +36,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
@@ -123,6 +122,10 @@ func TestWave4AppsChainEndToEnd(t *testing.T) {
 	// --- Phase 09: register an App + its linked contract-first tool ---
 	const uri = "ui://wave4-report/main"
 	const html = "<html><body>account report</body></html>"
+	// A host-supplied dedicated origin — the exact value a host documents for a
+	// verified remote deployment. Dockyard emits it VERBATIM on resources/read
+	// (D-176, supersedes the retired Claude derivation).
+	const wantDomain = "a904794854a047f6.claudemcpcontent.com"
 	if err := apps.Register(s, apps.App{
 		URI:  uri,
 		Name: "wave4-report",
@@ -131,11 +134,9 @@ func TestWave4AppsChainEndToEnd(t *testing.T) {
 		// point carries exactly the App's declared connect origin and nothing
 		// more (RFC §7.4).
 		CSP: apps.CSP{Connect: []string{"https://api.example.com"}},
-		// --- Phase 12: a domain label routed through the Claude host profile,
-		// which derives the signed claudemcpcontent.com origin. ---
-		Domain:      "report-origin",
-		HostProfile: "claude",
-		ServerURL:   "https://wave4.example.com/mcp",
+		// The dedicated origin is carried verbatim; HostProfile/ServerURL are
+		// deprecated no-ops retained for compatibility (D-176).
+		Domain: wantDomain,
 	}); err != nil {
 		t.Fatalf("apps.Register: %v", err)
 	}
@@ -198,7 +199,7 @@ func TestWave4AppsChainEndToEnd(t *testing.T) {
 	}
 
 	// resources/read on the Phase 09 App: HTML, App MIME, and a _meta.ui whose
-	// domain is the Claude-derived signed origin (Phase 12) and whose CSP
+	// domain is the host-supplied origin carried VERBATIM (D-176) and whose CSP
 	// carries exactly the declared connect origin.
 	read, err := session.ReadResource(ctx, &mcpsdk.ReadResourceParams{URI: uri})
 	if err != nil {
@@ -214,23 +215,11 @@ func TestWave4AppsChainEndToEnd(t *testing.T) {
 	if !ok {
 		t.Fatalf("resources/read _meta.ui missing: %#v", read.Contents[0].Meta)
 	}
-	// The Claude profile derives <hash32>.claudemcpcontent.com — the core never
-	// carried the verbatim "report-origin" label onto the wire (Phase 12).
+	// _meta.ui.domain is App.Domain VERBATIM — Dockyard never synthesises or
+	// rewrites a host's origin (D-176).
 	domain, _ := rui["domain"].(string)
-	if domain == "report-origin" {
-		t.Error("host-profile derivation skipped: _meta.ui.domain is the verbatim label")
-	}
-	if !strings.HasSuffix(domain, ".claudemcpcontent.com") {
-		t.Fatalf("_meta.ui.domain = %q, want a *.claudemcpcontent.com signed origin", domain)
-	}
-	// The signed origin must be stable for the (serverURL, label) pair — the
-	// same input the resource was registered with derives the same domain.
-	wantDomain, derr := apps.DerivedDomain("claude", "report-origin", "https://wave4.example.com/mcp")
-	if derr != nil {
-		t.Fatalf("DerivedDomain: %v", derr)
-	}
 	if domain != wantDomain {
-		t.Fatalf("_meta.ui.domain = %q, not stable (want %q)", domain, wantDomain)
+		t.Fatalf("_meta.ui.domain = %q, want the verbatim host-supplied origin %q", domain, wantDomain)
 	}
 	csp, _ := rui["csp"].(map[string]any)
 	if csp == nil {
@@ -409,7 +398,7 @@ func TestWave4GracefulDegradation(t *testing.T) {
 // ---- 3. failure modes — at least one per seam -------------------------------
 
 // TestWave4FailureModes proves each Wave 4 seam rejects a malformed input with a
-// typed error rather than panicking across a boundary (AGENTS.md §13, D-064).
+// typed error rather than panicking across a boundary (AGENTS.md §13).
 func TestWave4FailureModes(t *testing.T) {
 	t.Parallel()
 
@@ -453,26 +442,6 @@ func TestWave4FailureModes(t *testing.T) {
 		}
 	})
 
-	// runtime/apps host profile: the Claude signing profile handed a non-empty
-	// domain label but an empty ServerURL cannot derive a stable signed origin —
-	// it returns a typed ErrInvalidApp, never a forgeable origin or a panic
-	// (Phase 12, D-064).
-	t.Run("apps/claude-profile-empty-serverurl", func(t *testing.T) {
-		t.Parallel()
-		s := newWave4AppsServer(t)
-		err := apps.Register(s, apps.App{
-			URI:         "ui://wave4-report/main",
-			Name:        "wave4-report",
-			HTML:        []byte("<html></html>"),
-			Domain:      "report-origin",
-			HostProfile: "claude",
-			// ServerURL deliberately omitted — D-064 mandates a typed error.
-		})
-		if !errors.Is(err, apps.ErrInvalidApp) {
-			t.Fatalf("Register(claude profile, empty ServerURL): got %v, want ErrInvalidApp", err)
-		}
-	})
-
 	// runtime/apps host profile: an unregistered host id yields a wrapped
 	// ErrUnknownHost — the host-profile registry seam (Phase 12).
 	t.Run("apps/unknown-host-profile", func(t *testing.T) {
@@ -500,73 +469,70 @@ func TestWave4FailureModes(t *testing.T) {
 	})
 }
 
-// ---- 4. host-profile selection — capability-driven derivation ---------------
+// ---- 4. verbatim host-supplied domain — end to end --------------------------
 
-// TestWave4HostProfileSelection proves the same App domain label derives a
-// different _meta.ui.domain under different host profiles — the generic
-// verbatim profile vs. Claude's signed origin — and that the selection happens
-// through the registry seam, never a hardcoded host branch (RFC §7.5, D-062).
-func TestWave4HostProfileSelection(t *testing.T) {
+// TestWave4DomainVerbatim proves the D-176 model end to end: an App's
+// host-supplied Domain is carried onto resources/read _meta.ui.domain VERBATIM,
+// two Apps with distinct Domains emit distinct verbatim origins, and an App with
+// no Domain omits _meta.ui.domain entirely (the host's default origin). The
+// generic profile behind the registry seam is the verbatim passthrough; no host
+// is special-cased (RFC §7.5, D-176, supersedes D-062/D-063).
+func TestWave4DomainVerbatim(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	const label = "shared-origin"
-	const serverURL = "https://wave4.example.com/mcp"
+	const originA = "a904794854a047f6.claudemcpcontent.com"
+	const originB = "www-example-com.oaiusercontent.com"
 
-	// The generic (default) profile passes the label through verbatim.
-	generic, err := apps.DerivedDomain("", label, serverURL)
+	// The generic (default) profile behind the seam is verbatim passthrough.
+	generic, err := apps.DerivedDomain("", originA, "")
 	if err != nil {
 		t.Fatalf("DerivedDomain(generic): %v", err)
 	}
-	if generic != label {
-		t.Fatalf("generic profile derived %q, want the verbatim label %q", generic, label)
+	if generic != originA {
+		t.Fatalf("generic profile derived %q, want the verbatim origin %q", generic, originA)
 	}
 
-	// The Claude profile derives a distinct, signed claudemcpcontent.com origin.
-	claude, err := apps.DerivedDomain("claude", label, serverURL)
-	if err != nil {
-		t.Fatalf("DerivedDomain(claude): %v", err)
-	}
-	if claude == generic {
-		t.Fatal("claude profile derived the verbatim label — derivation did not run")
-	}
-	if !strings.HasSuffix(claude, ".claudemcpcontent.com") {
-		t.Fatalf("claude profile derived %q, want a *.claudemcpcontent.com origin", claude)
-	}
-
-	// The selection is observable end to end: two Apps with the same label but
-	// different host profiles serve different _meta.ui.domain values over the
-	// same real resources/read handler.
 	s := newWave4AppsServer(t)
 	if err := apps.Register(s, apps.App{
-		URI: "ui://wave4-generic/main", Name: "wave4-generic", HTML: []byte("<html>g</html>"),
-		Domain: label,
+		URI: "ui://wave4-a/main", Name: "wave4-a", HTML: []byte("<html>a</html>"),
+		Domain: originA,
 	}); err != nil {
-		t.Fatalf("Register(generic App): %v", err)
+		t.Fatalf("Register(App A): %v", err)
 	}
 	if err := apps.Register(s, apps.App{
-		URI: "ui://wave4-claude/main", Name: "wave4-claude", HTML: []byte("<html>c</html>"),
-		Domain: label, HostProfile: "claude", ServerURL: serverURL,
+		URI: "ui://wave4-b/main", Name: "wave4-b", HTML: []byte("<html>b</html>"),
+		// A deprecated HostProfile must NOT rewrite the value (D-176).
+		Domain: originB, HostProfile: "claude", ServerURL: "https://wave4.example.com/mcp",
 	}); err != nil {
-		t.Fatalf("Register(claude App): %v", err)
+		t.Fatalf("Register(App B): %v", err)
+	}
+	if err := apps.Register(s, apps.App{
+		URI: "ui://wave4-none/main", Name: "wave4-none", HTML: []byte("<html>n</html>"),
+	}); err != nil {
+		t.Fatalf("Register(App without Domain): %v", err)
 	}
 
 	session := connect(t, s)
-	domainOf := func(uri string) string {
+	uiOf := func(uri string) map[string]any {
 		t.Helper()
 		read, err := session.ReadResource(ctx, &mcpsdk.ReadResourceParams{URI: uri})
 		if err != nil {
 			t.Fatalf("ReadResource %q: %v", uri, err)
 		}
 		ui, _ := read.Contents[0].Meta["ui"].(map[string]any)
-		d, _ := ui["domain"].(string)
-		return d
+		return ui
 	}
-	if got := domainOf("ui://wave4-generic/main"); got != generic {
-		t.Fatalf("generic App _meta.ui.domain = %q, want %q", got, generic)
+	if got, _ := uiOf("ui://wave4-a/main")["domain"].(string); got != originA {
+		t.Fatalf("App A _meta.ui.domain = %q, want verbatim %q", got, originA)
 	}
-	if got := domainOf("ui://wave4-claude/main"); got != claude {
-		t.Fatalf("claude App _meta.ui.domain = %q, want %q", got, claude)
+	if got, _ := uiOf("ui://wave4-b/main")["domain"].(string); got != originB {
+		t.Fatalf("App B _meta.ui.domain = %q, want verbatim %q (HostProfile must not rewrite)", got, originB)
+	}
+	// An App with no Domain omits _meta.ui entirely (deny-by-default; the host
+	// uses its default per-conversation origin).
+	if ui := uiOf("ui://wave4-none/main"); ui != nil {
+		t.Fatalf("App without Domain emitted _meta.ui = %#v, want it absent", ui)
 	}
 }
 
@@ -585,21 +551,15 @@ func TestWave4ConcurrencyStress(t *testing.T) {
 	srv := newWave4AppsServer(t)
 	const uri = "ui://wave4-stress/main"
 	const html = "<html><body>stress</body></html>"
+	const wantDomain = "stress-origin.claudemcpcontent.com"
 	if err := apps.Register(srv, apps.App{
 		URI: uri, Name: "wave4-stress", HTML: []byte(html),
-		Domain: "stress-origin", HostProfile: "claude",
-		ServerURL: "https://wave4.example.com/mcp",
+		// A host-supplied dedicated origin, carried verbatim (D-176).
+		Domain: wantDomain,
 	}); err != nil {
 		t.Fatalf("apps.Register: %v", err)
 	}
 	registerReportTool(t, srv, uri)
-
-	// The signed origin the App was registered with — every concurrent read
-	// must return exactly this.
-	wantDomain, err := apps.DerivedDomain("claude", "stress-origin", "https://wave4.example.com/mcp")
-	if err != nil {
-		t.Fatalf("DerivedDomain: %v", err)
-	}
 
 	const workers = 16 // N >= 10
 	const iterations = 20
@@ -636,9 +596,8 @@ func TestWave4ConcurrencyStress(t *testing.T) {
 				}
 
 				// The host-profile registry is read on every derivation —
-				// exercise it concurrently and directly too.
-				if got, derr := apps.DerivedDomain("claude", "stress-origin",
-					"https://wave4.example.com/mcp"); derr != nil || got != wantDomain {
+				// exercise it concurrently and directly too (verbatim seam).
+				if got, derr := apps.DerivedDomain("", wantDomain, ""); derr != nil || got != wantDomain {
 					t.Errorf("worker %d: DerivedDomain: got %q err %v", w, got, derr)
 					return
 				}

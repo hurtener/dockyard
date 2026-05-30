@@ -45,6 +45,27 @@ func TestGolden_AppsToolMeta(t *testing.T) {
 	}
 }
 
+// TestGolden_AppsToolMetaLegacyOptIn pins the both-keys output under the D-177
+// opt-in: the canonical nested form PLUS the deprecated flat key, whose value
+// equals the nested resourceUri. The default-mode golden above (no flat key) is
+// the RFC-compliant baseline; this is the explicit, opt-in compat shape.
+func TestGolden_AppsToolMetaLegacyOptIn(t *testing.T) {
+	c := CodecFor(VersionApps20260126)
+	meta, err := c.EncodeAppsToolMeta(nil, AppsToolMeta{
+		ResourceURI:           "ui://weather-server/dashboard-template",
+		Visibility:            []string{VisibilityApp},
+		EmitLegacyResourceURI: true,
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	const want = `{"ui":{"resourceUri":"ui://weather-server/dashboard-template","visibility":["app"]},` +
+		`"ui/resourceUri":"ui://weather-server/dashboard-template"}`
+	if got := canon(t, meta); got != want {
+		t.Errorf("golden mismatch:\n got: %s\nwant: %s", got, want)
+	}
+}
+
 func TestGolden_AppsResourceMeta(t *testing.T) {
 	c := CodecFor(VersionApps20260126)
 	meta, err := c.EncodeAppsResourceMeta(nil, AppsResourceMeta{

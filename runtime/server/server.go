@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -96,6 +97,17 @@ type Options struct {
 	// binding of tasks/* (RFC §8.5). A nil value treats every requestor as
 	// unauthenticated, which is the correct posture for single-user stdio.
 	TasksAuthContext tasks.AuthContextFunc
+
+	// EmitLegacyToolUIMeta opts the server into additionally emitting the
+	// DEPRECATED flat tool-UI _meta key alongside the canonical nested
+	// `_meta.ui.resourceUri` on every UI-bearing tool registered through the
+	// runtime/tool builder (D-177). The default (false) is RFC-compliant
+	// nested-only output (RFC §7.1, brief 01 §2.3); the 2026-01-26 MCP Apps spec
+	// marks the flat form deprecated, so Dockyard never emits it by default.
+	// Turn it on only when targeting a host that still reads the flat key — it
+	// is a wire-compat escape hatch, not a recommended posture. The flat key's
+	// literal lives only in internal/protocolcodec (P3).
+	EmitLegacyToolUIMeta bool
 }
 
 // ExtensionCapability is one MCP extension-capability advertisement: a
@@ -168,6 +180,12 @@ type Server struct {
 	// attached via Options.Tasks or WithTasks; a nil mount means the server is
 	// a plain MCP server with no tasks/* interception.
 	tasksMount *tasks.Mount
+
+	// emitLegacyToolUIMeta mirrors Options.EmitLegacyToolUIMeta: when true the
+	// runtime/tool builder additionally emits the deprecated flat tool-UI _meta
+	// key alongside the nested form (D-177). Default false — RFC-compliant
+	// nested-only output.
+	emitLegacyToolUIMeta bool
 }
 
 // New constructs a Dockyard MCP server. It returns an error rather than
@@ -197,10 +215,11 @@ func New(info Info, opts *Options) (*Server, error) {
 		Version: info.Version,
 	}, sdkOpts)
 	s := &Server{
-		info: info,
-		log:  log,
-		mcp:  mcpSrv,
-		rec:  newRecorder(info, opts),
+		info:                 info,
+		log:                  log,
+		mcp:                  mcpSrv,
+		rec:                  newRecorder(info, opts),
+		emitLegacyToolUIMeta: opts != nil && opts.EmitLegacyToolUIMeta,
 	}
 	// Attach the Tasks transport mount when a Tasks engine was supplied. The
 	// mount is the seam that routes tasks/* frames into the engine ahead of
@@ -281,6 +300,12 @@ func (s *Server) Info() Info { return s.info }
 type AppLink struct {
 	// URI is the App's ui:// resource URI.
 	URI string
+	// Domain is the App's host-supplied dedicated origin (_meta.ui.domain), or
+	// "" when the App declares none. The server records it only to power the
+	// stdio-only startup warning (warnDomainOnStdio): a dedicated origin is
+	// honoured on a remote connector and ignored on a local (stdio) one
+	// (D-176). It is a plain string, not an Apps wire type (P3).
+	Domain string
 }
 
 // RegisterAppLink records the link from an App's name to its ui:// resource.
@@ -309,6 +334,41 @@ func (s *Server) RegisterAppLink(name string, link AppLink) error {
 func (s *Server) AppLinkByName(name string) (AppLink, bool) {
 	link, ok := s.appLinks[name]
 	return link, ok
+}
+
+// EmitLegacyToolUIMeta reports whether the server opted into emitting the
+// deprecated flat tool-UI _meta key alongside the nested form
+// (Options.EmitLegacyToolUIMeta; D-177). The runtime/tool builder reads it when
+// wiring a tool's _meta.ui so the server-level opt-in threads to the encoder
+// without a per-builder parameter. Default false — RFC-compliant nested-only.
+func (s *Server) EmitLegacyToolUIMeta() bool {
+	return s != nil && s.emitLegacyToolUIMeta
+}
+
+// warnDomainOnStdio logs a loud startup warning for every registered App that
+// declares a dedicated origin (_meta.ui.domain) while the server's only
+// transport is stdio. A dedicated origin is honoured only on a remote connector
+// — a local (stdio) connector ignores it, and a host such as Claude Desktop
+// rejects a domain on a local connector (D-176). Surfacing it at startup turns
+// a silent host-side rejection into an actionable log line. It is called from
+// ServeStdio; the HTTP transport (HTTPHandler) never warns.
+func (s *Server) warnDomainOnStdio(ctx context.Context) {
+	names := make([]string, 0, len(s.appLinks))
+	for name, link := range s.appLinks {
+		if link.Domain != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		s.log.WarnContext(ctx,
+			"app declares a dedicated origin (_meta.ui.domain) but the server's only transport is "+
+				"stdio; a dedicated origin is honoured only on a remote connector — a local (stdio) "+
+				"connector ignores it (set a Domain only for a verified remote/HTTP deployment)",
+			slog.String("app", name),
+			slog.String("domain", s.appLinks[name].Domain),
+		)
+	}
 }
 
 // Tools returns the names of registered tools, in registration order. The
@@ -380,6 +440,9 @@ func (s *Server) Run(ctx context.Context, t mcpsdk.Transport) error {
 // the SDK server (RFC §8.2). With no Tasks engine attached the SDK serves
 // stdin/stdout directly, exactly as before.
 func (s *Server) ServeStdio(ctx context.Context) error {
+	// stdio is a local connector: warn for any App that declares a dedicated
+	// origin, which a local connector ignores (D-176, RFC §7.5).
+	s.warnDomainOnStdio(ctx)
 	if s.tasksMount != nil {
 		return s.serveStdioWithTasks(ctx)
 	}

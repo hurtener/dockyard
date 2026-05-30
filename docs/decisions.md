@@ -1308,7 +1308,10 @@ is not lost.
 ## D-062 — `_meta.ui.domain` is auto-derived through a pluggable host-profile seam
 
 **Date:** 2026-05-21
-**Status:** Settled
+**Status:** Superseded by [D-176](#d-176) (2026-05-30) — `_meta.ui.domain` is now
+a host-supplied verbatim value; server-side auto-derivation is retired. The
+host-profile **seam** survives; only the **synthesising derivation** this entry
+introduced is gone. This entry stands as the record of what was decided then.
 **Where it lives:** RFC §7.5, RFC §18 Q-5, `runtime/apps`
 (`hostprofile.go`, `domain.go`, `apps.go`), phase plan `phase-12-host-profiles`
 **Why:** D-049 deferred `_meta.ui.domain` derivation: Phase 09 carried an
@@ -1333,9 +1336,14 @@ omission (RFC §7.4).
 ## D-063 — The Claude host profile derives `<hex128>.claudemcpcontent.com` from SHA-256
 
 **Date:** 2026-05-21
-**Status:** Settled
-**Where it lives:** RFC §7.5, `runtime/apps/hostprofile_claude.go`, phase plan
-`phase-12-host-profiles`
+**Status:** Superseded by [D-176](#d-176) (2026-05-30) — the synthesising Claude
+host profile is **retired**. The MCP Apps spec makes `domain` a host-minted,
+developer-copied verbatim value, not a framework-computed one, and the derived
+origin was rejected by Claude Desktop on a local connector. `runtime/apps/hostprofile_claude.go`
+is removed; `runtime/apps` ships only the generic verbatim profile behind the
+retained seam. This entry stands as the record of what was decided then.
+**Where it lives (historical):** RFC §7.5, `runtime/apps/hostprofile_claude.go` (removed),
+phase plan `phase-12-host-profiles`
 **Why:** Brief 01 §2.5 documents Claude's dedicated-origin form as
 `<hash32>.claudemcpcontent.com`, "a SHA-256 hash of the MCP server URL", and
 §4 sharp edge 3 stresses this is a Claude implementation detail, not a spec
@@ -1359,7 +1367,11 @@ confirmed is a one-file change behind the seam.
 ## D-064 — A signing host profile requires the MCP server URL on the App
 
 **Date:** 2026-05-21
-**Status:** Settled
+**Status:** Settled — the seam **contract** (`HostProfile.RequiresServerURL`)
+survives [D-176](#d-176) for any future host-blessed signing profile, but **no
+signing profile ships built-in** since D-176 retired the Claude derivation;
+`runtime/apps` ships only the generic verbatim profile. The `App.ServerURL`
+field is deprecated (D-176).
 **Where it lives:** RFC §7.5, `runtime/apps` (`apps.go`,
 `hostprofile_claude.go`), phase plan `phase-12-host-profiles`
 **Why:** A signed dedicated origin (D-063) is, by construction, derived from the
@@ -5908,3 +5920,128 @@ and surfacing `InputPrompt.Schema` to the requestor (no V1 wire surface carries 
 The reserved `obs/v1` kinds `app.user_action` / `host.compat` / `app.bridge` have no
 V1 server-side producer by design ("Dockyard sees only its half of the iframe bridge")
 — reserved contract surfaces, left as-is.
+
+---
+
+## D-176 — `_meta.ui.domain` is a host-supplied verbatim value; server-side auto-derivation is retired
+
+**Date:** 2026-05-30
+**Status:** Settled (v1.6 wave A — MCP Apps spec-alignment). **Supersedes
+[D-062](#d-062) and [D-063](#d-063)**; amends RFC §7.5.
+**Where it lives:** RFC §7.5, `runtime/apps` (`apps.go`, `domain.go`,
+`hostprofile.go`), `runtime/server` (`server.go` — the stdio guard), plan
+`docs/plans/v1.6-wave-A-apps-spec-alignment.md`, glossary (**Dedicated origin**,
+**Domain label**).
+
+**Why.** The vendored MCP Apps spec
+(`docs/specifications/mcp-apps-2026-01-26.mdx:205-300`) defines `domain` as
+**host-dependent**: *"Servers MUST consult host-specific documentation for the
+expected domain format … If omitted, Host uses default sandbox origin."* The host
+**mints** the value; a server copies it verbatim or leaves it empty. Dockyard
+instead **auto-derived** Claude's `{hash}.claudemcpcontent.com` subdomain itself
+(D-062/D-063), which (a) re-implements a host's internal algorithm — the "host
+matrix" drift CLAUDE.md §6 forbids, in derivation-function clothing — and (b) is
+**rejected by Claude Desktop on a local connector** (the exact error an upstream
+team hit building an inline App on v1.5.0).
+
+**The decision.** `App.Domain` is the host-supplied dedicated origin, emitted on
+`resources/read` `_meta.ui.domain` **byte-for-byte**. `apps.resourceMeta` no
+longer routes `Domain` through `DerivedDomain`; it passes `App.Domain` straight
+to the codec. An empty `Domain` omits `_meta.ui.domain` (the host's default
+per-conversation origin). The synthesising Claude host profile
+(`hostprofile_claude.go`) is **deleted**; `runtime/apps` ships only the generic
+verbatim profile.
+
+**The seam is kept, the synthesis is retired (P3 / §4.4).** The `HostProfile`
+interface, `RegisterHostProfile`, the registry, and `RequiresServerURL` survive
+so a future *legitimate*, host-documented-and-blessed transform has a home; only
+the synthesising Claude derivation is gone. `DerivedDomain` remains a verbatim
+passthrough via the generic profile (signature unchanged). The testgate
+capability category still resolves every registered profile through the seam.
+
+**Deprecate, not remove (locked open question).** `App.HostProfile` and
+`App.ServerURL` are **deprecated** (godoc + no longer drive any derivation),
+**not removed** — removing public fields is a breaking change (D-159 → major),
+and this wave is a **minor** bump. They are ignored: setting `HostProfile:
+"claude"` now yields `Domain` verbatim, not a derived origin. Removal is a future
+major.
+
+**Stdio guard (the static-feasible half of the feedback's §5).** A server whose
+only transport is **stdio** (`ServeStdio`) with any registered App carrying a
+non-empty `Domain` logs a loud `slog.Warn` at startup naming the App — a
+dedicated origin is honoured only on a remote connector; a local (stdio)
+connector ignores it. `HTTPHandler` does not warn. `validate`/`testgate` stay
+static by design (D-082), so a *static* `domain`-on-stdio gate would need
+`domain` surfaced as a manifest field (Go-only today) — recorded as a follow-up,
+not built here.
+
+**Behaviour change (semver — minor, D-159).** A project that set `HostProfile:
+"claude"` + `Domain` previously got a derived `claudemcpcontent.com` origin and
+now gets its `Domain` verbatim. Called out in `CHANGELOG.md`. The default
+scaffold/templates set no `Domain`, so no in-repo project changes wire output.
+
+**Non-goal (tracked).** Why Claude Desktop renders the reference app
+(`pengui-slides`) locally but not a wire-matched Dockyard App is an
+**investigation**, not a known Dockyard defect — tracked as a `docs/V2-BACKLOG.md`
+spike, not gated into this wave.
+
+---
+
+## D-177 — An opt-in additionally emits the deprecated flat `_meta` tool-UI key; the default stays nested-only
+
+**Date:** 2026-05-30
+**Status:** Settled (v1.6 wave A — MCP Apps spec-alignment).
+**Where it lives:** `runtime/server` (`Options.EmitLegacyToolUIMeta`,
+`Server.EmitLegacyToolUIMeta`), `runtime/tool/builder.go`, `runtime/apps`
+(`ToolLink.EmitLegacyResourceURI`, `ToolMetaFor`), `internal/protocolcodec`
+(`AppsToolMeta.EmitLegacyResourceURI`, the tool-meta encoder), plan
+`docs/plans/v1.6-wave-A-apps-spec-alignment.md`.
+
+**Why.** The reference `@modelcontextprotocol/ext-apps` SDK emits **both** the
+nested `_meta.ui.resourceUri` and the deprecated flat tool-UI key "for backward
+compatibility." Dockyard emits nested-only by RFC §7.1 + brief 01 §2.3, and the
+2026-01-26 spec marks the flat form deprecated — so the **default does not
+change**. But because some hosts may still read the flat key, a server-level
+opt-in lets a developer emit both without betting the RFC-compliant default on an
+**unproven** change (the upstream feedback notes Claude Desktop did not render
+even with both keys present).
+
+**The decision (knob surface locked).** A server-level boolean —
+`server.Options.EmitLegacyToolUIMeta` (default **false**) — threads through
+`Server.EmitLegacyToolUIMeta()` → the `runtime/tool` builder's `.UI()` wiring →
+`apps.ToolLink.EmitLegacyResourceURI` → the `internal/protocolcodec` tool-meta
+encoder, which then writes the flat key equal to the nested `resourceUri`
+alongside the nested form. A server-wide boolean (not a manifest `compat:` block,
+not a per-`.UI()` option) was chosen because the concern is **server-wide wire
+compat**, not per-tool. No exported function signature changes — the opt-in
+threads through configuration and an additive struct field. The
+`protocolcodec`/`apps` "never emit the flat key" assertions stay green as the
+**default-mode** tests; a new golden pins the both-keys output. The flat key
+remains **tolerated on read** in both modes; the P3 "tolerate on read, never
+emit" rule becomes "…never emit *unless explicitly opted in*."
+
+---
+
+## D-178 — The scaffold adopts the html-style `ui://<server>/<app>/index.html` URI convention
+
+**Date:** 2026-05-30
+**Status:** Settled (v1.6 wave A — MCP Apps spec-alignment).
+**Where it lives:** `templates/{analytics-widgets,approval-flows}`
+(`dockyard.app.yaml` `uri:`, `main.go.tmpl` `appURI` const + docstrings),
+`skills/attach-a-ui-resource/SKILL.md`, `docs/site` Apps guide, plan
+`docs/plans/v1.6-wave-A-apps-spec-alignment.md`.
+
+**Why.** The reference app uses an html-style resource URI
+(`ui://deck-editor/index.html`); Dockyard scaffolded `ui://<server>/<app>` (no
+extension). Some hosts may key off the html-style path, and matching the
+reference removes one more diff an upstream team has to reconcile.
+
+**The decision.** `dockyard new --template` scaffolds the App `ui://` URI as
+`ui://<server>/<app>/index.html`. The framework treats `ui://authority/path` as
+an **opaque string**, so this is a **convention + docs change only** — no
+behaviour change: `validate` / `build` / App registration accept the new URI
+exactly as before, and an existing project's `ui://<server>/<app>` URI keeps
+working (the docs say so explicitly). The blank `dockyard new` scaffold has no UI
+resource, so only the two product templates carry the convention (a documented
+deviation from the plan's "blank + --template" wording — blank has no `ui://` to
+change).

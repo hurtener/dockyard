@@ -38,7 +38,7 @@ tools:
 
 apps:
   - id: widgets
-    uri: ui://__PROJECT_NAME__/widgets
+    uri: ui://__PROJECT_NAME__/widgets/index.html
     entry: web/src/App.svelte
     # Inline only (decision D-126). The bridge will only ever grant inline;
     # the App's dispatcher chooses the right widget for each tool's result.

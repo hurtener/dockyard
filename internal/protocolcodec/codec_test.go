@@ -92,6 +92,74 @@ func TestAppsToolMeta_EmitsNestedFormOnly(t *testing.T) {
 	}
 }
 
+func TestAppsToolMeta_OptInEmitsBothForms(t *testing.T) {
+	// With the opt-in (D-177) the encoder writes BOTH the nested
+	// _meta.ui.resourceUri and the deprecated flat key, and the flat value
+	// equals the nested resourceUri. The default-mode tests above prove the
+	// flat key stays absent without the opt-in.
+	c := CodecFor(VersionApps20260126)
+	const uri = "ui://a/b"
+	meta, err := c.EncodeAppsToolMeta(nil, AppsToolMeta{
+		ResourceURI:           uri,
+		Visibility:            []string{VisibilityApp},
+		EmitLegacyResourceURI: true,
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	flat, ok := meta[metaKeyUIResourceURIFlat].(string)
+	if !ok {
+		t.Fatalf("opt-in did not emit the flat key: %#v", meta)
+	}
+	if flat != uri {
+		t.Errorf("flat key = %q, want it equal to the nested resourceUri %q", flat, uri)
+	}
+	ui, ok := meta[metaKeyUI].(appsUIToolWire)
+	if !ok || ui.ResourceURI != uri {
+		t.Fatalf("nested ui form missing or wrong: %#v", meta[metaKeyUI])
+	}
+	// Round-trip JSON: both keys are present on the wire and the flat value
+	// matches.
+	b, _ := json.Marshal(meta)
+	var rt map[string]any
+	if err := json.Unmarshal(b, &rt); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rt[metaKeyUIResourceURIFlat] != uri {
+		t.Errorf("wire JSON flat key = %v, want %q (JSON: %s)", rt[metaKeyUIResourceURIFlat], uri, b)
+	}
+	uiObj, _ := rt[metaKeyUI].(map[string]any)
+	if uiObj["resourceUri"] != uri {
+		t.Errorf("wire JSON nested resourceUri = %v, want %q", uiObj["resourceUri"], uri)
+	}
+	// The opt-in is still tolerated on read in both directions: decoding the
+	// both-keys output yields the nested resourceUri and never surfaces the
+	// control flag.
+	got, ok, err := c.DecodeAppsToolMeta(meta)
+	if err != nil || !ok {
+		t.Fatalf("decode both-keys: ok=%v err=%v", ok, err)
+	}
+	if got.ResourceURI != uri || got.EmitLegacyResourceURI {
+		t.Errorf("decode = %+v, want ResourceURI=%q and EmitLegacyResourceURI=false", got, uri)
+	}
+}
+
+func TestAppsToolMeta_OptInWithoutResourceURIEmitsNothing(t *testing.T) {
+	// The opt-in alone, with no ResourceURI, has nothing to emit — neither the
+	// nested nor the flat key — so _meta.ui is omitted entirely.
+	c := CodecFor(VersionApps20260126)
+	meta, err := c.EncodeAppsToolMeta(nil, AppsToolMeta{EmitLegacyResourceURI: true})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if _, bad := meta[metaKeyUIResourceURIFlat]; bad {
+		t.Error("opt-in with no ResourceURI emitted a flat key")
+	}
+	if _, bad := meta[metaKeyUI]; bad {
+		t.Error("opt-in with no ResourceURI emitted a nested ui key")
+	}
+}
+
 func TestAppsToolMeta_ToleratesDeprecatedFlatForm(t *testing.T) {
 	// A peer that still speaks the deprecated _meta["ui/resourceUri"] form
 	// must be understood on read (RFC §16 item 3; brief 01 §2.3).

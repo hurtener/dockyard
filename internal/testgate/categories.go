@@ -257,11 +257,14 @@ func runCapability(projectDir string, m *manifest.Manifest) Result {
 					fmt.Sprintf("host profile %q did not resolve for app %q: %v", id, a.ID, err))
 				continue
 			}
-			// A signing host profile (e.g. Claude — D-063, D-064) refuses to
-			// derive a stable signed origin without a server URL, by design: an
-			// empty URL would yield a forgeable origin. The capability category
-			// proves the SEAM resolves for every host, not that a real binding
-			// is correctly configured. Each profile declares this honestly via
+			// A signing host profile refuses to derive a stable signed origin
+			// without a server URL, by design: an empty URL would yield a
+			// forgeable origin. (No such profile ships built-in since D-176
+			// retired the Claude derivation — `domain` is now host-supplied
+			// verbatim — but the seam keeps the contract for a future
+			// host-blessed transform.) The capability category proves the SEAM
+			// resolves for every host, not that a real binding is correctly
+			// configured. Each profile declares this honestly via
 			// HostProfile.RequiresServerURL (D-165 — supersedes D-145's
 			// synthetic-URL workaround): a profile that requires a server URL
 			// is exempt from the empty-URL derivation here (its derivation is

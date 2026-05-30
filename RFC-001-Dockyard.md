@@ -482,11 +482,20 @@ Dockyard cannot meaningfully validate against every host in existence.
 
 Two host-specific concerns remain, and both are handled without a capability matrix:
 
-- **`_meta.ui.domain` is auto-derived.** Developers build for all hosts; Dockyard
-  derives the dedicated iframe origin automatically, including host-specific signed
-  forms (e.g. Claude's SHA-256-derived `claudemcpcontent.com` subdomain). These are
-  small **derivation functions behind pluggable host profiles** — algorithms, not
-  capability matrices — and are never hardcoded in the core.
+- **`_meta.ui.domain` is a host-supplied verbatim value.** The MCP Apps spec makes
+  `domain` *host-dependent*: a host **mints** the dedicated iframe origin and
+  publishes the format in its own documentation; *"Servers MUST consult
+  host-specific documentation … If omitted, Host uses default sandbox origin."*
+  Dockyard therefore emits a developer-supplied, host-documented `App.Domain`
+  **verbatim** on `resources/read`; it **never synthesises** a host's signed
+  origin. An empty `Domain` omits `_meta.ui.domain`, so the host uses its default
+  per-conversation origin. The pluggable **host-profile seam** (an interface +
+  factory + driver, AGENTS.md §4.4) is retained for a future host-blessed origin
+  transform — algorithms, not capability matrices — but no built-in profile
+  rewrites `Domain`; the synthesising Claude profile was retired (D-176, which
+  supersedes the auto-derivation of D-062/D-063). Because a dedicated origin is
+  honoured only on a remote connector, a stdio-only server that nonetheless sets a
+  `Domain` gets a loud startup warning.
 - **Harbor is the reference client.** Dockyard keeps Harbor's MCP client fully
   MCP-spec-compliant, so the two ecosystem halves are validated against each other
   and stay aligned as the spec evolves.

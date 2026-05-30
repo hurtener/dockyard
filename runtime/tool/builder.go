@@ -159,7 +159,16 @@ func (b *Builder[In, Out]) Register(s *server.Server) error {
 			return fmt.Errorf("dockyard/runtime/tool: tool %q: .UI(%q) references no registered App — "+
 				"register the App with apps.Register before registering the tool", b.name, b.uiResource)
 		}
-		meta, err := apps.ToolMetaFor(apps.ToolLink{ResourceURI: link.URI, Visibility: b.uiVisibility})
+		meta, err := apps.ToolMetaFor(apps.ToolLink{
+			ResourceURI: link.URI,
+			Visibility:  b.uiVisibility,
+			// Thread the server-level opt-in (Options.EmitLegacyToolUIMeta;
+			// D-177) so a host that still reads the deprecated flat tool-UI
+			// _meta key gets it alongside the nested form. Default off —
+			// RFC-compliant nested-only output. The flat key's literal lives
+			// only in internal/protocolcodec (P3).
+			EmitLegacyResourceURI: s.EmitLegacyToolUIMeta(),
+		})
 		if err != nil {
 			return fmt.Errorf("dockyard/runtime/tool: tool %q: wire _meta.ui: %w", b.name, err)
 		}

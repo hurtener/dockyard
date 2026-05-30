@@ -410,6 +410,33 @@ func TestToolMetaForNestedFormOnly(t *testing.T) {
 	}
 }
 
+// TestToolMetaForLegacyOptIn proves the D-177 opt-in: ToolLink with
+// EmitLegacyResourceURI set emits BOTH the nested _meta.ui.resourceUri and the
+// deprecated flat key, with the flat value equal to the nested resourceUri. The
+// default (TestToolMetaForNestedFormOnly above) stays nested-only.
+func TestToolMetaForLegacyOptIn(t *testing.T) {
+	t.Parallel()
+	const uri = "ui://x/m"
+	meta, err := apps.ToolMetaFor(apps.ToolLink{
+		ResourceURI:           uri,
+		EmitLegacyResourceURI: true,
+	})
+	if err != nil {
+		t.Fatalf("ToolMetaFor: %v", err)
+	}
+	flat, ok := meta["ui/resourceUri"].(string)
+	if !ok {
+		t.Fatalf("opt-in did not emit the flat key: %#v", meta)
+	}
+	if flat != uri {
+		t.Errorf("flat key = %q, want it equal to the nested resourceUri %q", flat, uri)
+	}
+	ui, ok := meta["ui"].(map[string]any)
+	if !ok || ui["resourceUri"] != uri {
+		t.Fatalf("_meta.ui.resourceUri missing or wrong: %#v", meta["ui"])
+	}
+}
+
 // TestAppVisibilityOnly proves a UI-only action tool (visibility ["app"]) is
 // encoded faithfully (brief 01 §2.3).
 func TestAppVisibilityOnly(t *testing.T) {
