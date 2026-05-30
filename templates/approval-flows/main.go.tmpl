@@ -50,10 +50,13 @@ var uiBundle embed.FS
 const httpAddr = "127.0.0.1:8080"
 
 // appURI is the ui:// URI under which the approvals App is served as an
-// MCP resource. The host segment is the manifest name (RFC §7.1 + brief
-// 01 §2.2).
+// MCP resource. The host segment is the manifest name; the html-style
+// `.../index.html` path matches the reference MCP Apps SDK convention
+// (RFC §7.1 + brief 01 §2.2; D-178). The framework treats the URI as an
+// opaque string, so the convention is documentation only — an existing
+// project's URI may keep any ui:// form.
 const (
-	appURI  = "ui://__PROJECT_NAME__/approvals"
+	appURI  = "ui://__PROJECT_NAME__/approvals/index.html"
 	appName = "approvals"
 )
 
@@ -163,7 +166,7 @@ func main() {
 }
 
 // registerApp installs the embedded single-file Svelte bundle as the
-// `ui://<name>/approvals` MCP App resource (RFC §7.1, §7.4 — inline,
+// `ui://<name>/approvals/index.html` MCP App resource (RFC §7.1, §7.4 — inline,
 // deny-by-default CSP). Every approval tool declares `.UI(appName)` so its
 // result renders inside this App in the host's chat surface.
 func registerApp(srv *server.Server) error {

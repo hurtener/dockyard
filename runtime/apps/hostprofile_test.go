@@ -3,7 +3,6 @@ package apps_test
 import (
 	"errors"
 	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/hurtener/dockyard/runtime/apps"
@@ -20,9 +19,28 @@ func (f fakeProfile) ID() string                                 { return f.id }
 func (fakeProfile) DeriveDomain(label, _ string) (string, error) { return label, nil }
 func (fakeProfile) RequiresServerURL() bool                      { return false }
 
+// signingProfile is a test-only host profile that declares RequiresServerURL —
+// the signing-host shape the seam keeps a home for after the Claude derivation
+// was retired (D-176). It proves the interface's RequiresServerURL branch and
+// the testgate's empty-URL exemption stay exercised without shipping a
+// synthesising built-in.
+type signingProfile struct{ id string }
+
+func (s signingProfile) ID() string { return s.id }
+func (signingProfile) DeriveDomain(label, serverURL string) (string, error) {
+	if label == "" {
+		return "", nil
+	}
+	if serverURL == "" {
+		return "", errors.New("signing profile requires a server URL")
+	}
+	return label + ".signed.example", nil
+}
+func (signingProfile) RequiresServerURL() bool { return true }
+
 func TestHostProfileFor_BuiltIns(t *testing.T) {
 	t.Parallel()
-	for _, id := range []string{"generic", "claude"} {
+	for _, id := range []string{"generic"} {
 		p, err := apps.HostProfileFor(id)
 		if err != nil {
 			t.Fatalf("HostProfileFor(%q): %v", id, err)
@@ -64,8 +82,8 @@ func TestRegisterHostProfile_Validation(t *testing.T) {
 		t.Error("RegisterHostProfile(empty id) = nil, want error")
 	}
 	// A duplicate of a built-in id must be rejected — drivers cannot shadow.
-	if err := apps.RegisterHostProfile(fakeProfile{id: "claude"}); err == nil {
-		t.Error("RegisterHostProfile(duplicate \"claude\") = nil, want error")
+	if err := apps.RegisterHostProfile(fakeProfile{id: "generic"}); err == nil {
+		t.Error("RegisterHostProfile(duplicate \"generic\") = nil, want error")
 	}
 }
 
@@ -105,87 +123,55 @@ func TestGenericProfile_VerbatimPassthrough(t *testing.T) {
 	}
 }
 
-func TestClaudeProfile_SignedOriginForm(t *testing.T) {
+// TestSigningProfile_SeamRetained proves the host-profile seam still carries a
+// signing-shaped profile after the Claude derivation was retired (D-176): a
+// registered profile that declares RequiresServerURL derives a stable origin
+// with a server URL and refuses one without it. The built-in registry ships
+// only "generic" (verbatim); a host-blessed transform lives behind the seam
+// exactly like this.
+func TestSigningProfile_SeamRetained(t *testing.T) {
 	t.Parallel()
-	p, err := apps.HostProfileFor("claude")
+	const id = "test-signing-seam-retained"
+	if err := apps.RegisterHostProfile(signingProfile{id: id}); err != nil {
+		t.Fatalf("RegisterHostProfile(%q): %v", id, err)
+	}
+	p, err := apps.HostProfileFor(id)
 	if err != nil {
-		t.Fatalf("HostProfileFor(claude): %v", err)
+		t.Fatalf("HostProfileFor(%q): %v", id, err)
 	}
-	const serverURL = "https://weather.example.com/mcp"
-	got, err := p.DeriveDomain("dashboard", serverURL)
+	got, err := p.DeriveDomain("dashboard", "https://weather.example.com/mcp")
 	if err != nil {
-		t.Fatalf("claude DeriveDomain: %v", err)
+		t.Fatalf("signing DeriveDomain: %v", err)
 	}
-	if !strings.HasSuffix(got, ".claudemcpcontent.com") {
-		t.Fatalf("claude origin %q is not under claudemcpcontent.com", got)
+	if !dnsLabel.MatchString("dashboard") || got != "dashboard.signed.example" {
+		t.Errorf("signing DeriveDomain = %q, want dashboard.signed.example", got)
 	}
-	label, _, _ := strings.Cut(got, ".")
-	if len(label) != 32 {
-		t.Errorf("claude hash label %q length = %d, want 32", label, len(label))
+	if _, err := p.DeriveDomain("dashboard", ""); err == nil {
+		t.Error("signing DeriveDomain with empty serverURL = nil error, want error")
 	}
-	if !dnsLabel.MatchString(label) {
-		t.Errorf("claude hash label %q is not a valid DNS label", label)
-	}
-	if label != strings.ToLower(label) {
-		t.Errorf("claude hash label %q is not lowercase hex", label)
+	if got, err := p.DeriveDomain("", "https://weather.example.com/mcp"); err != nil || got != "" {
+		t.Errorf("signing DeriveDomain(empty label) = %q, %v; want \"\", nil", got, err)
 	}
 }
 
-func TestClaudeProfile_Deterministic(t *testing.T) {
-	t.Parallel()
-	p, _ := apps.HostProfileFor("claude")
-	const url = "https://a.example.com/mcp"
-	a, _ := p.DeriveDomain("main", url)
-	b, _ := p.DeriveDomain("main", url)
-	if a != b {
-		t.Errorf("claude derivation not deterministic: %q != %q", a, b)
-	}
-}
-
-func TestClaudeProfile_VariesWithInput(t *testing.T) {
-	t.Parallel()
-	p, _ := apps.HostProfileFor("claude")
-	base, _ := p.DeriveDomain("main", "https://a.example.com/mcp")
-	otherURL, _ := p.DeriveDomain("main", "https://b.example.com/mcp")
-	otherLabel, _ := p.DeriveDomain("other", "https://a.example.com/mcp")
-	if base == otherURL {
-		t.Error("claude origin did not vary with server URL")
-	}
-	if base == otherLabel {
-		t.Error("claude origin did not vary with domain label")
-	}
-}
-
-func TestClaudeProfile_EmptyLabel(t *testing.T) {
-	t.Parallel()
-	p, _ := apps.HostProfileFor("claude")
-	got, err := p.DeriveDomain("", "https://a.example.com/mcp")
-	if err != nil || got != "" {
-		t.Errorf("claude DeriveDomain(empty label) = %q, %v; want \"\", nil", got, err)
-	}
-}
-
-func TestClaudeProfile_MissingServerURL(t *testing.T) {
-	t.Parallel()
-	p, _ := apps.HostProfileFor("claude")
-	if _, err := p.DeriveDomain("main", ""); err == nil {
-		t.Error("claude DeriveDomain with empty serverURL = nil error, want error")
-	}
-}
-
-// TestHostProfile_RequiresServerURL is the table-driven assertion of the new
-// HostProfile method D-165 introduced — every shipped profile declares
-// whether its derivation depends on a non-empty server URL. The testgate
-// capability category consults this to exercise every profile honestly
-// without the synthetic-URL workaround D-165 retired.
+// TestHostProfile_RequiresServerURL is the table-driven assertion of the
+// HostProfile method (D-165): a profile declares whether its derivation depends
+// on a non-empty server URL. The testgate capability category consults this to
+// exercise every profile honestly without a synthetic placeholder URL. The
+// built-in "generic" profile requires none; a test signing profile stands in
+// for the signing-host shape the seam retains (D-176).
 func TestHostProfile_RequiresServerURL(t *testing.T) {
 	t.Parallel()
+	const signingID = "test-requires-server-url-signing"
+	if err := apps.RegisterHostProfile(signingProfile{id: signingID}); err != nil {
+		t.Fatalf("RegisterHostProfile(%q): %v", signingID, err)
+	}
 	tests := []struct {
 		id   string
 		want bool
 	}{
 		{"generic", false},
-		{"claude", true},
+		{signingID, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {

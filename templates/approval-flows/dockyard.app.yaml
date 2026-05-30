@@ -48,7 +48,7 @@ tools:
 
 apps:
   - id: approvals
-    uri: ui://__PROJECT_NAME__/approvals
+    uri: ui://__PROJECT_NAME__/approvals/index.html
     entry: web/src/App.svelte
     # Inline only — the same posture as analytics-widgets (D-126); the
     # bridge will only ever grant inline.

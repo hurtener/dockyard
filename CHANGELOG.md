@@ -23,6 +23,46 @@ deliberately deferred to V2.
 
 (No entries yet — the next release surface will land here.)
 
+## [1.6.0] - 2026-05-30
+
+### Changed
+
+- **`_meta.ui.domain` is now a host-supplied verbatim value; server-side
+  auto-derivation is retired. (Behaviour change — minor.)** The MCP Apps spec
+  makes `domain` host-dependent — the host *mints* the dedicated iframe origin
+  and documents its format; a server copies it verbatim or leaves it empty.
+  `App.Domain` is emitted on `resources/read` **byte-for-byte**; Dockyard no
+  longer synthesises Claude's `{hash}.claudemcpcontent.com` subdomain (which a
+  local connector rejects). **What changes for you:** a project that set
+  `HostProfile: "claude"` + `Domain` previously got a derived
+  `claudemcpcontent.com` origin and now gets its `Domain` verbatim — set `Domain`
+  to the exact origin your host documents for a verified remote deployment, or
+  leave it empty for the host's default per-conversation origin. `App.HostProfile`
+  and `App.ServerURL` are **deprecated** (retained, ignored for derivation); the
+  pluggable host-profile seam stays for a future host-blessed transform. The
+  default scaffold and templates set no `Domain`, so they are unaffected. (D-176)
+
+- **A stdio-only server that sets a `Domain` now warns at startup.** A dedicated
+  origin is honoured only on a remote connector; a local (stdio) connector
+  ignores it. `ServeStdio` logs a loud `slog.Warn` naming the App;
+  `HTTPHandler` does not. (D-176)
+
+- **The product templates scaffold the html-style
+  `ui://<server>/<app>/index.html` resource URI.** This matches the reference MCP
+  Apps SDK convention. The framework treats the `ui://` URI as an opaque string,
+  so this is a convention + docs change only — an existing project's
+  `ui://<server>/<app>` URI keeps working. (D-178)
+
+### Added
+
+- **A server-level opt-in to additionally emit the deprecated flat tool-UI
+  `_meta` key.** `server.Options{EmitLegacyToolUIMeta: true}` makes every
+  UI-bearing tool registered through the `runtime/tool` builder carry the
+  deprecated flat key alongside the canonical nested `_meta.ui.resourceUri`, for
+  a host that still reads the flat form. The default (off) is unchanged
+  RFC-compliant nested-only output; the 2026-01-26 spec marks the flat form
+  deprecated, so Dockyard never emits it by default. (D-177)
+
 ## [1.5.0] - 2026-05-29
 
 ### Changed

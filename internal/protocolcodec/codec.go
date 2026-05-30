@@ -36,8 +36,9 @@ type Codec interface {
 	// EncodeAppsToolMeta merges the Apps tool metadata into base and returns
 	// the resulting `_meta` map. base may be nil; it is never mutated. If m
 	// carries no UI information the `ui` key is omitted. The deprecated flat
-	// `ui/resourceUri` key is removed if present in base — encoders never
-	// emit it.
+	// `ui/resourceUri` key is removed if present in base — encoders never emit
+	// it UNLESS m.EmitLegacyResourceURI is set, the explicit opt-in (D-177), in
+	// which case it is written equal to the nested resourceUri.
 	EncodeAppsToolMeta(base Meta, m AppsToolMeta) (Meta, error)
 
 	// DecodeAppsToolMeta extracts Apps tool metadata from a `_meta` map. It
@@ -198,14 +199,19 @@ func (v1Codec) EncodeAppsToolMeta(base Meta, m AppsToolMeta) (Meta, error) {
 	if out == nil {
 		out = Meta{}
 	}
-	// Encoders never emit the deprecated flat form: strip it if a caller's
-	// base map happened to carry it (RFC §16 item 3).
+	// By default encoders never emit the deprecated flat form: strip it if a
+	// caller's base map happened to carry it (RFC §16 item 3). The opt-in
+	// (m.EmitLegacyResourceURI; D-177) re-adds it below, equal to the nested
+	// resourceUri, for a host that still reads the flat key.
 	delete(out, metaKeyUIResourceURIFlat)
 	if !m.hasUI() {
 		delete(out, metaKeyUI)
 		return out, nil
 	}
-	out[metaKeyUI] = appsUIToolWire(m)
+	out[metaKeyUI] = appsUIToolWire{ResourceURI: m.ResourceURI, Visibility: m.Visibility}
+	if m.EmitLegacyResourceURI && m.ResourceURI != "" {
+		out[metaKeyUIResourceURIFlat] = m.ResourceURI
+	}
 	return out, nil
 }
 
@@ -219,7 +225,9 @@ func (v1Codec) DecodeAppsToolMeta(meta Meta) (AppsToolMeta, bool, error) {
 		if err := remarshal(raw, &w); err != nil {
 			return AppsToolMeta{}, false, fmt.Errorf("%w: _meta.ui: %w", ErrMalformedMeta, err)
 		}
-		m := AppsToolMeta(w)
+		// EmitLegacyResourceURI is a control flag, never a wire field — the
+		// decoder leaves it false (D-177).
+		m := AppsToolMeta{ResourceURI: w.ResourceURI, Visibility: w.Visibility}
 		if m.hasUI() {
 			return m, true, nil
 		}

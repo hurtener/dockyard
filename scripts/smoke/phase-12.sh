@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Smoke script for Phase 12 — host profiles + _meta.ui.domain derivation.
-# Pluggable host profiles (interface + factory + driver) carry host-specific
-# derivation functions; _meta.ui.domain is auto-derived, including Claude's
-# SHA-256 signed claudemcpcontent.com origin. One assertion per acceptance
-# criterion (docs/plans/phase-12-host-profiles.md).
+# Smoke script for Phase 12 — host profiles + _meta.ui.domain.
+# The pluggable host-profile seam (interface + factory + driver) is retained as
+# the extensibility point for a future host-blessed origin transform. As of
+# D-176 (v1.6 wave A) _meta.ui.domain is HOST-SUPPLIED VERBATIM — the
+# synthesising Claude profile (D-062/D-063) is retired and the seam ships only
+# the generic verbatim profile. One assertion per acceptance criterion
+# (docs/plans/phase-12-host-profiles.md, as amended by D-176).
 # A check against an unbuilt surface skips rather than fails — see common.sh.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
@@ -42,17 +44,32 @@ else
   skip "host-profile seam not built — seam-shape check deferred"
 fi
 
-# 4. The Claude profile is a driver file that self-registers via init().
-if [ -f runtime/apps/hostprofile_claude.go ]; then
-  if grep -q 'claudemcpcontent.com' runtime/apps/hostprofile_claude.go \
-     && grep -q 'sha256' runtime/apps/hostprofile_claude.go \
-     && grep -q 'func init()' runtime/apps/hostprofile_claude.go; then
-    ok "claude driver derives a SHA-256 claudemcpcontent.com origin, init()-registered"
+# 4. The generic verbatim profile is a driver file that self-registers via
+#    init(); the synthesising Claude profile is retired (D-176).
+if [ -f runtime/apps/hostprofile_generic.go ]; then
+  if grep -q 'func init()' runtime/apps/hostprofile_generic.go \
+     && grep -q 'RegisterHostProfile' runtime/apps/hostprofile_generic.go; then
+    ok "generic verbatim profile is init()-registered behind the seam"
   else
-    fail "claude driver missing SHA-256 derivation, the apex, or init() registration"
+    fail "generic profile missing init() registration"
   fi
 else
-  skip "runtime/apps/hostprofile_claude.go not built"
+  skip "runtime/apps/hostprofile_generic.go not built"
+fi
+
+# 4b. No production driver synthesises a host's signed origin — the derivation
+#     is retired and _meta.ui.domain is host-supplied verbatim (D-176). (Test
+#     files legitimately use such an origin as a verbatim example value, so the
+#     scan is non-test production sources only.)
+if [ -f runtime/apps/hostprofile.go ]; then
+  synth_hits=$(grep -l 'claudemcpcontent.com\|sha256' runtime/apps/*.go 2>/dev/null | grep -v '_test.go' || true)
+  if [ ! -f runtime/apps/hostprofile_claude.go ] && [ -z "$synth_hits" ]; then
+    ok "the synthesising Claude profile is retired — no driver mints a signed origin"
+  else
+    fail "a host-profile driver still synthesises a signed origin (D-176 retires it)"
+  fi
+else
+  skip "host-profile seam not built — synthesis-retired check deferred"
 fi
 
 # 5. The Apps core (apps.go) contains no hardcoded host name — host-specific
@@ -67,25 +84,27 @@ else
   skip "runtime/apps/apps.go not built"
 fi
 
-# 6. _meta.ui.domain derivation is wired into the resource-read choke point.
+# 6. _meta.ui.domain is carried VERBATIM at the resource-read choke point —
+#    resourceMeta passes App.Domain straight to the codec, no derivation (D-176).
 if [ -f runtime/apps/apps.go ]; then
-  if grep -q 'DerivedDomain' runtime/apps/apps.go; then
-    ok "resourceMeta routes _meta.ui.domain through DerivedDomain (auto-derived)"
+  if grep -q 'Domain:        a.Domain' runtime/apps/apps.go \
+     && ! grep -q 'DerivedDomain' runtime/apps/apps.go; then
+    ok "resourceMeta carries _meta.ui.domain verbatim (App.Domain, no derivation)"
   else
-    fail "apps.go does not route _meta.ui.domain through the derivation choke point"
+    fail "apps.go does not carry _meta.ui.domain verbatim (D-176)"
   fi
 else
-  skip "runtime/apps/apps.go not built — derivation-wiring check deferred"
+  skip "runtime/apps/apps.go not built — verbatim-domain check deferred"
 fi
 
-# 7. The phase-12 host-profile + domain-derivation tests pass under -race.
+# 7. The phase-12 host-profile + verbatim-domain tests pass under -race.
 if [ -f runtime/apps/hostprofile_test.go ]; then
   if CGO_ENABLED=1 go test -race -count=1 \
-       -run 'HostProfile|Claude|Generic|DerivedDomain|ResourceMeta_Domain' \
+       -run 'HostProfile|Generic|Signing|DerivedDomain|ResourceMeta_Domain' \
        ./runtime/apps/... >/dev/null 2>&1; then
-    ok "phase-12 host-profile + domain-derivation tests pass under -race"
+    ok "phase-12 host-profile + verbatim-domain tests pass under -race"
   else
-    fail "phase-12 host-profile / domain-derivation tests failed"
+    fail "phase-12 host-profile / verbatim-domain tests failed"
   fi
 else
   skip "phase-12 host-profile tests not built"

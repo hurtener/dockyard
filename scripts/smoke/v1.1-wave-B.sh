@@ -101,12 +101,13 @@ else
   fail "HostProfile.RequiresServerURL method missing from the interface"
 fi
 
-# 12. Both shipped profiles implement RequiresServerURL.
-if grep -q "RequiresServerURL" runtime/apps/hostprofile_generic.go \
-   && grep -q "RequiresServerURL" runtime/apps/hostprofile_claude.go; then
-  ok "generic + claude profiles implement RequiresServerURL"
+# 12. The shipped generic profile implements RequiresServerURL. (D-176 retired
+#     the Claude profile; the seam now ships only the generic verbatim profile,
+#     but the RequiresServerURL contract survives for a future signing profile.)
+if grep -q "RequiresServerURL" runtime/apps/hostprofile_generic.go; then
+  ok "the shipped generic profile implements RequiresServerURL"
 else
-  fail "one or both shipped host profiles do not implement RequiresServerURL"
+  fail "the shipped generic host profile does not implement RequiresServerURL"
 fi
 
 # 13. The capability category consults RequiresServerURL.

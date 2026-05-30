@@ -52,22 +52,30 @@ type App struct {
 	// Permissions is the App's sandbox-capability request. The zero value
 	// requests none.
 	Permissions Permissions
-	// Domain is the App's host-agnostic domain *label* — a request for a stable
-	// dedicated sandbox origin. Dockyard does not carry it verbatim: it is the
-	// input to host-profile derivation, which produces the concrete
-	// _meta.ui.domain value on the resources/read response (RFC §7.5, D-062).
-	// An empty Domain requests no dedicated origin and omits _meta.ui.domain.
+	// Domain is the App's dedicated sandboxed-iframe origin (_meta.ui.domain) —
+	// a host-supplied, verbatim value. It is host-dependent and
+	// remote-connector-only: a developer copies the exact origin the host
+	// documents for a verified remote (HTTP) deployment — each host publishes
+	// its own format (commonly a hash-based or URL-derived subdomain) — and
+	// Dockyard emits it byte-for-byte on every resources/read. Dockyard does NOT
+	// synthesise or rewrite it — the host mints the value (the MCP Apps spec:
+	// "Servers MUST consult host-specific documentation for the expected domain
+	// format"; D-176, supersedes the auto-derivation of D-062/D-063). An empty
+	// Domain (the default) omits _meta.ui.domain, so the host uses its default
+	// per-conversation sandbox origin. Setting Domain on a stdio-only server has
+	// no effect on a local connector and logs a startup warning (RFC §7.5).
 	Domain string
-	// HostProfile is the host id selecting the host profile whose derivation
-	// function turns the Domain label into the concrete _meta.ui.domain origin.
-	// An empty value selects the default verbatim profile — the Phase 09
-	// behaviour (D-049). A signing host's id selects its derived origin form.
-	// Host ids and their derivations live behind the host-profile seam
-	// (hostprofile.go); the Apps core names no host (RFC §7.5, D-062).
+	// HostProfile is Deprecated: it no longer drives any domain derivation.
+	// _meta.ui.domain is now the verbatim, host-supplied Domain (D-176) — the
+	// host mints the origin and Dockyard never computes a host's signed form, so
+	// the field is ignored. It is retained for backward compatibility. The
+	// host-profile seam (RegisterHostProfile, the HostProfile interface) remains
+	// for a future host-blessed transform, but no built-in profile rewrites
+	// Domain.
 	HostProfile string
-	// ServerURL is the MCP server URL the dedicated origin is derived from. It
-	// is required when Domain is set and HostProfile selects a signing host;
-	// the default verbatim profile ignores it.
+	// ServerURL is Deprecated: it was the input a signing host profile derived a
+	// dedicated origin from. With derivation retired (D-176) it is ignored and
+	// retained only for backward compatibility.
 	ServerURL string
 	// PrefersBorder is the App's visual-boundary preference. A nil pointer
 	// declares none and lets the host decide.
@@ -121,19 +129,17 @@ func normalizeMeta(m protocolcodec.Meta) (map[string]any, error) {
 // external origins (RFC §7.4, brief 01 §2.5). When the App declares any of
 // them, _meta.ui carries exactly those fields.
 func (a App) resourceMeta() (map[string]any, error) {
-	// _meta.ui.domain is auto-derived through the pluggable host-profile seam:
-	// the App declares a host-agnostic Domain label, the host profile derives
-	// the concrete dedicated origin (RFC §7.5, D-062). The core never names a
-	// host — derivation lives behind DerivedDomain.
-	domain, err := DerivedDomain(a.HostProfile, a.Domain, a.ServerURL)
-	if err != nil {
-		return nil, fmt.Errorf("dockyard/runtime/apps: derive domain for %q: %w", a.URI, err)
-	}
+	// _meta.ui.domain is the host-supplied dedicated origin, carried VERBATIM
+	// (D-176, supersedes D-062/D-063). The MCP Apps spec makes `domain` a
+	// host-minted value a server copies from host-specific documentation —
+	// Dockyard never synthesises a host's signed origin. An empty Domain omits
+	// _meta.ui.domain (the host's default per-conversation origin). HostProfile
+	// / ServerURL are retained for compatibility but no longer consulted.
 	codec := protocolcodec.CodecFor(protocolcodec.VersionApps20260126)
 	meta, err := codec.EncodeAppsResourceMeta(nil, protocolcodec.AppsResourceMeta{
 		CSP:           a.CSP.toCodec(),
 		Permissions:   a.Permissions.toCodec(),
-		Domain:        domain,
+		Domain:        a.Domain,
 		PrefersBorder: a.PrefersBorder,
 	})
 	if err != nil {
@@ -222,7 +228,7 @@ func Register(s *server.Server, app App) error {
 	// .UI(app.Name) to this App's URI and emit _meta.ui (RFC §7.1; D-173).
 	// This is what makes tool.New[...].UI(name).Register(srv) link the tool to
 	// its App without the caller hand-building _meta.
-	if err := s.RegisterAppLink(app.Name, server.AppLink{URI: app.URI}); err != nil {
+	if err := s.RegisterAppLink(app.Name, server.AppLink{URI: app.URI, Domain: app.Domain}); err != nil {
 		return fmt.Errorf("dockyard/runtime/apps: register App %q: %w", app.URI, err)
 	}
 	return nil
@@ -238,6 +244,15 @@ type ToolLink struct {
 	// VisibilityApp. An empty slice means "unspecified" — a host treats that as
 	// ["model","app"]. Set ["app"] for a UI-only action tool (brief 01 §2.3).
 	Visibility []string
+	// EmitLegacyResourceURI additionally emits the DEPRECATED flat tool-UI
+	// _meta key alongside the canonical nested `_meta.ui.resourceUri` (D-177).
+	// The default (false) is RFC-compliant nested-only output (RFC §7.1, brief
+	// 01 §2.3). The runtime/tool builder sets it from the server-level
+	// Options.EmitLegacyToolUIMeta opt-in; a direct ToolMetaFor caller may set
+	// it for a host that still reads the flat key. It is a wire-compat escape
+	// hatch, not a recommended posture. The flat key's literal lives only in
+	// internal/protocolcodec (P3).
+	EmitLegacyResourceURI bool
 }
 
 func (l ToolLink) validate() error {
@@ -259,8 +274,10 @@ func (l ToolLink) validate() error {
 
 // ToolMetaFor builds the tool-definition _meta map carrying _meta.ui for link
 // (RFC §7.1, brief 01 §2.3). The encoding goes through internal/protocolcodec,
-// which emits only the nested {resourceUri, visibility} form and never the
-// deprecated flat tool-UI _meta form (P3, brief 01 §2.3).
+// which emits the nested {resourceUri, visibility} form. By default it never
+// emits the deprecated flat tool-UI _meta form (P3, brief 01 §2.3); setting
+// link.EmitLegacyResourceURI additionally writes the flat tool-UI key for a
+// host that still reads it (D-177).
 //
 // Use it when registering the App's tool:
 //
@@ -275,8 +292,9 @@ func ToolMetaFor(link ToolLink) (map[string]any, error) {
 	}
 	codec := protocolcodec.CodecFor(protocolcodec.VersionApps20260126)
 	meta, err := codec.EncodeAppsToolMeta(nil, protocolcodec.AppsToolMeta{
-		ResourceURI: link.ResourceURI,
-		Visibility:  link.Visibility,
+		ResourceURI:           link.ResourceURI,
+		Visibility:            link.Visibility,
+		EmitLegacyResourceURI: link.EmitLegacyResourceURI,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("dockyard/runtime/apps: encode tool _meta for %q: %w",

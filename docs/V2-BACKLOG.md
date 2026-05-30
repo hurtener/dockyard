@@ -155,13 +155,19 @@ recorded order in the decisions log. Each item carries:
 
 ### Analytics-widgets / Claude signed-origin follow-up
 
-> **Status:** **Claimed by v1.1 wave B (D-165), Path B.** The
+> **Status:** **Claimed by v1.1 wave B (D-165), Path B**, then **largely
+> overtaken by D-176 (v1.6 wave A).** The
 > `HostProfile` interface gained a `RequiresServerURL() bool` method;
 > the capability category in `internal/testgate/categories.go` now
-> consults it (the `syntheticServerURL` constant retired). See
-> `docs/plans/v1.1-wave-B-runtime-cleanups.md` for the implementation
-> details. The entry stays here as the audit trail of what was
-> deferred and when it shipped.
+> consults it (the `syntheticServerURL` constant retired). D-176 then
+> **retired the signed-origin derivation entirely**: `_meta.ui.domain`
+> is host-supplied verbatim, so the "let an App declare its domain so the
+> derivation has a stable input" framing below no longer applies. The
+> one live remnant — surfacing `domain` as a **manifest field** so a
+> *static* `validate` gate can flag a `domain` set on a stdio-only server
+> (D-176 ships only the runtime `slog.Warn`) — is carried by the new
+> **"Static `validate` gate for `domain`-on-stdio"** item below. The
+> entry stays here as the audit trail of what was deferred and when.
 
 - **Origin.** Phase 29 live-skill validation surfaced the gap;
   `internal/testgate/categories.go`'s `runCapability` carries the
@@ -213,6 +219,56 @@ recorded order in the decisions log. Each item carries:
   media/image example exercises it end to end through `dockyard inspect`;
   the conformance suite asserts the host-built policy honours the
   declaration.
+
+### Claude Desktop renders the reference App locally but not a wire-matched Dockyard App (spike)
+
+- **Origin.** Upstream-team feedback (2026-05-30), the OPEN item of the
+  v1.6 wave A plan (`docs/plans/v1.6-wave-A-apps-spec-alignment.md`).
+  Related: D-176 (which fixed the one *known*
+  defect — server-derived `_meta.ui.domain` rejected on a local
+  connector — and split this open investigation out as a spike).
+- **What was deferred + why.** After building an inline MCP App on
+  v1.5.0 and diffing it, over raw MCP, against the official
+  `@modelcontextprotocol/ext-apps` reference app (`pengui-slides`), the
+  team found Claude Desktop renders `pengui` locally but **not** a
+  Dockyard App whose wire output was matched (including, in their
+  testing, both the nested and the flat tool-UI `_meta` keys — see
+  D-177, which makes the flat key an opt-in rather
+  than betting the default on this unproven change). This is an
+  **investigation, not a known Dockyard defect**: it needs a
+  Claude-Desktop repro loop to isolate, and may yield a fix, a doc, or a
+  confirmed host-side limitation — so it is not gated into the wave.
+- **Definition of done.** A Claude-Desktop repro loop systematically
+  diffs a Dockyard App against `pengui-slides` across resource
+  `name`/`title`/`description`, opener-tool `visibility`,
+  module-vs-IIFE script shape, and possible per-connector `_meta`
+  caching, and lands either: a framework fix (with a regression test), a
+  documented host-side limitation (in the `attach-a-ui-resource` skill +
+  the docs-site Apps guide), or a confirmed "host renders correctly,
+  nothing to change" note. A tracking issue carries the running diff.
+
+### Static `validate` gate for `domain`-on-stdio
+
+- **Origin.** D-176 (v1.6 wave A). The
+  static-feasible half of the upstream feedback's §5 (a silent
+  misconfiguration passing `validate`) ships as a **runtime** `slog.Warn`
+  in D-176; a *static* gate is the deferred remnant.
+- **What was deferred + why.** `validate`/`testgate` are **static by
+  design** (D-082): they read the manifest + contracts, they do not
+  build or run the server, so they cannot see that an App emitted
+  `_meta.ui` (or a `domain`) on the wire. `App.Domain` is set
+  **programmatically** in `apps.Register` today and has no manifest
+  surface, so a static check has nothing to read. The same static-vs-
+  runtime wall is why "assert a UI tool actually emits `_meta.ui` on the
+  wire" stays deferred (D-173): a wire assertion needs an ephemeral
+  server run (the D-081 pattern), not a static gate.
+- **Definition of done.** A manifest `apps[].domain` field (or
+  equivalent) surfaces the dedicated origin statically; a
+  `checkAppDomainTransport` `validate` check flags a non-empty `domain`
+  on a server whose only declared transport is stdio (mirroring the
+  runtime warning); the scaffold/templates document the field; the
+  related "UI tool emits `_meta.ui` on the wire" assertion lands as an
+  ephemeral-server run if pursued at the same time.
 
 ### Bridge View-side task-progress channel
 

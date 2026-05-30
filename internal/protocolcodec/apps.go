@@ -28,10 +28,20 @@ type AppsToolMeta struct {
 	// that as ["model","app"]. Dockyard preserves it as-given and lets the
 	// caller decide whether to default it.
 	Visibility []string
+	// EmitLegacyResourceURI opts the encoder into additionally writing the
+	// DEPRECATED flat `_meta["ui/resourceUri"]` key alongside the canonical
+	// nested `_meta.ui.resourceUri` (D-177). It is a control flag, NOT a wire
+	// field — the encoder reads it but never serialises it, and the decoder
+	// never sets it. The default (false) is the RFC-compliant nested-only
+	// output; the 2026-01-26 spec marks the flat form deprecated, so it is
+	// emitted only on an explicit opt-in (the server-level
+	// Options.EmitLegacyToolUIMeta, threaded by runtime/apps).
+	EmitLegacyResourceURI bool
 }
 
 // hasUI reports whether the tool meta carries any Apps information worth
-// emitting.
+// emitting. The legacy-flat control flag alone does not count: with no
+// ResourceURI there is nothing to emit, flat or nested.
 func (m AppsToolMeta) hasUI() bool {
 	return m.ResourceURI != "" || len(m.Visibility) > 0
 }
@@ -104,8 +114,10 @@ type AppsExtensionCapability struct {
 
 // ---- wire shapes (raw `_meta` / capability JSON; stay inside the seam) ----
 
-// appsUIToolWire is the value of the `_meta.ui` key on an Apps tool. Its field
-// layout deliberately matches [AppsToolMeta] so the two are convertible.
+// appsUIToolWire is the value of the `_meta.ui` key on an Apps tool. It mirrors
+// the wire half of [AppsToolMeta]; the encoder/decoder map the two field by
+// field (AppsToolMeta also carries the non-wire EmitLegacyResourceURI control
+// flag, so the two are no longer a direct type conversion).
 type appsUIToolWire struct {
 	ResourceURI string   `json:"resourceUri,omitempty"`
 	Visibility  []string `json:"visibility,omitempty"`

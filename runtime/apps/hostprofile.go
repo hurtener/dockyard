@@ -12,37 +12,42 @@ import (
 var ErrUnknownHost = errors.New("dockyard/runtime/apps: unknown host profile")
 
 // HostProfile is a pluggable bundle of host-specific *derivation functions* —
-// algorithms, never a capability matrix (RFC §7.5, D-011, D-012). A profile
-// captures the small, host-specific quirks Dockyard must reproduce without
-// hardcoding a host list in the Apps core; today that is one quirk: deriving
-// the dedicated sandboxed-iframe origin (`_meta.ui.domain`).
+// algorithms, never a capability matrix (RFC §7.5, D-011, D-012). It is the
+// extensibility seam (AGENTS.md §4.4) for a future host-blessed origin
+// transform: a host that documents and blesses a server-side derivation can
+// add a driver behind it without the Apps core naming any host.
+//
+// As of D-176 the seam carries one built-in profile, "generic" (verbatim
+// passthrough), and Dockyard emits `_meta.ui.domain` as the host-supplied
+// App.Domain verbatim — the synthesising Claude profile (D-062/D-063) is
+// retired because the MCP Apps spec makes `domain` a host-minted value a server
+// copies, not one a framework computes. The seam stays so a legitimate,
+// host-documented transform has a home.
 //
 // New hosts are added as new driver files that self-register via init(); the
 // core never enumerates hosts (brief 01 §4 sharp edge 3, §5).
 type HostProfile interface {
 	// ID is the stable host identifier the profile registers under (e.g.
-	// "claude", "generic"). It must be non-empty and unique in the registry.
+	// "generic"). It must be non-empty and unique in the registry.
 	ID() string
 	// DeriveDomain derives the dedicated sandboxed-iframe origin for the host
 	// from a host-agnostic domain label and the MCP server URL.
 	//
 	// An empty label means the App declared no dedicated origin; a profile
 	// must then return "" with a nil error so the runtime omits
-	// `_meta.ui.domain` entirely (preserving Phase 09's deny-by-default
-	// omission — RFC §7.4). A non-empty label yields the host's concrete
-	// origin form (for Claude, a SHA-256-derived `claudemcpcontent.com`
-	// subdomain — brief 01 §2.5).
+	// `_meta.ui.domain` entirely (preserving the deny-by-default omission —
+	// RFC §7.4). The built-in "generic" profile returns the label verbatim;
+	// a future host-blessed profile may transform it.
 	DeriveDomain(label, serverURL string) (string, error)
 	// RequiresServerURL reports whether the profile cannot derive a domain
 	// from a non-empty label without a non-empty serverURL — the case of a
 	// signing host that binds the derivation to the server URL so distinct
-	// servers cannot forge each other's origin (brief 01 §2.5, D-063, D-064).
+	// servers cannot forge each other's origin.
 	//
 	// A pass-through profile (e.g. "generic") returns false: it returns the
-	// label verbatim regardless of serverURL. A signing profile (e.g.
-	// "claude") returns true: feeding it an empty serverURL yields the
-	// ErrInvalidApp-wrapped "cannot derive a signed origin without a server
-	// URL" error rather than a forgeable origin.
+	// label verbatim regardless of serverURL. A signing profile returns true:
+	// feeding it an empty serverURL yields an error rather than a forgeable
+	// origin.
 	//
 	// The method is the seam D-165 closes: it lets the
 	// capability-degradation testgate category exercise every profile

@@ -229,6 +229,13 @@ modes negotiate; `contracts.ts` consumed for typed `structuredContent`.
 
 #### 12 — Host profiles + `_meta.ui.domain` derivation (RFC §7.5)
 
+> **Superseded in part by D-176 (v1.6 wave A).** `_meta.ui.domain` is now
+> host-supplied **verbatim**; the server-side auto-derivation and the
+> synthesising Claude profile this phase shipped are retired (the spec makes
+> `domain` a host-minted value a server copies). The pluggable host-profile
+> **seam** survives. See `docs/plans/v1.6-wave-A-apps-spec-alignment.md` and
+> D-176.
+
 **Goal.** Pluggable host profiles carrying derivation functions; auto-derive
 `_meta.ui.domain`, including Claude's SHA-256 signed origin.
 **Acceptance.** The domain is auto-derived; the Claude profile produces the correct

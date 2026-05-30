@@ -2,22 +2,23 @@ package apps
 
 import "fmt"
 
-// DerivedDomain is the single choke point through which an App's host-agnostic
-// domain label becomes a concrete `_meta.ui.domain` value (RFC §7.5, D-062).
+// DerivedDomain resolves a domain label through the host-profile seam (RFC
+// §7.5). As of D-176 it is a VERBATIM passthrough: the only built-in profile is
+// the "generic" one, which returns the label unchanged — `_meta.ui.domain` is a
+// host-supplied value Dockyard never synthesises (D-176, supersedes D-062). The
+// resources/read emission path no longer calls it (apps.go carries App.Domain
+// verbatim directly); DerivedDomain is retained as the seam's read side for the
+// testgate capability category and any direct caller, and for a future
+// host-blessed transform registered behind RegisterHostProfile.
 //
 // It resolves the host profile for hostProfileID (an empty id selects the
 // "generic" verbatim profile), then runs that profile's DeriveDomain over the
-// label and MCP server URL. The result is the dedicated sandboxed-iframe origin
-// the resources/read response carries.
+// label and MCP server URL.
 //
 // An empty label yields an empty origin and a nil error: the App declared no
 // dedicated origin, so the runtime omits `_meta.ui.domain` entirely and a host
 // reads the deny-by-default policy (RFC §7.4). An unregistered hostProfileID
 // yields a wrapped ErrUnknownHost.
-//
-// Routing every derivation through this one function keeps the Apps core free
-// of host-specific code: apps.go calls DerivedDomain and never names a host
-// (brief 01 §4 sharp edge 3, §5).
 func DerivedDomain(hostProfileID, label, serverURL string) (string, error) {
 	if label == "" {
 		return "", nil

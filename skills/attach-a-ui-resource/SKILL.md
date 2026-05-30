@@ -53,7 +53,11 @@ In `dockyard.app.yaml`:
 ```yaml
 apps:
   - id: widgets
-    uri: ui://__PROJECT_NAME__/widgets
+    # The html-style `.../index.html` path matches the reference MCP Apps SDK
+    # convention (D-178). The framework treats the ui:// URI as an OPAQUE string,
+    # so the convention is documentation only — an existing project's
+    # `ui://<server>/<app>` URI keeps working; only the convention moved.
+    uri: ui://__PROJECT_NAME__/widgets/index.html
     entry: web/src/App.svelte
     # Inline only (D-126). The host renders the App in the chat surface.
     display_modes: [inline]
@@ -152,7 +156,7 @@ The Svelte App's built bundle lives under `web/dist/index.html` after
 var uiBundle embed.FS
 
 const (
-    appURI  = "ui://__PROJECT_NAME__/widgets"
+    appURI  = "ui://__PROJECT_NAME__/widgets/index.html"
     appName = "widgets"
 )
 
@@ -172,6 +176,53 @@ func registerApp(srv *server.Server) error {
 
 The `all:` prefix is required — empty `_` and `.` files are skipped
 otherwise (RFC §14, brief 06 §2.2).
+
+### Dedicated origin (`App.Domain`) — host-supplied, remote-only, opt-in
+
+Leave `App.Domain` **empty** unless you have a specific reason to set it — that
+is the right default, and the host then serves your App from its default
+per-conversation sandbox origin.
+
+`_meta.ui.domain` is a **host-supplied verbatim value** (D-176). The MCP Apps
+spec makes the format *host-dependent*: the host **mints** a dedicated
+sandboxed-iframe origin and documents it (e.g. a `*.claudemcpcontent.com` or
+`*.oaiusercontent.com` form); a server **copies that exact string** into
+`App.Domain` and Dockyard emits it byte-for-byte. Dockyard does **not**
+synthesise or derive it for you.
+
+```go
+return apps.Register(srv, apps.App{
+    URI:   appURI,
+    Name:  appName,
+    HTML:  html,
+    // Only for a verified REMOTE (HTTP) deployment, and only the exact origin
+    // your host documents. Copy it verbatim; do not invent one.
+    Domain: "a904794854a047f6.claudemcpcontent.com",
+})
+```
+
+- **Remote-connector only.** A dedicated origin is honoured on a remote (HTTP)
+  connector; a **local (stdio) connector ignores it**. If you set `Domain` on a
+  stdio-only server, Dockyard logs a loud startup warning at `dockyard dev`/run
+  naming the App — set `Domain` only for a verified remote deployment.
+- **Deprecated.** `App.HostProfile` and `App.ServerURL` are deprecated and
+  ignored (they previously drove a server-side derivation that the spec and the
+  reference SDK showed was the wrong model). Don't set them.
+
+### Wire-compat: the deprecated flat tool-UI `_meta` key (opt-in)
+
+Dockyard emits the canonical **nested** `_meta.ui.resourceUri` on a tool, and by
+default **never** the deprecated flat form. If you are targeting a host that
+still reads the flat key, opt in server-wide:
+
+```go
+srv, _ := server.New(info, &server.Options{EmitLegacyToolUIMeta: true})
+```
+
+Every UI-bearing tool registered through the `tool.New(...).UI(...)` builder then
+carries **both** keys (the flat value equals the nested `resourceUri`). Leave it
+off (the default) for RFC-compliant nested-only output — the 2026-01-26 spec
+marks the flat form deprecated. (D-177)
 
 ## 4. The Svelte App
 
