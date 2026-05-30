@@ -21,6 +21,10 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
+(No entries yet — the next release surface will land here.)
+
+## [1.6.0] - 2026-05-30
+
 ### Changed
 
 - **`_meta.ui.domain` is now a host-supplied verbatim value; server-side
