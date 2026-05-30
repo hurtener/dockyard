@@ -156,7 +156,7 @@ recorded order in the decisions log. Each item carries:
 ### Analytics-widgets / Claude signed-origin follow-up
 
 > **Status:** **Claimed by v1.1 wave B (D-165), Path B**, then **largely
-> overtaken by [D-176](decisions.md#d-176) (v1.6 wave A).** The
+> overtaken by D-176 (v1.6 wave A).** The
 > `HostProfile` interface gained a `RequiresServerURL() bool` method;
 > the capability category in `internal/testgate/categories.go` now
 > consults it (the `syntheticServerURL` constant retired). D-176 then
@@ -224,7 +224,7 @@ recorded order in the decisions log. Each item carries:
 
 - **Origin.** Upstream-team feedback (2026-05-30), the OPEN item of the
   v1.6 wave A plan (`docs/plans/v1.6-wave-A-apps-spec-alignment.md`).
-  Related: [D-176](decisions.md#d-176) (which fixed the one *known*
+  Related: D-176 (which fixed the one *known*
   defect — server-derived `_meta.ui.domain` rejected on a local
   connector — and split this open investigation out as a spike).
 - **What was deferred + why.** After building an inline MCP App on
@@ -233,7 +233,7 @@ recorded order in the decisions log. Each item carries:
   team found Claude Desktop renders `pengui` locally but **not** a
   Dockyard App whose wire output was matched (including, in their
   testing, both the nested and the flat tool-UI `_meta` keys — see
-  [D-177](decisions.md#d-177), which makes the flat key an opt-in rather
+  D-177, which makes the flat key an opt-in rather
   than betting the default on this unproven change). This is an
   **investigation, not a known Dockyard defect**: it needs a
   Claude-Desktop repro loop to isolate, and may yield a fix, a doc, or a
@@ -249,7 +249,7 @@ recorded order in the decisions log. Each item carries:
 
 ### Static `validate` gate for `domain`-on-stdio
 
-- **Origin.** [D-176](decisions.md#d-176) (v1.6 wave A). The
+- **Origin.** D-176 (v1.6 wave A). The
   static-feasible half of the upstream feedback's §5 (a silent
   misconfiguration passing `validate`) ships as a **runtime** `slog.Warn`
   in D-176; a *static* gate is the deferred remnant.

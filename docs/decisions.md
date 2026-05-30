@@ -1308,7 +1308,7 @@ is not lost.
 ## D-062 — `_meta.ui.domain` is auto-derived through a pluggable host-profile seam
 
 **Date:** 2026-05-21
-**Status:** Superseded by [D-176](#d-176) (2026-05-30) — `_meta.ui.domain` is now
+**Status:** Superseded by D-176 (2026-05-30) — `_meta.ui.domain` is now
 a host-supplied verbatim value; server-side auto-derivation is retired. The
 host-profile **seam** survives; only the **synthesising derivation** this entry
 introduced is gone. This entry stands as the record of what was decided then.
@@ -1336,7 +1336,7 @@ omission (RFC §7.4).
 ## D-063 — The Claude host profile derives `<hex128>.claudemcpcontent.com` from SHA-256
 
 **Date:** 2026-05-21
-**Status:** Superseded by [D-176](#d-176) (2026-05-30) — the synthesising Claude
+**Status:** Superseded by D-176 (2026-05-30) — the synthesising Claude
 host profile is **retired**. The MCP Apps spec makes `domain` a host-minted,
 developer-copied verbatim value, not a framework-computed one, and the derived
 origin was rejected by Claude Desktop on a local connector. `runtime/apps/hostprofile_claude.go`
@@ -1368,7 +1368,7 @@ confirmed is a one-file change behind the seam.
 
 **Date:** 2026-05-21
 **Status:** Settled — the seam **contract** (`HostProfile.RequiresServerURL`)
-survives [D-176](#d-176) for any future host-blessed signing profile, but **no
+survives D-176 for any future host-blessed signing profile, but **no
 signing profile ships built-in** since D-176 retired the Claude derivation;
 `runtime/apps` ships only the generic verbatim profile. The `App.ServerURL`
 field is deprecated (D-176).
@@ -5927,7 +5927,7 @@ V1 server-side producer by design ("Dockyard sees only its half of the iframe br
 
 **Date:** 2026-05-30
 **Status:** Settled (v1.6 wave A — MCP Apps spec-alignment). **Supersedes
-[D-062](#d-062) and [D-063](#d-063)**; amends RFC §7.5.
+D-062 and D-063**; amends RFC §7.5.
 **Where it lives:** RFC §7.5, `runtime/apps` (`apps.go`, `domain.go`,
 `hostprofile.go`), `runtime/server` (`server.go` — the stdio guard), plan
 `docs/plans/v1.6-wave-A-apps-spec-alignment.md`, glossary (**Dedicated origin**,
