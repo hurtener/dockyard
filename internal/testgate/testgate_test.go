@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hurtener/dockyard/internal/manifest"
+	"github.com/hurtener/dockyard/runtime/apps"
 )
 
 // writeManifest writes a dockyard.app.yaml into dir and returns dir. The
@@ -218,6 +219,68 @@ tools:
 	}
 	if strings.Contains(res.Detail, "capability-test.example") {
 		t.Errorf("capability-test detail leaks the retired synthetic URL: %s", res.Detail)
+	}
+}
+
+// signingHostProfile is a test-only host profile that declares
+// RequiresServerURL — the signing-host shape the host-profile seam keeps a home
+// for after D-176 retired the synthesising Claude profile. The built-in
+// registry ships only the generic verbatim profile, so without this the
+// capability category's "a profile that requires a server URL is exempt from
+// the empty-URL derivation" branch would go unexercised.
+type signingHostProfile struct{ id string }
+
+func (s signingHostProfile) ID() string { return s.id }
+func (signingHostProfile) DeriveDomain(label, serverURL string) (string, error) {
+	if label == "" {
+		return "", nil
+	}
+	if serverURL == "" {
+		// A signing profile refuses to derive without a server URL; the
+		// capability category must NOT reach here (it exempts the profile via
+		// RequiresServerURL).
+		return "", errors.New("signing profile requires a server URL")
+	}
+	return label + ".signed.example", nil
+}
+func (signingHostProfile) RequiresServerURL() bool { return true }
+
+// TestRunCapability_SigningProfileExemptFromEmptyURL: a registered signing host
+// profile (RequiresServerURL == true) is exempt from the empty-URL derivation
+// the capability category drives, so the category still passes — exercising the
+// exemption branch the retired Claude profile used to cover (D-176). Without the
+// exemption the signing profile's DeriveDomain would error on the empty URL and
+// fail the gate.
+func TestRunCapability_SigningProfileExemptFromEmptyURL(t *testing.T) {
+	t.Parallel()
+	if err := apps.RegisterHostProfile(signingHostProfile{id: "testgate-signing-exempt"}); err != nil {
+		t.Fatalf("RegisterHostProfile: %v", err)
+	}
+	const widgetsManifest = `name: widgets-server
+title: Widgets Server
+version: 0.1.0
+runtime:
+  transports: [stdio]
+  ui:
+    framework: svelte
+    bundle: single-file
+apps:
+  - id: widgets
+    uri: ui://widgets-server/widgets/index.html
+    entry: web/src/App.svelte
+    display_modes: [inline]
+tools:
+  - name: render
+    description: Render a widget inline in the host.
+    input: internal/contracts.RenderInput
+    output: internal/contracts.RenderOutput
+    ui: widgets
+    task_support: forbidden
+`
+	m := loadManifestString(t, widgetsManifest)
+	res := runCapability(t.TempDir(), m)
+	if !res.Passed {
+		t.Fatalf("runCapability failed with a registered signing profile (exemption not applied): %s", res.Detail)
 	}
 }
 

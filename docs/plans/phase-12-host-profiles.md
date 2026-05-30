@@ -1,5 +1,19 @@
 # Phase 12 — Host profiles + `_meta.ui.domain` derivation
 
+> **⚠️ Superseded in part by D-176 (v1.6 wave A — MCP Apps spec-alignment).**
+> The MCP Apps spec makes `_meta.ui.domain` a **host-supplied verbatim** value
+> (the host mints it; a server copies it), not a framework-derived one — and the
+> derived origin was rejected by Claude Desktop on a local connector. So the
+> **server-side auto-derivation** and the **synthesising Claude profile** this
+> plan specifies are **retired**: `runtime/apps/hostprofile_claude.go` is removed,
+> `apps.resourceMeta` emits `App.Domain` byte-for-byte, and `App.HostProfile` /
+> `App.ServerURL` are deprecated no-ops. The pluggable host-profile **seam**
+> (interface + factory + driver, with the generic verbatim profile) is **kept**
+> for a future host-blessed transform. This plan stands as the record of what
+> Phase 12 built; the authority is now
+> `docs/plans/v1.6-wave-A-apps-spec-alignment.md`, D-176, and the amended
+> RFC §7.5.
+
 ## Summary
 
 This phase adds **pluggable host profiles** to `runtime/apps`: small bundles of

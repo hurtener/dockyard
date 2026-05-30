@@ -104,6 +104,30 @@ func TestWarnDomainOnStdio_SilentWithoutDomain(t *testing.T) {
 	}
 }
 
+// TestEmitLegacyToolUIMeta_Getter proves the D-177 opt-in is plumbed from
+// Options onto the Server: New mirrors Options.EmitLegacyToolUIMeta onto the
+// getter the runtime/tool builder reads. Default off.
+func TestEmitLegacyToolUIMeta_Getter(t *testing.T) {
+	t.Parallel()
+	off := newServerWithLogger(t, &captureHandler{})
+	if off.EmitLegacyToolUIMeta() {
+		t.Error("default EmitLegacyToolUIMeta() = true, want false")
+	}
+	on, err := New(Info{Name: "legacy-on", Version: "0.0.1"},
+		&Options{Logger: slog.New(&captureHandler{}), EmitLegacyToolUIMeta: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if !on.EmitLegacyToolUIMeta() {
+		t.Error("EmitLegacyToolUIMeta() = false after opting in, want true")
+	}
+	// A nil receiver is safe (defensive — the getter guards it).
+	var nilSrv *Server
+	if nilSrv.EmitLegacyToolUIMeta() {
+		t.Error("nil *Server EmitLegacyToolUIMeta() = true, want false")
+	}
+}
+
 // TestHTTPHandler_DoesNotWarnDomain proves the guard is stdio-only: building and
 // using the HTTP transport for a server with a Domain-bearing App emits no
 // dedicated-origin warning (a dedicated origin IS honoured on a remote

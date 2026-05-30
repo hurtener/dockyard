@@ -351,6 +351,53 @@ func TestHandlerErrorSurfacesAsToolError(t *testing.T) {
 	}
 }
 
+// TestBuilderUILink_LegacyOptIn is the D-177 end-to-end wiring test: it proves
+// the server-level opt-in threads all the way from server.Options through the
+// builder's .UI() to the tool _meta on the wire. A server built with
+// EmitLegacyToolUIMeta: true serves a UI-bearing tool whose tools/list _meta
+// carries BOTH the nested _meta.ui.resourceUri and the deprecated flat key,
+// equal to each other. The default-off path (TestBuilderRegistersWithGeneratedSchema)
+// proves the flat key stays absent. This closes the Options→Server→builder→
+// ToolLink→protocolcodec seam that the leaf codec tests alone do not exercise.
+func TestBuilderUILink_LegacyOptIn(t *testing.T) {
+	t.Parallel()
+	s, err := server.New(server.Info{Name: "test-app", Version: "0.1.0"},
+		&server.Options{Logger: slog.New(slog.DiscardHandler), EmitLegacyToolUIMeta: true})
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	uri := registerRevenueApp(t, s)
+	if err := tool.New[revenueInput, revenueOutput]("show_revenue").
+		Describe("Render the revenue dashboard").
+		UI("revenue_card").
+		Handler(revenueHandler).
+		Register(s); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	list, err := connect(t, s).ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(list.Tools) != 1 {
+		t.Fatalf("ListTools = %d tools, want 1", len(list.Tools))
+	}
+	got := list.Tools[0]
+
+	// Nested form present and correct.
+	if ui := toolUIMeta(t, got.Meta); ui["resourceUri"] != uri {
+		t.Errorf("tool _meta.ui.resourceUri = %v, want %q", ui["resourceUri"], uri)
+	}
+	// Flat form ALSO present (the opt-in), equal to the nested resourceUri.
+	flat, ok := got.Meta["ui/resourceUri"].(string)
+	if !ok {
+		t.Fatalf("opt-in did not emit the flat tool-UI key on the wire: %#v", got.Meta)
+	}
+	if flat != uri {
+		t.Errorf("flat key = %q, want it equal to the nested resourceUri %q", flat, uri)
+	}
+}
+
 // TestBuilderUILink_FailsLoudOnUnregisteredApp is the D-173 fail-loud contract:
 // .UI(name) with no App registered under name is a typed error at Register, not
 // a silently dropped link (the trap that cost an upstream debugging session).
