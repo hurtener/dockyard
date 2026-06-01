@@ -23,9 +23,13 @@ import { HostNotification, ViewNotification } from '../protocol.js';
 import {
   McpUiInitializeRequestSchema,
   McpUiInitializedNotificationSchema,
+  McpUiMessageRequestSchema,
+  McpUiOpenLinkRequestSchema,
+  McpUiRequestDisplayModeRequestSchema,
   McpUiRequestTeardownNotificationSchema,
   McpUiResourceTeardownResultSchema,
   McpUiSizeChangedNotificationSchema,
+  McpUiUpdateModelContextRequestSchema,
 } from '../spec/ext-apps-schema.js';
 import { HostHarness } from './harness.js';
 
@@ -133,6 +137,65 @@ describe('wire conformance — the bridge emits schema-valid ui/ wire (D-182)', 
     const result = await h.sendRequest('ui/resource-teardown', {});
     // The empty result object must satisfy McpUiResourceTeardownResultSchema.
     expect(() => McpUiResourceTeardownResultSchema.parse(result)).not.toThrow();
+  });
+
+  // Every View→host *request* the bridge sends has a vendored schema (except
+  // base-MCP tools/call) — conformance-test each so a field-rename or shape
+  // drift (the class item A/the ui/message + update-model-context fixes belong
+  // to) is a failing build, not a silent host rejection (D-182).
+  it('ui/open-link conforms to its schema', async () => {
+    const h = harness();
+    const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+    await bridge.connect();
+    await bridge.openLink('https://example.com/path');
+    const req = h.lastRequest('ui/open-link')!;
+    expect(() =>
+      McpUiOpenLinkRequestSchema.parse({ method: req.method, params: req.params }),
+    ).not.toThrow();
+  });
+
+  it('ui/message conforms — content blocks + role "user" (item 2 regression)', async () => {
+    const h = harness();
+    const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+    await bridge.connect();
+    await bridge.sendMessage('hello world');
+    const req = h.lastRequest('ui/message')!;
+    // Would have failed before the fix: a bare-string `content` is not
+    // `ContentBlock[]`, and a non-"user" role is rejected.
+    expect(() =>
+      McpUiMessageRequestSchema.parse({ method: req.method, params: req.params }),
+    ).not.toThrow();
+  });
+
+  it('ui/request-display-mode conforms to its schema', async () => {
+    const h = harness();
+    const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+    await bridge.connect();
+    await bridge.requestDisplayMode('fullscreen');
+    const req = h.lastRequest('ui/request-display-mode')!;
+    expect(() =>
+      McpUiRequestDisplayModeRequestSchema.parse({
+        method: req.method,
+        params: req.params,
+      }),
+    ).not.toThrow();
+  });
+
+  it('ui/update-model-context conforms — content blocks (item 2 regression)', async () => {
+    const h = harness();
+    const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+    await bridge.connect();
+    await bridge.updateModelContext({
+      content: [{ type: 'text', text: 'note' }],
+      structuredContent: { selected: 42 },
+    });
+    const req = h.lastRequest('ui/update-model-context')!;
+    expect(() =>
+      McpUiUpdateModelContextRequestSchema.parse({
+        method: req.method,
+        params: req.params,
+      }),
+    ).not.toThrow();
   });
 
   it('Dockyard extension notifications are fenced out of the conformed surface (D-183)', () => {

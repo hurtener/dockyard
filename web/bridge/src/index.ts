@@ -79,7 +79,6 @@ export type {
   JsonRpcRequest,
   JsonRpcResponse,
   MessageParams,
-  MessageRole,
   OpenLinkParams,
   RequestDisplayModeParams,
   RequestDisplayModeResult,

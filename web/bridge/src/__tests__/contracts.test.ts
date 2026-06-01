@@ -141,10 +141,10 @@ describe('BridgeShell — view → host helpers', () => {
     const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
     await bridge.connect();
 
-    await bridge.sendMessage('user', 'hello');
+    await bridge.sendMessage('hello');
     expect(h.lastRequest('ui/message')!.params).toEqual({
       role: 'user',
-      content: 'hello',
+      content: [{ type: 'text', text: 'hello' }],
     });
   });
 
@@ -153,9 +153,9 @@ describe('BridgeShell — view → host helpers', () => {
     const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
     await bridge.connect();
 
-    await bridge.updateModelContext({ content: 'note' });
+    await bridge.updateModelContext({ content: [{ type: 'text', text: 'note' }] });
     expect(h.lastRequest('ui/update-model-context')!.params).toEqual({
-      content: 'note',
+      content: [{ type: 'text', text: 'note' }],
     });
   });
 });

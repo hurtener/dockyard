@@ -88,6 +88,37 @@ describe('HostBridge handshake', () => {
     host.close();
   });
 
+  it('forwards View size-changed and request-teardown to its callbacks (D-182, item 4)', async () => {
+    const channel = new MessageChannel();
+    const sizes: Array<{ width?: number; height?: number }> = [];
+    let teardowns = 0;
+    const host = new HostBridge({
+      peer: channel.port1 as unknown as MessageSink,
+      source: portSource(channel.port1),
+      onViewSize: (s) => sizes.push(s),
+      onViewRequestTeardown: () => {
+        teardowns += 1;
+      },
+    });
+    host.start();
+
+    channel.port2.postMessage({
+      jsonrpc: '2.0',
+      method: 'ui/notifications/size-changed',
+      params: { width: 320, height: 480 },
+    });
+    channel.port2.postMessage({
+      jsonrpc: '2.0',
+      method: 'ui/notifications/request-teardown',
+      params: {},
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(sizes).toEqual([{ width: 320, height: 480 }]);
+    expect(teardowns).toBe(1);
+    host.close();
+  });
+
   it('grants a display mode the App advertised and denies one it did not', async () => {
     const channel = new MessageChannel();
     const host = new HostBridge({

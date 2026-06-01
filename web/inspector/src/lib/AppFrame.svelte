@@ -108,6 +108,10 @@
   let handle: AppFrameHandle | undefined;
   let frameStatus = $state<AppFrameStatus>('idle');
   let mountKey = $state(0);
+  // The View-reported content height (`ui/notifications/size-changed`; D-182).
+  // The inspector sizes the preview iframe to it — mirroring a real host's
+  // content-sizing — rather than leaving it a fixed-height box.
+  let viewHeight = $state<number | undefined>(undefined);
 
   // The PageState the frame routes through, derived from the bridge status.
   const pageState = $derived<PageStateValue>(
@@ -130,6 +134,7 @@
     // once into the new instance.
     lastSentPayload = '';
     lastSentProgress = '';
+    viewHeight = undefined;
     handle = mountAppFrame({
       iframe,
       hostWindow: window,
@@ -137,6 +142,16 @@
       hostCapabilities,
       onRpc,
       onStatus: (s) => (frameStatus = s),
+      onViewSize: (size) => {
+        if (typeof size.height === 'number' && size.height > 0) {
+          viewHeight = Math.ceil(size.height);
+        }
+      },
+      // The App asked to be torn down — remount it fresh (the preview is
+      // always-mounted, so honoring teardown means restarting the instance).
+      onViewRequestTeardown: () => {
+        mountKey += 1;
+      },
     });
     // Wire the active fixture into the freshly mounted bridge.
     handle.bridge.setCallToolResponder(
@@ -306,6 +321,8 @@
         bind:this={iframe}
         title={appName}
         class="preview"
+        class:sized={viewHeight !== undefined}
+        style={viewHeight !== undefined ? `height: ${viewHeight}px` : undefined}
         sandbox={APP_SANDBOX}
       ></iframe>
     {/key}
@@ -357,6 +374,13 @@
     border: 1px solid var(--dy-color-border);
     border-radius: var(--dy-radius-md);
     background: var(--dy-color-surface);
+  }
+  /* When the View reports its content size, the inline `height` drives the
+     iframe (mirroring a real host's content-sizing); cap it so a tall App
+     scrolls within the panel rather than blowing out the layout (D-182). */
+  .preview.sized {
+    flex: none;
+    max-height: 80vh;
   }
   .frame-overlay {
     position: absolute;

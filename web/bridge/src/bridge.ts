@@ -37,13 +37,13 @@ import {
   ViewNotification,
   type AppCapabilities,
   type CallToolResult,
+  type ContentBlock,
   type DisplayMode,
   type HostCapabilities,
   type HostContextChangedParams,
   type InitializeParams,
   type InitializeResult,
   type JsonRpcId,
-  type MessageRole,
   type RequestDisplayModeResult,
   type SizeChangedParams,
   type ToolCancelledParams,
@@ -438,8 +438,16 @@ export class BridgeShell {
   }
 
   /** Sends a message into the host chat (`ui/message`). */
-  async sendMessage(role: MessageRole, content: string): Promise<void> {
-    await this.transport.request<void>(ViewMethod.message, { role, content });
+  async sendMessage(content: string | ContentBlock[]): Promise<void> {
+    // `ui/message` is always a `user` message of content blocks
+    // (McpUiMessageRequestSchema, D-182); a bare string is wrapped as one text
+    // block for ergonomics.
+    const blocks: ContentBlock[] =
+      typeof content === 'string' ? [{ type: 'text', text: content }] : content;
+    await this.transport.request<void>(ViewMethod.message, {
+      role: 'user',
+      content: blocks,
+    });
   }
 
   /** Updates the model's context (`ui/update-model-context`). */

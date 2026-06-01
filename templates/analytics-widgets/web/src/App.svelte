@@ -68,6 +68,9 @@
   let resolvedTheme: 'light' | 'dark' = $state('light');
   let message = $state('Waiting for tool result…');
 
+  // Advertise the App's supported display modes to the host (sent on the wire as
+  // appCapabilities.availableDisplayModes). Keep in sync with dockyard.app.yaml
+  // `apps[].display_modes`.
   const bridge = createBridge({ displayModes: ['inline'] });
 
   // Subscribe to tool-result; the dispatcher reads `kind` and selects the

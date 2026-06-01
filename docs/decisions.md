@@ -6229,6 +6229,20 @@ they are what the schema forces into the open.
   `web/inspector` adds its own `zod` + `@modelcontextprotocol/sdk` devDeps. The
   package's **`.` entry stays Zod-free** (the consumer zero-dep guarantee holds
   for App authors; only `./spec`, imported by tooling/tests, pulls Zod).
+- **Checkpoint audit (§17) fixes.** A wave-boundary audit surfaced and closed:
+  (a) the `./spec` subpath was unresolvable for external consumers — `zod` +
+  `@modelcontextprotocol/sdk` are now declared **optional `peerDependencies`** of
+  `dockyard-bridge` (the `.` entry stays Zod-free, so `.`-only App authors are
+  unaffected); (b) `ui/message` and `ui/update-model-context` sent a bare-string
+  `content` where the schema requires `ContentBlock[]` (and `ui/message` allowed a
+  non-`user` role) — a real outbound drift a spec host would reject, now fixed and
+  guarded; (c) the conformance test only `.parse()`d the handshake, so the item-3
+  claim "every View→host request is conformance-tested" was inaccurate — it now
+  covers all four schema-defined View→host requests (open-link, message,
+  request-display-mode, update-model-context), making the claim true; (d) the
+  inspector silently dropped the View's `size-changed` and `request-teardown` — it
+  now sizes the preview iframe to the reported content height and remounts on a
+  teardown request.
 
 ---
 

@@ -51,6 +51,26 @@ deliberately deferred to V2.
 - **`dockyard-bridge` applies host fonts. (D-182, item D)** Host-provided
   `styles.css.fonts` CSS is injected into the View document so the host's fonts
   load.
+- **`ui/message` and `ui/update-model-context` now send schema-conformant
+  content. (D-182 — checkpoint audit)** Both sent a bare-string `content` (and
+  `ui/message` allowed a non-`user` role); the schema requires `content:
+  ContentBlock[]` (and `role: "user"`), so a spec host would have rejected them.
+  `sendMessage` now wraps a string into a text block; `UpdateModelContextParams.content`
+  is `ContentBlock[]`. The conformance test now `.parse()`s **every** View→host
+  request (open-link, message, request-display-mode, update-model-context), not
+  just the handshake.
+- **The local inspector consumes the View's `size-changed` and `request-teardown`.
+  (D-182, item 4 — checkpoint audit)** It sizes the preview iframe to the App's
+  reported content height (mirroring a real host) and remounts on a teardown
+  request, instead of silently dropping both.
+
+### Packaging
+
+- **`dockyard-bridge` declares `zod` + `@modelcontextprotocol/sdk` as optional
+  peer dependencies** so the `dockyard-bridge/spec` subpath (the vendored
+  ext-apps schema, used by tooling and the inspector) resolves for any consumer.
+  The `.` entry remains Zod-free, so App authors importing only `.` install
+  nothing extra.
 - **The local inspector is a faithful, validating spec host. (D-182, item 4)** It
   no longer sends a host→View `ui/notifications/initialized`; it marks itself ready
   when the View sends `initialized`, reads `availableDisplayModes`, and now

@@ -31,15 +31,15 @@ canonical examples — start from one when you can.
    (manifest) and `.UI(appName)` on the builder (`main.go`).
 3. **Embed the bundle** — `//go:embed all:web/dist` in the server, and
    register the bundle via `apps.Register` in `main` (or `registerApp`).
-4. **Author the Svelte App** — uses the in-repo `@dockyard/bridge`
+4. **Author the Svelte App** — uses the in-repo `dockyard-bridge`
    helpers to receive the typed tool result and render.
 5. **Build** — `dockyard build` runs Vite then `go build`, embedding the
    freshly built HTML.
 
 ## Prerequisites — the `web/` toolchain
 
-The Dockyard **Go module** and the frontend packages **`@dockyard/bridge`
-and `@dockyard/ui`** are all published, so a scaffolded UI project resolves
+The Dockyard **Go module** and the frontend packages **`dockyard-bridge`
+and `dockyard-ui`** are all published, so a scaffolded UI project resolves
 everything from npm + the Go proxy with no local checkout — `dockyard new
 --template analytics-widgets` then `cd web && npm install` just works. The
 hidden `--dockyard-path` flag remains a **build-from-source convenience**
@@ -231,7 +231,7 @@ A minimal dispatcher:
 
 ```svelte
 <script lang="ts">
-  import { hostContext, onToolResult } from '@dockyard/bridge';
+  import { hostContext, onToolResult } from 'dockyard-bridge';
   import Chart from './widgets/Chart.svelte';
   import Table from './widgets/Table.svelte';
   import MetricCardWidget from './widgets/MetricCardWidget.svelte';
@@ -272,7 +272,7 @@ notification (RFC §8.4):
 
 ```svelte
 <script lang="ts">
-  import { onTaskProgress } from '@dockyard/bridge';
+  import { onTaskProgress } from 'dockyard-bridge';
   let percent: number | undefined;
   let note = '';
   onTaskProgress((p) => {

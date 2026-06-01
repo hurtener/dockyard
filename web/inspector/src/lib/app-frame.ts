@@ -55,6 +55,10 @@ export interface MountAppFrameOptions {
   onRpc?: (entry: HostRpcLogEntry) => void;
   /** Called whenever the frame status changes. */
   onStatus?: (status: AppFrameStatus) => void;
+  /** Called when the View reports its content size (`size-changed`; D-182). */
+  onViewSize?: (size: { width?: number; height?: number }) => void;
+  /** Called when the App asks to be torn down (`request-teardown`; D-182). */
+  onViewRequestTeardown?: () => void;
 }
 
 /** A handle to a mounted App frame — drive and tear it down. */
@@ -111,6 +115,8 @@ export function mountAppFrame(opts: MountAppFrameOptions): AppFrameHandle {
     hostContext: opts.hostContext,
     hostCapabilities: opts.hostCapabilities,
     onRpc: opts.onRpc,
+    onViewSize: opts.onViewSize,
+    onViewRequestTeardown: opts.onViewRequestTeardown,
   });
 
   setStatus('handshaking');

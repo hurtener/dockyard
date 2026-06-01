@@ -256,11 +256,14 @@ export interface OpenLinkParams {
   url: string;
 }
 
-export type MessageRole = 'user' | 'assistant' | 'system';
-
 export interface MessageParams {
-  role: MessageRole;
-  content: string;
+  /**
+   * Only `"user"` is supported (`McpUiMessageRequestSchema`) — an App posts to
+   * the host's chat on the user's behalf. An earlier wider role + a bare-string
+   * `content` diverged from the schema and a spec host would reject it (D-182).
+   */
+  role: 'user';
+  content: ContentBlock[];
 }
 
 export interface RequestDisplayModeParams {
@@ -276,8 +279,10 @@ export interface RequestDisplayModeResult {
 }
 
 export interface UpdateModelContextParams {
-  content?: string;
-  structuredContent?: unknown;
+  /** Context content blocks (`McpUiUpdateModelContextRequestSchema`, D-182). */
+  content?: ContentBlock[];
+  /** Machine-readable context — a JSON object (`record<string, unknown>`). */
+  structuredContent?: Record<string, unknown>;
 }
 
 export interface CallToolParams<I = unknown> {

@@ -17,14 +17,16 @@
  *   - it answers `ui/initialize` and then waits: a faithful spec host does NOT
  *     send a host→View `initialized`; it marks itself ready when the View SENDS
  *     `ui/notifications/initialized` (D-180/D-182);
- *   - it fans host→view notifications (`tool-input`, `tool-result`, …);
+ *   - it fans host→view notifications (`tool-input`, `tool-result`, …) and
+ *     consumes the View's `size-changed` (sizes the preview) and
+ *     `request-teardown` (closes the preview) — D-182 item 4;
  *   - it answers `ui/request-display-mode`, granting only modes in
  *     `availableDisplayModes` — capability-driven, never a host matrix
  *     (RFC §7.5);
- *   - it answers `ui/open-link` / `ui/message` / `ui/update-model-context` /
- *     `tools/call` with a benign result — the inspector is read-only and is
- *     never an arbitrary-execution proxy (RFC §12); a real `tools/call` proxy
- *     is wired by Phase 23.
+ *   - it answers `ui/open-link` / `ui/message` / `ui/update-model-context` with
+ *     a benign ack, and `tools/call` from the wired fixture responder (or a
+ *     "not wired" error) — the inspector is read-only and never an
+ *     arbitrary-execution proxy (RFC §12).
  *
  * It is transport-agnostic: it takes a `MessageSink` (where it posts to the
  * View) and a `MessageSource` (where View messages arrive), exactly like the
@@ -53,8 +55,10 @@ import {
   type TaskProgressParams,
 } from 'dockyard-bridge';
 // The vendored ext-apps schema (zod) — the `./spec` subpath is the opt-in,
-// zod-bearing surface; the inspector validates inbound View messages against it
-// (D-182, item 4). The bridge's `.` entry stays Zod-free for App consumers.
+// zod-bearing surface; the inspector validates the inbound `ui/initialize`
+// handshake against it (D-182, item 4) — the message whose mis-shape caused
+// D-179. (The bridge's own conformance test guards the View's full outbound
+// wire.) The bridge's `.` entry stays Zod-free for App consumers.
 import { McpUiInitializeRequestSchema } from 'dockyard-bridge/spec';
 
 /** The protocol revision the host half advertises (matches the View half). */
@@ -106,6 +110,17 @@ export interface HostBridgeOptions {
   hostInfo?: { name: string; version: string };
   /** Called for every JSON-RPC message in either direction (the RPC log). */
   onRpc?: (entry: HostRpcLogEntry) => void;
+  /**
+   * Called when the View reports its content size via
+   * `ui/notifications/size-changed` (D-182, item 4) — the inspector sizes the
+   * App preview iframe to it, mirroring how a real host content-sizes the App.
+   */
+  onViewSize?: (size: { width?: number; height?: number }) => void;
+  /**
+   * Called when the App asks to be torn down via
+   * `ui/notifications/request-teardown`. The inspector closes the preview frame.
+   */
+  onViewRequestTeardown?: () => void;
 }
 
 /**
@@ -149,6 +164,10 @@ export class HostBridge {
   private readonly hostCapabilities: HostCapabilities;
   private readonly hostInfo: { name: string; version: string };
   private readonly onRpc: ((entry: HostRpcLogEntry) => void) | undefined;
+  private readonly onViewSize:
+    | ((size: { width?: number; height?: number }) => void)
+    | undefined;
+  private readonly onViewRequestTeardown: (() => void) | undefined;
 
   private readonly boundOnMessage: (ev: HostInboundEvent) => void;
   private started = false;
@@ -196,6 +215,8 @@ export class HostBridge {
       version: '0.1.0',
     };
     this.onRpc = options.onRpc;
+    this.onViewSize = options.onViewSize;
+    this.onViewRequestTeardown = options.onViewRequestTeardown;
     this.boundOnMessage = (ev) => this.onMessage(ev.data);
     this.readyPromise = new Promise<void>((resolve) => {
       this.resolveReady = resolve;
@@ -351,6 +372,23 @@ export class HostBridge {
         // v1.6.1 bugs; D-182 item 4). Idempotent against a duplicate.
         this.viewReady = true;
         this.resolveReady();
+        return;
+      case HostNotification.sizeChanged: {
+        // The View → host direction of `size-changed`: the App reports its
+        // content size (D-182, item 4). A faithful host sizes the App's frame
+        // to it; the inspector forwards it so the preview iframe grows to fit,
+        // mirroring a real host rather than a fixed-height box.
+        const size = (notification.params ?? {}) as {
+          width?: number;
+          height?: number;
+        };
+        this.onViewSize?.(size);
+        return;
+      }
+      case ViewNotification.requestTeardown:
+        // The App asks the host to tear it down (D-182, item B). The inspector
+        // closes the preview frame rather than dropping the request silently.
+        this.onViewRequestTeardown?.();
         return;
       case DockyardExtMethod.elicitationResponse: {
         // Phase 25 / D-134 — the App's reply to a task's input_required
