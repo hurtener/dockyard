@@ -40,11 +40,6 @@ export interface HarnessOptions {
   hostContext?: HostContext;
   /** Host capabilities returned in the result. */
   hostCapabilities?: Record<string, unknown>;
-  /**
-   * When true, the harness does NOT auto-send `ui/notifications/initialized`
-   * after `ui/initialize` — the test drives it via `sendInitialized()`.
-   */
-  manualInitialized?: boolean;
   /** Display modes the host grants for `ui/request-display-mode`. */
   grantModes?: DisplayMode[];
 }
@@ -62,6 +57,9 @@ export class HostHarness {
 
   /** Every request the bridge has sent, in order. */
   readonly requests: CapturedRequest[] = [];
+
+  /** Every View→host notification the bridge has sent, in order. */
+  readonly notifications: { method: string; params: unknown }[] = [];
 
   private readonly channel = new MessageChannel();
   private readonly hostPort: MessagePort;
@@ -109,7 +107,10 @@ export class HostHarness {
     this.hostPort.postMessage({ jsonrpc: '2.0', method, params });
   }
 
-  /** Manually sends `ui/notifications/initialized` (for `manualInitialized`). */
+  /**
+   * Simulates a NON-spec host that pushes `ui/notifications/initialized`
+   * host→View. A spec host never does this; the bridge must ignore it (D-180).
+   */
   sendInitialized(): void {
     this.notify(ViewNotification.initialized);
   }
@@ -118,6 +119,16 @@ export class HostHarness {
   lastRequest(method: string): CapturedRequest | undefined {
     for (let i = this.requests.length - 1; i >= 0; i--) {
       if (this.requests[i]!.method === method) return this.requests[i];
+    }
+    return undefined;
+  }
+
+  /** The most recent View→host notification for `method`, if any. */
+  lastNotification(
+    method: string,
+  ): { method: string; params: unknown } | undefined {
+    for (let i = this.notifications.length - 1; i >= 0; i--) {
+      if (this.notifications[i]!.method === method) return this.notifications[i];
     }
     return undefined;
   }
@@ -137,8 +148,13 @@ export class HostHarness {
       return;
     }
     const message = data as JsonRpcMessage;
-    // The harness only handles bridge → host *requests*.
-    if (!('method' in message) || !('id' in message)) return;
+    if (!('method' in message)) return; // a response to a host→View request
+    if (!('id' in message)) {
+      // A View→host notification (initialized, size-changed, elicitation).
+      const note = message as { method: string; params?: unknown };
+      this.notifications.push({ method: note.method, params: note.params });
+      return;
+    }
     const req = message as JsonRpcRequest;
     this.requests.push({ method: req.method, params: req.params, id: req.id });
 
@@ -163,10 +179,9 @@ export class HostHarness {
           hostCapabilities: this.options.hostCapabilities ?? {},
           hostInfo: { name: 'test-host', version: '0.0.0' },
         };
-        // The host replies, then (unless manual) sends `initialized`.
-        if (!this.options.manualInitialized) {
-          queueMicrotask(() => this.sendInitialized());
-        }
+        // A spec-compliant host replies to `ui/initialize` and then waits; the
+        // *View* sends `ui/notifications/initialized` (the host never sends one,
+        // and the bridge never waits to receive it — D-180).
         return { jsonrpc: '2.0', id: req.id, result };
       }
       case ViewMethod.requestDisplayMode: {

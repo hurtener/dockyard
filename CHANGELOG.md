@@ -21,7 +21,35 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-(No entries yet — the next release surface will land here.)
+### Fixed
+
+- **`dockyard-bridge` `ui/initialize` now uses the MCP Apps `ui/` dialect — a
+  spec-compliant host no longer rejects the View handshake. (D-179)** The View's
+  `ui/initialize` request sent base-MCP `{capabilities:{appCapabilities},
+  clientInfo}`; the MCP Apps host (`@modelcontextprotocol/ext-apps`) validates the
+  request against a strict schema requiring top-level `{appInfo, appCapabilities,
+  protocolVersion}` (`appInfo` REQUIRED). The mismatch made the host return a
+  JSON-RPC error for the first handshake message, so `connect()` rejected, `ready`
+  never became true, and an otherwise-correct App rendered blank with no visible
+  error. The bridge now sends the `ui/` dialect shape. (Hosts only spoke this
+  dialect; the local inspector accepted the base-MCP shape, which is why this
+  passed locally.) The public `clientInfo` bridge option is unchanged.
+
+- **`dockyard-bridge` SENDS `ui/notifications/initialized` rather than awaiting it.
+  (D-180)** The handshake waited to *receive* `ui/notifications/initialized`
+  before resolving `ready`. Per the JSON-RPC/MCP lifecycle (and the ext-apps
+  reference View) the View is the initiator and *sends* `initialized` after the
+  `ui/initialize` result, then is ready. A spec-compliant host never sends a
+  View→host message, so the old code deadlocked. An inbound `initialized` from a
+  non-spec host is now ignored.
+
+- **`dockyard-bridge` reports View content size to the host via
+  `ui/notifications/size-changed`. (D-181)** The bridge only ever *received*
+  `size-changed` (host→View); it never measured or reported its own content
+  height. A spec-compliant host sizes the App iframe from the View's report;
+  without it the iframe collapses to ~0px and the App looks blank even after it
+  paints. The bridge now runs a `ResizeObserver` and emits a de-duplicated
+  `size-changed` on ready and on every change, torn down in `close()`.
 
 ## [1.6.0] - 2026-05-30
 

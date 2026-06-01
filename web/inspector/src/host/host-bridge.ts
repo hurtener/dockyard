@@ -14,7 +14,8 @@
  *
  *   - it answers the View's `ui/initialize` request with an `InitializeResult`
  *     carrying `hostContext` and `hostCapabilities`;
- *   - it sends `ui/notifications/initialized` so the View resolves `ready`;
+ *   - it acks the handshake with a host→View `ui/notifications/initialized`
+ *     (current Views resolve `ready` on their own and ignore this — D-180);
  *   - it fans host→view notifications (`tool-input`, `tool-result`, …);
  *   - it answers `ui/request-display-mode`, granting only modes in
  *     `availableDisplayModes` — capability-driven, never a host matrix
@@ -401,7 +402,7 @@ export class HostBridge {
     // The View advertises the display modes its build supports; the host
     // narrows `availableDisplayModes` to that intersection — capability-driven
     // negotiation, never a host matrix (RFC §7.5).
-    const appModes = params.capabilities?.appCapabilities?.displayModes;
+    const appModes = params.appCapabilities?.displayModes;
     if (appModes && appModes.length > 0) {
       const granted = (this.hostContext.availableDisplayModes ?? []).filter(
         (m) => appModes.includes(m),
@@ -421,9 +422,12 @@ export class HostBridge {
       hostInfo: this.hostInfo,
     };
     this.respond(req.id, result);
-    // Tell the View the host is ready — the View waits on this before
-    // resolving its own `ready` (brief 01 §2.4). Sending it completes the
-    // host's side of the `ui/initialize` handshake.
+    // A spec-compliant View resolves `ready` on its own after the
+    // `ui/initialize` result and SENDS `ui/notifications/initialized`; it no
+    // longer waits to receive one (dockyard-bridge D-180). The inspector keeps
+    // emitting this host→View ack — current bridges ignore it — pending the
+    // inspector-handshake hardening that makes this host fully spec-faithful
+    // (D-181 follow-up). It is harmless and marks the host's side complete.
     this.notify(ViewNotification.initialized, {});
     this.viewReady = true;
     this.resolveReady();

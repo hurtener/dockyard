@@ -32,7 +32,14 @@ describe('BridgeShell — ui/initialize handshake', () => {
     expect(h.lastRequest('ui/initialize')).toBeDefined();
   });
 
-  it('sends ui/initialize with protocolVersion, capabilities and clientInfo', async () => {
+  it('sends ui/initialize in the ui/ dialect — appInfo + flat appCapabilities (D-179)', async () => {
+    // Bug 1 regression: a spec-compliant host (@modelcontextprotocol/ext-apps)
+    // validates `ui/initialize` params against a schema requiring top-level
+    // `{appInfo, appCapabilities, protocolVersion}` (appInfo REQUIRED). The
+    // previous base-MCP `{capabilities:{appCapabilities}, clientInfo}` shape was
+    // rejected with a JSON-RPC error, so connect() rejected and the App stayed
+    // blank with no visible error. Assert the dialect shape AND the absence of
+    // the legacy keys — the structural check that would have caught the bug.
     const h = harness();
     const bridge = createBridge({
       peer: h.peer,
@@ -44,32 +51,87 @@ describe('BridgeShell — ui/initialize handshake', () => {
     await bridge.connect();
 
     const req = h.lastRequest('ui/initialize')!;
-    expect(req.params).toMatchObject({
+    expect(req.params).toEqual({
       protocolVersion: '2026-01-26',
-      capabilities: { appCapabilities: { displayModes: ['inline', 'fullscreen'] } },
-      clientInfo: { name: 'demo-app', version: '2.0.0' },
+      appCapabilities: { displayModes: ['inline', 'fullscreen'] },
+      appInfo: { name: 'demo-app', version: '2.0.0' },
     });
+    expect(req.params).not.toHaveProperty('capabilities');
+    expect(req.params).not.toHaveProperty('clientInfo');
   });
 
-  it('does NOT resolve ready until ui/notifications/initialized arrives', async () => {
-    const h = harness({ manualInitialized: true });
+  it('resolves ready by SENDING ui/notifications/initialized, never awaiting one (D-180)', async () => {
+    // Bug 2 regression: the View is the initiator. A spec host NEVER sends a
+    // View→host notification, so the old "await receipt of initialized" code
+    // deadlocked → ready never flipped → blank App. The bridge must SEND
+    // `initialized` after the initialize result and become ready on its own.
+    // The harness here does NOT push a host→View initialized.
+    const h = harness();
     const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
 
-    const connected = bridge.connect();
-    let resolved = false;
-    void connected.then(() => {
-      resolved = true;
-    });
+    await bridge.connect();
+    await new Promise((r) => setTimeout(r, 0)); // drain the View→host post
 
-    // Give the ui/initialize round trip time to settle.
-    await new Promise((r) => setTimeout(r, 20));
-    expect(resolved).toBe(false);
-    expect(get(bridge.ready)).toBe(false);
+    expect(get(bridge.ready)).toBe(true);
+    expect(bridge.isInitialized).toBe(true);
+    expect(h.lastNotification('ui/notifications/initialized')).toBeDefined();
+  });
+
+  it('ignores a non-spec inbound ui/notifications/initialized from the host', async () => {
+    // A non-spec host that also pushes `initialized` host→View must not break
+    // the bridge (no deadlock, no double-ready, no throw).
+    const h = harness();
+    const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+    await bridge.connect();
+    expect(get(bridge.ready)).toBe(true);
 
     h.sendInitialized();
-    await connected;
-    expect(resolved).toBe(true);
+    await new Promise((r) => setTimeout(r, 0));
     expect(get(bridge.ready)).toBe(true);
+  });
+
+  it('reports View content size to the host via ui/notifications/size-changed (D-181)', async () => {
+    // Bug 3 regression: without a View→host size report, a spec host sizes the
+    // App iframe to a collapsed (~0px) height and the App looks blank even after
+    // it paints. The bridge runs a ResizeObserver and emits size-changed on
+    // ready. jsdom defines neither ResizeObserver nor a synchronous rAF, so we
+    // stub both to drive a single deterministic measurement.
+    type ROCtor = new (cb: () => void) => {
+      observe(): void;
+      disconnect(): void;
+    };
+    const g = globalThis as unknown as {
+      ResizeObserver?: ROCtor;
+      requestAnimationFrame?: (cb: () => void) => number;
+    };
+    const realRO = g.ResizeObserver;
+    const realRAF = g.requestAnimationFrame;
+    g.ResizeObserver = class {
+      constructor(_cb: () => void) {}
+      observe(): void {}
+      disconnect(): void {}
+    };
+    g.requestAnimationFrame = (cb: () => void): number => {
+      cb();
+      return 0;
+    };
+    try {
+      const h = harness();
+      const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+      await bridge.connect();
+      await new Promise((r) => setTimeout(r, 0)); // drain the View→host post
+
+      const sized = h.lastNotification('ui/notifications/size-changed');
+      expect(sized).toBeDefined();
+      expect(sized!.params).toMatchObject({
+        width: expect.any(Number),
+        height: expect.any(Number),
+      });
+      bridge.close();
+    } finally {
+      g.ResizeObserver = realRO;
+      g.requestAnimationFrame = realRAF;
+    }
   });
 
   it('connect() is idempotent — returns the same promise', async () => {
