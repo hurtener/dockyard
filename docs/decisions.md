@@ -6130,4 +6130,96 @@ View→host emit reuses it. A regression test stubs `ResizeObserver` + a synchro
 to the Dockyard inspector because its host accepted the non-spec View behaviour.
 The inspector's host-side handshake should be validated against the official
 `@modelcontextprotocol/ext-apps` schemas so the inspector and a real host agree;
-filed as a V2-backlog hardening item.
+filed as a V2-backlog hardening item. **Superseded as a follow-up by D-182**,
+which makes the vendored ext-apps schema the conformance source for both the
+bridge and the inspector host (v1.7 wave A).
+
+---
+
+## D-182 — The View bridge wire layer is derived from + conformance-tested against the vendored ext-apps schema (option B)
+
+**Date:** 2026-06-01
+**Status:** Settled (v1.7 wave A — bridge spec-conformance). Supersedes the
+implicit "hand-derive the View wire layer" stance (Phase 11). Amends RFC §7.3;
+extends RFC §10/§16. Subsumes the D-181 inspector-hardening follow-up.
+**Where it lives:** `web/bridge/src/spec/ext-apps-schema.ts` (vendored),
+`web/bridge/src/protocol.ts` (derived types), `web/bridge/src/__tests__/conformance.test.ts`,
+`web/inspector/src/host/host-bridge.ts`, RFC §7.3, plan
+`docs/plans/v1.7-wave-A-bridge-spec-conformance.md`.
+
+**The problem.** `web/bridge` hand-transcribed the MCP Apps `ui/` wire dialect —
+method names, notification shapes, capability and `hostContext` types, the
+handshake lifecycle. A hand-transcription drifts silently: the v1.6.1 bugs
+(D-179/D-180/D-181) were three transcription errors that no test caught because
+the only thing that validated the wire was the equally-lenient inspector host. A
+post-mortem diff against the official `@modelcontextprotocol/ext-apps` schema
+(`src/generated/schema.ts`) found four more latent divergences
+(`appCapabilities.availableDisplayModes` vs our `displayModes`; `ui/resource-teardown`
+being a request we treat as a notification; `containerDimensions` flexible-sizing;
+host fonts). RFC §8.2 had **already** chosen "vendor the schema, generate the wire
+layer" for the Tasks shim and §5.4 for the Go `protocolcodec` seam — the View
+bridge simply never got the same discipline because Phase 11 predated a stable
+published ext-apps schema.
+
+**The decision.** Apply the §8.2 pattern to the View half:
+
+1. **Vendor** the machine-readable ext-apps schema into the repo, pinned by
+   upstream commit SHA + date (RFC §10, alongside the existing
+   `docs/specifications/mcp-apps-2026-01-26.mdx`). It is not hand-edited.
+2. **Derive** the bridge's wire types from the vendored schema by type-inference
+   (`z.input`/`z.infer`) rather than hand-declaring them — a mis-named or
+   wrong-shaped field becomes a `tsc` error.
+3. **Conformance-test** the bridge's outbound wire (the `ui/initialize` params and
+   every View→host request/notification) by `.parse()`ing it against the vendored
+   schema. The `ui/initialize` case is the regression that would have caught
+   D-179; the same layer hardens the **inspector host**, which validates inbound
+   View messages against the schema and becomes a faithful spec host (resolves
+   ready on receiving the View's `initialized`, no host-sent `initialized`, sends
+   `ui/resource-teardown` as a request).
+4. **Keep the runtime Zod-free** (RFC §7.4): the vendored schema is reachable only
+   via `import type` on runtime paths and `.parse()` in tests; a bundle guard
+   asserts no schema-validation runtime leaks into a single-file App bundle.
+
+**What this is not.** Not "import the official SDK at runtime" — that would ship
+Zod into every App bundle and breach §7.4. The lean, Svelte-idiomatic runtime
+binding (stores, `callContract`, view-state) stays Dockyard's — only the *wire
+layer* is sourced from upstream. **Infer over generate:** type-inference from the
+vendored Zod schema is chosen over a bespoke `.ts` generator (nothing to
+maintain; the types are the spec by construction); a generator remains the
+fallback if a build tool fails to tree-shake the type-only import. **Vendor over
+npm devDep:** the schema is vendored as a file (RFC §10 hermetic-pin culture),
+with the npm `@modelcontextprotocol/ext-apps` devDep as the fallback if the
+schema's import closure is impractical to vendor. Both fallbacks are recorded as
+open questions in the plan and locked at implementation. The four conformance
+fixes (A–D) ride this decision as acceptance criteria, not separate decisions —
+they are what the schema forces into the open.
+
+---
+
+## D-183 — Dockyard's Tasks×Apps `ui/` notifications are explicit extensions outside the MCP Apps schema
+
+**Date:** 2026-06-01
+**Status:** Settled (v1.7 wave A — bridge spec-conformance).
+**Where it lives:** `web/bridge/src/dockyard-ext.ts`, the `web/bridge`
+conformance test, `skills/attach-a-ui-resource/SKILL.md`, the docs-site Apps
+guide, plan `docs/plans/v1.7-wave-A-bridge-spec-conformance.md`.
+
+**Why.** `ui/notifications/task-progress` and
+`ui/notifications/elicitation-response` are emitted by the bridge for the
+Tasks×Apps surface (RFC §8, D-134) but are **not** in the vendored MCP Apps
+schema — they are Dockyard extensions. Under D-182's conformance layer they would
+read as "drift" unless explicitly fenced. More importantly they are **not
+portable**: a stock host (e.g. Claude Desktop) does not implement them, so a
+Tasks-augmented App's progress/elicitation behaviour works only against a
+Dockyard-aware host (the inspector, or Harbor as the MCP client).
+
+**The decision.** These two notifications live in a clearly-named `dockyard-ext`
+module, separate from the conformed `protocol.ts` surface, documented as Dockyard
+extensions that require a Dockyard-aware host. The D-182 conformance layer asserts
+they are the **only** View→host messages the bridge emits that are absent from the
+vendored schema — so the extension boundary is explicit and can't silently grow.
+The `attach-a-ui-resource` skill and the docs-site Apps guide state the host
+requirement, so an App author does not expect task progress / elicitation to work
+on a stock host. This neither promotes the extensions into the spec nor removes
+them — it fences them honestly. A future upstream MCP Apps Tasks integration would
+let these migrate from `dockyard-ext` into the conformed surface.

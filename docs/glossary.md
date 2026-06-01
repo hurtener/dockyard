@@ -72,7 +72,10 @@ authors never hand-write protocol code: it runs the `ui/initialize` handshake,
 exposes `hostContext` as Svelte stores, fans out host→view notifications, offers
 typed view→host helpers, negotiates display modes, and framework-manages
 `viewUUID` view-state. Its peer, the *host half* of the same dialect, is the
-inspector. RFC §7.2, §7.3. D-016, D-059, D-060, D-061.
+inspector. Its wire layer (methods, notification shapes, capability + host-context
+types, handshake lifecycle) is **derived from and conformance-tested against the
+vendored ext-apps schema** — not hand-maintained — while the runtime stays
+Zod-free (D-182). RFC §7.2, §7.3. D-016, D-059, D-060, D-061, D-182.
 
 ## C
 
@@ -185,6 +188,15 @@ windows × amd64 and arm64. Built sequentially, one `go build` per target with
 than aborting the run. `buildpkg.DefaultMatrix()` returns it. RFC §14. D-087.
 
 ## D
+
+**Dockyard Apps extension** — a `ui/` notification the bridge shell library
+emits that is **not** in the MCP Apps schema — `ui/notifications/task-progress`
+and `ui/notifications/elicitation-response`, serving the Tasks×Apps surface
+(RFC §8, D-134). It functions only against a Dockyard-aware host (the inspector,
+or Harbor as the MCP client); a stock host (e.g. Claude Desktop) ignores it.
+Fenced in `web/bridge/src/dockyard-ext.ts`, separate from the conformed wire
+surface, and asserted by the wire conformance test to be the only non-spec
+message the bridge emits. D-183.
 
 **docs site** — Dockyard's published technical-documentation site (Phase 29),
 built with VitePress from sources under `docs/site/` and deployed to GitHub
@@ -995,6 +1007,14 @@ and the criteria a future phase or PR would need to meet to claim it
 (the "definition of done"). A new deferral lands in V2-BACKLOG in the
 same PR that records it in `docs/decisions.md`. D-158.
 
+**Vendored ext-apps schema** — the machine-readable
+`@modelcontextprotocol/ext-apps` schema mirrored into `web/bridge/src/spec/`,
+pinned by upstream commit SHA + date, from which the bridge shell library's
+`ui/` wire types are inferred and against which its outbound wire is
+conformance-tested. The View-side analogue of the `internal/protocolcodec` seam
+(§5.4) and the vendored Tasks schema (§8.2) — a vendored spec in machine-
+readable form. RFC §7.3, §10. D-182.
+
 **Vendored spec** — an external MCP specification mirrored into
 `docs/specifications/`, pinned by upstream commit SHA + date, so Dockyard's
 build is reproducible and the source of truth is searchable in-repo. A spec bump
@@ -1023,3 +1043,10 @@ a 16-byte trace-id and an 8-byte span-id, lowercase hex. Modelled in
 Dockyard server's spans nest natively under a calling Harbor agent's
 `execute_tool` span, and Phase 16's OTel adapter has spec-shaped IDs to export.
 RFC §11.2. D-074.
+
+**Wire conformance test** — a `web/bridge` test that `.parse()`s the
+bridge shell library's emitted `ui/` payloads (the `ui/initialize` params and
+every View→host request/notification) against the vendored ext-apps schema. It
+turns silent wire drift into a failing build — the structural guard that would
+have caught the v1.6.1 handshake bugs (D-179/D-180/D-181). The inspector host is
+held to the same schema. RFC §7.3. D-182.

@@ -450,6 +450,26 @@ This does not breach P4 (server-side only): the shell is a *library shipped to a
 authors*, not a Dockyard-operated client. The other consumer of the host half of
 this dialect is the inspector (§12).
 
+**Settled (RFC §7.3 — the wire layer is derived, not hand-maintained; D-182).**
+The shell's `ui/` wire layer — method names, notification shapes, the capability
+and `hostContext` types, and the handshake lifecycle — is **derived from and
+conformance-tested against the vendored official `@modelcontextprotocol/ext-apps`
+schema**, not hand-transcribed. This is the View-side analogue of the §8.2 Tasks
+rule ("the wire layer code-generated from a vendored schema snapshot") and the
+§5.4 `protocolcodec` seam: the machine-readable ext-apps schema is vendored by
+upstream SHA (§10, alongside the prose snapshot), the bridge's TypeScript wire
+types are *inferred* from it (a mis-named field is a compile error), and a
+conformance test parses the bridge's outbound wire against it (a wire drift is a
+failing build, not a blank App a partner finds in a host). The shipped App bundle
+stays **Zod-free** (RFC §7.4): the schema is type-only at runtime and validated
+only in tests. Dockyard's own Tasks×Apps `ui/` notifications (`task-progress`,
+`elicitation-response`; §8, D-134) are **not** in the MCP Apps schema — they are
+explicitly fenced as Dockyard extensions that function only against a
+Dockyard-aware host, and the conformance layer asserts they are the only non-spec
+messages emitted (D-183). The hand-transcribed wire layer that predated this rule
+(Phase 11) was the root cause of the v1.6.1 handshake bugs (D-179/D-180/D-181);
+D-182 makes the §8.2 discipline binding for the View half.
+
 ### 7.4 CSP, sandboxing, single-file bundles — settled
 
 Apps always run in a sandboxed iframe under a deny-by-default CSP (Brief 01 §2.5).
