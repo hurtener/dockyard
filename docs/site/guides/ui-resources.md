@@ -182,7 +182,7 @@ explicit UI action.
 If your App renders fine in the inspector but shows as a blank/white area
 in a host like Claude Desktop, work through these in order:
 
-- **Use a current `dockyard-bridge` (≥ 1.5.1).** Earlier bridge builds
+- **Use a current `dockyard-bridge` (≥ 1.6.1).** Earlier bridge builds
   spoke a non-spec handshake that a strict host rejected (or deadlocked
   against), and never reported the App's content size — so the host sized
   the iframe to ~0px and the App looked blank with no error. The current
