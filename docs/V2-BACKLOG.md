@@ -220,8 +220,23 @@ recorded order in the decisions log. Each item carries:
   the conformance suite asserts the host-built policy honours the
   declaration.
 
-### Claude Desktop renders the reference App locally but not a wire-matched Dockyard App (spike)
+### Claude Desktop renders the reference App locally but not a wire-matched Dockyard App (spike) — RESOLVED (D-179, D-180, D-181)
 
+- **Resolution (2026-06-01).** Root-caused and fixed. The spike's premise —
+  that the tool/resource `_meta` wire was the suspect — was wrong: the
+  declaration contract already matched the spec and the reference app. The
+  defect was on the **View side** of the bridge handshake: the
+  `dockyard-bridge` `ui/initialize` request used base-MCP field names
+  (`capabilities`/`clientInfo`) instead of the `ui/` dialect
+  (`appInfo`/`appCapabilities`), so a spec-compliant host rejected the
+  first handshake message and the App rendered blank with no error; two
+  further View-side gaps (awaiting `initialized` instead of sending it, and
+  never reporting content size) sat behind it. Fixed in `web/bridge` with
+  regression tests and a docs-site / skill troubleshooting note — the
+  framework-fix branch of this item's Definition of Done. See
+  D-179/D-180/D-181. Remaining open follow-up: harden the **inspector** host
+  against the official `ext-apps` schemas so it can no longer accept the
+  non-spec View shapes that masked these bugs (noted under D-181).
 - **Origin.** Upstream-team feedback (2026-05-30), the OPEN item of the
   v1.6 wave A plan (`docs/plans/v1.6-wave-A-apps-spec-alignment.md`).
   Related: D-176 (which fixed the one *known*

@@ -344,6 +344,12 @@ synthetic data from the fixture switcher (D-130).
   `ui: <id>` is half the wiring; the runtime needs the builder call too
   so the `_meta.ui` block on the tool result points at the right
   resource.
+- **Blank/white App in the host (renders fine in the inspector).** Use a
+  current `dockyard-bridge` (≥ 1.5.1): earlier builds spoke a non-spec
+  `ui/initialize` handshake a strict host rejected, and never reported the
+  App's size, so the host collapsed the iframe to ~0px (D-179, D-180,
+  D-181). Then check the iframe console for CSP `Refused to …` errors and
+  declare the missing origin in the manifest `csp`.
 
 ## What to do next
 

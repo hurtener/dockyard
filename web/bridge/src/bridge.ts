@@ -147,6 +147,7 @@ export class BridgeShell {
   private initialized = false;
   private closed = false;
   private unsubTransport: Unsubscribe | undefined;
+  private stopSizeReporting: (() => void) | undefined;
 
   constructor(options: BridgeOptions = {}) {
     this.options = options;
@@ -192,45 +193,94 @@ export class BridgeShell {
     if (this.options.displayModes) {
       appCapabilities.displayModes = this.options.displayModes;
     }
+    // MCP Apps `ui/initialize` params use the ui/ dialect field names —
+    // top-level `appCapabilities` + `appInfo` — NOT base-MCP `capabilities` +
+    // `clientInfo`. The reference host (@modelcontextprotocol/ext-apps) validates
+    // params against a schema requiring `{appInfo, appCapabilities,
+    // protocolVersion}` (appInfo REQUIRED); the previous base-MCP shape was
+    // rejected by a strict host, so the handshake never completed and the App
+    // never rendered.
     const params: InitializeParams = {
       protocolVersion: PROTOCOL_VERSION,
-      capabilities: { appCapabilities },
-      clientInfo: this.options.clientInfo ?? DEFAULT_CLIENT,
+      appCapabilities,
+      appInfo: this.options.clientInfo ?? DEFAULT_CLIENT,
     };
 
-    // A promise that settles when the host's `initialized` notification lands.
-    let resolveInitialized!: () => void;
-    const initializedReceived = new Promise<void>((resolve) => {
-      resolveInitialized = resolve;
-    });
-    const offInit = this.transport.onNotification((_p, method) => {
-      if (method === ViewNotification.initialized) {
-        this.initialized = true;
-        resolveInitialized();
-      }
-    });
-
-    try {
-      const result = await this.transport.request<InitializeResult>(
-        ViewMethod.initialize,
-        params,
-      );
-      this.hostCtx.set(result.hostContext ?? {});
-      this._hostCapabilities.set(result.hostCapabilities ?? {});
-      // Retain the negotiated protocol version + host identity (protocol.ts:
-      // "the negotiated value from the host's ui/initialize result is retained
-      // for forward-compatibility"). Both were previously discarded.
-      if (typeof result.protocolVersion === 'string' && result.protocolVersion !== '') {
-        this.negotiatedProtocolVersion = result.protocolVersion;
-      }
-      this._hostInfo.set(result.hostInfo);
-      // The View must wait for `ui/notifications/initialized` before assuming
-      // readiness (brief 01 §2.4).
-      await initializedReceived;
-      this._ready.set(true);
-    } finally {
-      offInit();
+    const result = await this.transport.request<InitializeResult>(
+      ViewMethod.initialize,
+      params,
+    );
+    this.hostCtx.set(result.hostContext ?? {});
+    this._hostCapabilities.set(result.hostCapabilities ?? {});
+    // Retain the negotiated protocol version + host identity (protocol.ts:
+    // "the negotiated value from the host's ui/initialize result is retained
+    // for forward-compatibility"). Both were previously discarded.
+    if (typeof result.protocolVersion === 'string' && result.protocolVersion !== '') {
+      this.negotiatedProtocolVersion = result.protocolVersion;
     }
+    this._hostInfo.set(result.hostInfo);
+    // The View is the initiator: per the JSON-RPC/MCP lifecycle (and the
+    // @modelcontextprotocol/ext-apps reference view that Claude's host is built
+    // on), after the `ui/initialize` result the View *sends*
+    // `ui/notifications/initialized` and is immediately ready. It must NOT wait
+    // to *receive* that notification — the host never sends a View→host message,
+    // so awaiting it deadlocks against a spec-compliant host (blank App, no
+    // error). `initialized` is correctly a View→host notification in protocol.ts.
+    this.transport.notify(ViewNotification.initialized, {});
+    this.initialized = true;
+    this._ready.set(true);
+    this.startSizeReporting();
+  }
+
+  /**
+   * Reports the View's content size to the host via `ui/notifications/size-changed`
+   * (View→host) so the host sizes the App iframe to fit the content. The MCP Apps
+   * reference view (`@modelcontextprotocol/ext-apps`, autoResize) does exactly this
+   * with a ResizeObserver; WITHOUT it a spec-compliant host (Claude Desktop) gives
+   * the iframe a collapsed (~0px) height and the App looks blank even though it
+   * rendered. Mirrors the reference: measure documentElement under `fit-content`,
+   * add the scrollbar gutter, send once immediately then on each de-duplicated
+   * change. No-op outside a DOM (unit tests).
+   */
+  private startSizeReporting(): void {
+    if (
+      typeof document === 'undefined' ||
+      typeof ResizeObserver === 'undefined' ||
+      typeof requestAnimationFrame === 'undefined'
+    ) {
+      return;
+    }
+    let pending = false;
+    let lastW = -1;
+    let lastH = -1;
+    const measure = (): void => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        if (this.closed) return;
+        const el = document.documentElement;
+        const savedW = el.style.width;
+        const savedH = el.style.height;
+        el.style.width = 'fit-content';
+        el.style.height = 'fit-content';
+        const rect = el.getBoundingClientRect();
+        el.style.width = savedW;
+        el.style.height = savedH;
+        const scrollbar = window.innerWidth - el.clientWidth;
+        const width = Math.ceil(rect.width + scrollbar);
+        const height = Math.ceil(rect.height);
+        if (width === lastW && height === lastH) return;
+        lastW = width;
+        lastH = height;
+        this.transport.notify(HostNotification.sizeChanged, { width, height });
+      });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(document.documentElement);
+    observer.observe(document.body);
+    this.stopSizeReporting = () => observer.disconnect();
   }
 
   /** Resolves once the handshake completed and the bridge is ready. */
@@ -247,6 +297,7 @@ export class BridgeShell {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.stopSizeReporting?.();
     this.unsubTransport?.();
     this.router.clear();
     this.views.clear();

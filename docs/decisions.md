@@ -6045,3 +6045,89 @@ working (the docs say so explicitly). The blank `dockyard new` scaffold has no U
 resource, so only the two product templates carry the convention (a documented
 deviation from the plan's "blank + --template" wording — blank has no `ui://` to
 change).
+
+---
+
+## D-179 — `dockyard-bridge` `ui/initialize` uses the MCP Apps `ui/` dialect, not the base-MCP request shape
+
+**Date:** 2026-06-01
+**Status:** Settled (bugfix — App rendered blank against a spec-compliant host).
+**Where it lives:** `web/bridge/src/bridge.ts` (`runHandshake`), `web/bridge/src/protocol.ts` (`InitializeParams`), `web/bridge/src/__tests__/{bridge.test.ts,harness.ts}`.
+
+**Why.** A Dockyard App that is correct on paper — nested+flat `_meta.ui`,
+`text/html;profile=mcp-app`, `ui/initialize` @ 2026-01-26 — rendered blank/white
+in Claude Desktop while never erroring visibly. The View-side bridge sent its
+`ui/initialize` request in the **base-MCP** field shape
+(`{capabilities:{appCapabilities}, clientInfo}`). A spec-compliant host
+(`@modelcontextprotocol/ext-apps`) validates the request against a strict schema
+requiring the **`ui/` dialect**: top-level `{appInfo, appCapabilities,
+protocolVersion}` with **`appInfo` REQUIRED**. The SDK's `parseWithCompat` runs
+*before* the request handler; with `appInfo`/`appCapabilities` absent, Zod throws,
+the SDK returns a JSON-RPC error carrying the request id, the bridge's
+`transport.request('ui/initialize')` rejects, `runHandshake` throws before
+`ready` flips, `connect()` rejects, and the App never paints. The Dockyard
+inspector accepted the base-MCP shape, so this passed locally — the inspector's
+host and the bridge's View shared the same non-spec assumption (see D-181 note).
+
+**The decision.** The View sends the `ui/` dialect shape: `{protocolVersion,
+appCapabilities, appInfo}`. The public `BridgeOptions.clientInfo` source option is
+retained (it maps to the wire `appInfo` value), so no consumer API breaks. The
+result side already matched the host's result schema and is unchanged. Regression
+guard: a test asserts the emitted params equal the dialect shape **and** that the
+legacy `capabilities`/`clientInfo` keys are absent.
+
+---
+
+## D-180 — `dockyard-bridge` SENDS `ui/notifications/initialized`; it never awaits one
+
+**Date:** 2026-06-01
+**Status:** Settled (bugfix — handshake deadlock against a spec host).
+**Where it lives:** `web/bridge/src/bridge.ts` (`runHandshake`), `web/bridge/src/__tests__/{bridge.test.ts,harness.ts}`.
+
+**Why.** `runHandshake` subscribed and **awaited receipt** of
+`ui/notifications/initialized` before resolving `ready`. Per the JSON-RPC/MCP
+lifecycle and the `@modelcontextprotocol/ext-apps` reference View, the View is the
+initiator: after the `ui/initialize` result it **sends** `initialized` and is
+immediately ready. A spec-compliant host never emits a View→host notification, so
+the old code deadlocked — both sides waited, `ready` never resolved, blank App.
+`protocol.ts` already classified `initialized` as a View→host notification; only
+`bridge.ts` used it backwards. (This sat behind D-179 — the handshake failed at
+`ui/initialize` first, so the deadlock was unreachable until D-179 was fixed.)
+
+**The decision.** After the `ui/initialize` result the bridge calls
+`transport.notify(ViewNotification.initialized, {})`, sets `initialized = true`,
+and flips `ready`. An inbound `initialized` from a non-spec host is ignored
+(no deadlock, no double-ready). The in-test host harness no longer auto-sends
+`initialized` host→View, matching a real spec host; a regression test asserts
+`ready` flips when the host sends nothing and that an inbound `initialized` is
+harmless.
+
+---
+
+## D-181 — `dockyard-bridge` reports View content size via `ui/notifications/size-changed`
+
+**Date:** 2026-06-01
+**Status:** Settled (bugfix — collapsed iframe rendered blank).
+**Where it lives:** `web/bridge/src/bridge.ts` (`startSizeReporting`, `close`), `web/bridge/src/__tests__/bridge.test.ts`.
+
+**Why.** The bridge only ever **received** `ui/notifications/size-changed`
+(host→View); it never measured or reported its own content height. A
+spec-compliant host sizes the App iframe from the View's report (the ext-apps
+reference View does this with a `ResizeObserver` under `autoResize`); without it
+the iframe collapses to ~0px and the App looks blank even after it paints. (Like
+D-180, this was masked by D-179 — content never rendered to be measured.)
+
+**The decision.** On `ready` the bridge starts a `ResizeObserver` that measures
+`document.documentElement` under `fit-content`, adds the scrollbar gutter, and
+emits a de-duplicated, `requestAnimationFrame`-throttled `size-changed`
+(View→host) on ready and on every change, torn down in `close()`. It no-ops
+without a DOM / `ResizeObserver` (unit env). The wire method string
+`ui/notifications/size-changed` is shared with the host→View direction; the
+View→host emit reuses it. A regression test stubs `ResizeObserver` + a synchronous
+`requestAnimationFrame` and asserts a `size-changed` is sent after `ready`.
+
+**Inspector follow-up (noted, not in this change).** All three bugs were invisible
+to the Dockyard inspector because its host accepted the non-spec View behaviour.
+The inspector's host-side handshake should be validated against the official
+`@modelcontextprotocol/ext-apps` schemas so the inspector and a real host agree;
+filed as a V2-backlog hardening item.

@@ -177,6 +177,27 @@ session (decisions [D-103](/reference/decisions),
 server side-effects on its own — every mutating call comes from an
 explicit UI action.
 
+## Troubleshooting: a blank App in the host
+
+If your App renders fine in the inspector but shows as a blank/white area
+in a host like Claude Desktop, work through these in order:
+
+- **Use a current `dockyard-bridge` (≥ 1.5.1).** Earlier bridge builds
+  spoke a non-spec handshake that a strict host rejected (or deadlocked
+  against), and never reported the App's content size — so the host sized
+  the iframe to ~0px and the App looked blank with no error. The current
+  bridge speaks the host's `ui/` dialect, signals readiness itself, and
+  reports its size automatically (decisions
+  [D-179](/reference/decisions), [D-180](/reference/decisions),
+  [D-181](/reference/decisions)).
+- **Check the iframe console for CSP errors.** The App runs under a
+  deny-by-default sandbox. A `Refused to connect/load …` error means a
+  domain your App reaches at runtime isn't declared — add it to the
+  manifest `csp` (`connect` for `fetch`/WebSocket, `resource` for
+  scripts/styles/fonts/images).
+- **Keep the tool result small.** Very large results can fail to render;
+  return only what the App needs as structured output.
+
 ## See also
 
 - [`attach-a-ui-resource` agent skill](/agent-skills/)

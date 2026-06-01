@@ -167,8 +167,10 @@ export interface AppCapabilities {
 
 export interface InitializeParams {
   protocolVersion: string;
-  capabilities: { appCapabilities?: AppCapabilities };
-  clientInfo: { name: string; version: string };
+  // ui/ dialect (brief 01 §2.4): top-level `appCapabilities` + `appInfo`, NOT
+  // base-MCP `capabilities`/`clientInfo`. The host schema requires `appInfo`.
+  appCapabilities?: AppCapabilities;
+  appInfo: { name: string; version: string };
 }
 
 /** Standardized host CSS custom properties (brief 01 §2.4 — `styles.variables`). */
