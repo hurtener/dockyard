@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Smoke script for v1.7 wave A — Bridge spec-conformance.
+# Plan: docs/plans/v1.7-wave-A-bridge-spec-conformance.md
+# A check against an unbuilt surface should skip(), not fail() — see common.sh.
+set -uo pipefail
+cd "$(dirname "$0")/../.."
+. scripts/smoke/common.sh
+
+echo "smoke: v1.7-wave-A bridge-spec-conformance"
+
+# --- Item 1: vendored ext-apps schema + derived types + conformance --------
+
+# The official ext-apps machine-readable schema is vendored, SHA-pinned, DO NOT EDIT.
+schema_file="$(ls web/bridge/src/spec/ext-apps-schema*.ts 2>/dev/null | head -1)"
+if [ -n "${schema_file}" ] && grep -qiE 'do not edit' "${schema_file}" 2>/dev/null \
+   && grep -qiE 'sha|commit' "${schema_file}" 2>/dev/null; then
+  ok "vendored ext-apps schema present (SHA-pinned, DO NOT EDIT)"
+else
+  skip "vendored ext-apps schema not yet present under web/bridge/src/spec/"
+fi
+
+# protocol.ts derives its wire types from the vendored schema (inference, not hand-written).
+if [ -f web/bridge/src/protocol.ts ] \
+   && grep -qE "ext-apps-schema|z\.(input|infer)" web/bridge/src/protocol.ts 2>/dev/null; then
+  ok "protocol.ts derives wire types from the vendored schema"
+else
+  skip "protocol.ts still hand-declares the wire types"
+fi
+
+# A conformance test parses the bridge's outbound wire against the vendored schema.
+if ls web/bridge/src/__tests__/conformance*.test.ts >/dev/null 2>&1; then
+  ok "web/bridge wire-conformance test exists"
+else
+  skip "web/bridge wire-conformance test not yet added"
+fi
+
+# --- Item A: appCapabilities.availableDisplayModes -------------------------
+
+if [ -f web/bridge/src/bridge.ts ] \
+   && grep -q "availableDisplayModes" web/bridge/src/bridge.ts 2>/dev/null \
+   && ! grep -qE "appCapabilities\.displayModes|displayModes:" web/bridge/src/bridge.ts 2>/dev/null; then
+  ok "bridge emits appCapabilities.availableDisplayModes (not displayModes)"
+else
+  skip "bridge still emits appCapabilities.displayModes"
+fi
+
+# --- Item B: ui/resource-teardown is a request; request-teardown added -----
+
+if [ -f web/bridge/src/bridge.ts ] \
+   && grep -q "request-teardown" web/bridge/src/protocol.ts web/bridge/src/bridge.ts 2>/dev/null; then
+  ok "bridge exposes the app-initiated ui/notifications/request-teardown"
+else
+  skip "bridge does not yet expose request-teardown / teardown-as-request"
+fi
+
+# --- Item 3: Dockyard Tasks×Apps notifications fenced ----------------------
+
+# task-progress + elicitation-response live in dockyard-ext, NOT in protocol.ts.
+if [ -f web/bridge/src/dockyard-ext.ts ] \
+   && grep -qE "task-progress|elicitation-response" web/bridge/src/dockyard-ext.ts 2>/dev/null; then
+  ok "Dockyard Tasks×Apps notifications fenced in dockyard-ext"
+else
+  skip "Dockyard Tasks×Apps notifications not yet fenced"
+fi
+
+# --- Item 4: inspector host conformance ------------------------------------
+
+# The inspector host no longer unconditionally sends host→View initialized.
+if [ -f web/inspector/src/host/host-bridge.ts ] \
+   && ! grep -qE "this\.notify\(ViewNotification\.initialized" web/inspector/src/host/host-bridge.ts 2>/dev/null; then
+  ok "inspector host no longer sends host→View ui/notifications/initialized"
+else
+  skip "inspector host still sends host→View initialized (faithful-host not yet landed)"
+fi
+
+# --- §19: docs reflect the Tasks-extension host requirement ----------------
+
+if grep -qiE "Dockyard-aware host|Tasks.*host-only|only against.*host" \
+     skills/attach-a-ui-resource/SKILL.md 2>/dev/null; then
+  ok "attach-a-ui-resource skill notes the Tasks-extension host requirement"
+else
+  skip "attach-a-ui-resource skill does not yet note the Tasks-extension boundary"
+fi
+
+smoke_summary
