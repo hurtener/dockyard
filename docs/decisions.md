@@ -6194,6 +6194,38 @@ open questions in the plan and locked at implementation. The four conformance
 fixes (A–D) ride this decision as acceptance criteria, not separate decisions —
 they are what the schema forces into the open.
 
+**Implementation notes (deviations, recorded per CLAUDE.md §4.3 — v1.7 wave A).**
+
+- **The schema is referenced only by the test layer; `protocol.ts` imports
+  neither it nor Zod.** `dockyard-bridge` is published as *source* (D-172), so a
+  schema import in the runtime/public type graph would force every consuming
+  project to install `zod` + `@modelcontextprotocol/sdk` just to type-check the
+  bridge. Keeping the schema test-only preserves the consumer zero-dep property
+  and the Zod-free App bundle. The plan's "derive the types in `protocol.ts` by
+  inference" is therefore realised as: hand-written clean public types in
+  `protocol.ts`, **pinned by the runtime `conformance.test.ts`** that `.parse()`s
+  the bridge's emitted wire against the schema. This is in fact the *stronger*
+  guard — a structural `extends` assertion cannot catch a renamed field (excess
+  properties pass), whereas the round-trip `.parse()` does (it caught item A).
+- **The "bundle is Zod-free" guard is the static "schema referenced only by
+  tests" check** (`scripts/smoke/v1.7-wave-A.sh`), not a build-and-grep of a
+  template's output. Zod can only enter the App bundle via a runtime import,
+  which the static check forbids — a stronger and cheaper guarantee than
+  inspecting a built artifact.
+- **Pure file-vendoring was impractical → `zod` + `@modelcontextprotocol/sdk`
+  are `web/bridge` devDeps** (the documented fallback). The upstream
+  `src/generated/schema.ts` imports seven base schemas from
+  `@modelcontextprotocol/sdk/types.js`, so vendoring the ext-apps schema
+  self-contained would mean vendoring the entire SDK types closure. The ext-apps
+  schema file itself is vendored by SHA (commit `7d4434e`, 2026-06-01); its
+  `zod` + SDK imports resolve to devDeps.
+- **Full inspector inbound-schema validation is deferred** to a V2-BACKLOG entry.
+  Item 4 made the inspector host behaviourally faithful (no host-sent
+  `initialized`; ready on the View's `initialized`; reads `availableDisplayModes`),
+  which closes the leniency that masked the 1.6.1 bugs. `.parse()`-validating the
+  inspector's inbound messages adds Zod to `web/inspector` for marginal extra
+  value, since the bridge's `conformance.test.ts` already guards the View side.
+
 ---
 
 ## D-183 — Dockyard's Tasks×Apps `ui/` notifications are explicit extensions outside the MCP Apps schema

@@ -292,6 +292,15 @@ simply never fires the subscriber, so subscribe unconditionally and render
 whatever arrives. It is demoable through `dockyard inspect` — the inspector
 forwards the attached server's task progress to the App preview.
 
+> **Tasks×Apps is Dockyard-host-only.** `onTaskProgress` and the
+> elicitation-response flow are **Dockyard extensions** outside the MCP Apps
+> schema (`task-progress` / `elicitation-response`). They work **only against a
+> Dockyard-aware host** — the inspector, or Harbor as the MCP client. A stock
+> host (e.g. Claude Desktop) ignores them: progress never arrives and an
+> elicitation reply is dropped. Build the App so its core value does not depend
+> on them; treat live progress and inline elicitation as enhancements that light
+> up on a Dockyard host.
+
 ### Host theme propagation
 
 Read the host's theme from `hostContext.styles.variables`. The bridge

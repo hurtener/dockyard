@@ -73,9 +73,10 @@ exposes `hostContext` as Svelte stores, fans out host→view notifications, offe
 typed view→host helpers, negotiates display modes, and framework-manages
 `viewUUID` view-state. Its peer, the *host half* of the same dialect, is the
 inspector. Its wire layer (methods, notification shapes, capability + host-context
-types, handshake lifecycle) is **derived from and conformance-tested against the
-vendored ext-apps schema** — not hand-maintained — while the runtime stays
-Zod-free (D-182). RFC §7.2, §7.3. D-016, D-059, D-060, D-061, D-182.
+types, handshake lifecycle) is **pinned to and conformance-tested against the
+vendored ext-apps schema** — a drift is a failing build, not a blank App — while
+the runtime stays Zod-free (the schema is referenced only by the test layer;
+D-182). RFC §7.2, §7.3. D-016, D-059, D-060, D-061, D-182.
 
 ## C
 
@@ -1010,8 +1011,8 @@ same PR that records it in `docs/decisions.md`. D-158.
 **Vendored ext-apps schema** — the machine-readable
 `@modelcontextprotocol/ext-apps` schema mirrored into `web/bridge/src/spec/`,
 pinned by upstream commit SHA + date, from which the bridge shell library's
-`ui/` wire types are inferred and against which its outbound wire is
-conformance-tested. The View-side analogue of the `internal/protocolcodec` seam
+`ui/` wire types are pinned (via the test layer) and against which its outbound
+wire is conformance-tested. The View-side analogue of the `internal/protocolcodec` seam
 (§5.4) and the vendored Tasks schema (§8.2) — a vendored spec in machine-
 readable form. RFC §7.3, §10. D-182.
 

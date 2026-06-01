@@ -93,7 +93,10 @@ describe('HostBridge handshake', () => {
 
     expect(entries).toContain('inbound:ui/initialize');
     expect(entries).toContain('outbound:response');
-    expect(entries).toContain('outbound:ui/notifications/initialized');
+    // A faithful spec host does NOT send a host→View `initialized`; it receives
+    // the View's `initialized` and is ready on receipt (D-182, item 4).
+    expect(entries).toContain('inbound:ui/notifications/initialized');
+    expect(entries).not.toContain('outbound:ui/notifications/initialized');
     host.close();
     view.close();
   });

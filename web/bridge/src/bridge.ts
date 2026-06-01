@@ -22,25 +22,30 @@
  */
 
 import type { ContractInput, ContractOutput, ToolContract } from './contracts.js';
+import {
+  DockyardExtMethod,
+  type ElicitationResponseParams,
+  type TaskProgressParams,
+} from './dockyard-ext.js';
 import { HostContextState, type HostContextStores, type StyleTarget } from './host-context.js';
 import { NotificationRouter, type Unsubscribe } from './notifications.js';
 import {
   HostNotification,
+  HostRequest,
   PROTOCOL_VERSION,
   ViewMethod,
   ViewNotification,
   type AppCapabilities,
   type CallToolResult,
   type DisplayMode,
-  type ElicitationResponseParams,
   type HostCapabilities,
   type HostContextChangedParams,
   type InitializeParams,
   type InitializeResult,
+  type JsonRpcId,
   type MessageRole,
   type RequestDisplayModeResult,
   type SizeChangedParams,
-  type TaskProgressParams,
   type ToolCancelledParams,
   type ToolInputParams,
   type UpdateModelContextParams,
@@ -147,6 +152,7 @@ export class BridgeShell {
   private initialized = false;
   private closed = false;
   private unsubTransport: Unsubscribe | undefined;
+  private unsubRequests: Unsubscribe | undefined;
   private stopSizeReporting: (() => void) | undefined;
 
   constructor(options: BridgeOptions = {}) {
@@ -164,6 +170,9 @@ export class BridgeShell {
     });
     this.unsubTransport = this.transport.onNotification((params, method) =>
       this.onNotification(method, params),
+    );
+    this.unsubRequests = this.transport.onRequest((_params, method, id) =>
+      this.onRequest(method, id),
     );
 
     const styleTarget =
@@ -303,6 +312,7 @@ export class BridgeShell {
     this.closed = true;
     this.stopSizeReporting?.();
     this.unsubTransport?.();
+    this.unsubRequests?.();
     this.router.clear();
     this.views.clear();
     this.transport.close();
@@ -496,7 +506,18 @@ export class BridgeShell {
     const params: ElicitationResponseParams = { taskId };
     if (data !== undefined) params.data = data;
     if (options?.declined) params.declined = true;
-    this.transport.notify(ViewNotification.elicitationResponse, params);
+    this.transport.notify(DockyardExtMethod.elicitationResponse, params);
+  }
+
+  /**
+   * Asks the host to tear this App down — the View-initiated
+   * `ui/notifications/request-teardown` (D-182, item B). Fire-and-forget: the
+   * host responds by sending the `ui/resource-teardown` request, which the
+   * bridge answers and then closes. Use when an App is done and wants its
+   * iframe released (the host-initiated teardown is the common path).
+   */
+  requestTeardown(): void {
+    this.transport.notify(ViewNotification.requestTeardown, {});
   }
 
   /* --- framework-managed view-state ---------------------------------- */
@@ -528,11 +549,22 @@ export class BridgeShell {
     ) {
       this.hostCtx.patch(params as HostContextChangedParams);
     }
-    // `ui/resource-teardown` tears the bridge down (drop subscribers, close the
-    // transport, set ready=false). The host sends it when the App's resource is
-    // being torn down; the View must release its listeners rather than leak
-    // them. close() is idempotent, so a duplicate teardown is safe.
-    if (method === HostNotification.resourceTeardown) {
+  }
+
+  /**
+   * Handles an inbound host → View *request*. The only one is
+   * `ui/resource-teardown` (D-182, item B): a spec host asks the View to clean
+   * up and **waits for the View's result** before tearing down the iframe — so
+   * the bridge responds first (an empty result object per
+   * `McpUiResourceTeardownResultSchema`), then closes (drop subscribers, close
+   * the transport, set ready=false). Responding before `close()` matters:
+   * `close()` shuts the transport, after which `respond` is a no-op. `close()`
+   * is idempotent, so a duplicate teardown is safe. An unknown request method is
+   * ignored (forward-compatibility).
+   */
+  private onRequest(method: string, id: JsonRpcId): void {
+    if (method === HostRequest.resourceTeardown) {
+      this.transport.respond(id, {});
       this.close();
     }
   }

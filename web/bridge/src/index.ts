@@ -44,6 +44,7 @@ export type {
 export {
   EXTENSION_ID,
   HostNotification,
+  HostRequest,
   PROTOCOL_VERSION,
   RESOURCE_MIME_TYPE,
   ReservedNotification,
@@ -53,6 +54,12 @@ export {
   isJsonRpcRequest,
   isJsonRpcResponse,
 } from './protocol.js';
+// Dockyard Tasks×Apps extensions — outside the conformed MCP Apps surface (D-183).
+export { DockyardExtMethod, DOCKYARD_EXT_METHODS } from './dockyard-ext.js';
+export type {
+  ElicitationResponseParams,
+  TaskProgressParams,
+} from './dockyard-ext.js';
 export type {
   AppCapabilities,
   CallToolParams,
@@ -60,7 +67,6 @@ export type {
   ContainerDimensions,
   ContentBlock,
   DisplayMode,
-  ElicitationResponseParams,
   HostCapabilities,
   HostContext,
   HostContextChangedParams,
@@ -79,7 +85,6 @@ export type {
   RequestDisplayModeResult,
   SizeChangedParams,
   StyleVariables,
-  TaskProgressParams,
   ToolCancelledParams,
   ToolInputParams,
   UpdateModelContextParams,

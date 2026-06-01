@@ -18,6 +18,7 @@ import {
   type DisplayMode,
   type HostContext,
   type InitializeResult,
+  type JsonRpcId,
   type JsonRpcMessage,
   type JsonRpcRequest,
   type JsonRpcResponse,
@@ -69,6 +70,12 @@ export class HostHarness {
   private readonly responders = new Map<
     string,
     (req: JsonRpcRequest) => JsonRpcResponse
+  >();
+  /** Negative ids for host→View requests, and their pending settlers. */
+  private hostReqId = -1;
+  private readonly pendingHostReqs = new Map<
+    JsonRpcId,
+    { resolve: (r: unknown) => void; reject: (e: Error) => void }
   >();
 
   constructor(options: HarnessOptions = {}) {
@@ -133,6 +140,19 @@ export class HostHarness {
     return undefined;
   }
 
+  /**
+   * Sends a host → View *request* and resolves with the View's result (or
+   * rejects on a JSON-RPC error). Host request ids are negative so they never
+   * collide with the View's own positive request ids.
+   */
+  sendRequest(method: string, params?: unknown): Promise<unknown> {
+    const id = this.hostReqId--;
+    return new Promise<unknown>((resolve, reject) => {
+      this.pendingHostReqs.set(id, { resolve, reject });
+      this.hostPort.postMessage({ jsonrpc: '2.0', id, method, params });
+    });
+  }
+
   /** Tears the channel down. */
   close(): void {
     this.channel.port1.close();
@@ -148,7 +168,19 @@ export class HostHarness {
       return;
     }
     const message = data as JsonRpcMessage;
-    if (!('method' in message)) return; // a response to a host→View request
+    if (!('method' in message)) {
+      // A response to a host→View request — resolve the pending host request.
+      const res = message as { id?: JsonRpcId; result?: unknown; error?: { message: string } };
+      if (res.id !== undefined) {
+        const pending = this.pendingHostReqs.get(res.id);
+        if (pending) {
+          this.pendingHostReqs.delete(res.id);
+          if (res.error) pending.reject(new Error(res.error.message));
+          else pending.resolve(res.result);
+        }
+      }
+      return;
+    }
     if (!('id' in message)) {
       // A View→host notification (initialized, size-changed, elicitation).
       const note = message as { method: string; params?: unknown };

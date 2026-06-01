@@ -198,6 +198,18 @@ in a host like Claude Desktop, work through these in order:
 - **Keep the tool result small.** Very large results can fail to render;
   return only what the App needs as structured output.
 
+## Tasks×Apps is Dockyard-host-only
+
+Live task progress (`onTaskProgress`) and the inline elicitation-response flow
+are **Dockyard extensions** — the `ui/notifications/task-progress` and
+`ui/notifications/elicitation-response` messages are not part of the MCP Apps
+schema. They work **only against a Dockyard-aware host**: the local inspector,
+or Harbor acting as the MCP client. A stock host (for example Claude Desktop)
+ignores them — progress never arrives and an elicitation reply is dropped
+(decision [D-183](/reference/decisions)). Design an App so its core value works
+without them, and treat progress and inline elicitation as enhancements that
+light up on a Dockyard host.
+
 ## See also
 
 - [`attach-a-ui-resource` agent skill](/agent-skills/)

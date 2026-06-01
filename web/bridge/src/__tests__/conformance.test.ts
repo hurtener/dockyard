@@ -18,9 +18,13 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { createBridge } from '../bridge.js';
+import { DOCKYARD_EXT_METHODS } from '../dockyard-ext.js';
+import { HostNotification, ViewNotification } from '../protocol.js';
 import {
   McpUiInitializeRequestSchema,
   McpUiInitializedNotificationSchema,
+  McpUiRequestTeardownNotificationSchema,
+  McpUiResourceTeardownResultSchema,
   McpUiSizeChangedNotificationSchema,
 } from '../spec/ext-apps-schema.js';
 import { HostHarness } from './harness.js';
@@ -120,5 +124,47 @@ describe('wire conformance — the bridge emits schema-valid ui/ wire (D-182)', 
       g.ResizeObserver = realRO;
       g.requestAnimationFrame = realRAF;
     }
+  });
+
+  it('the ui/resource-teardown response conforms (item B)', async () => {
+    const h = harness();
+    const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+    await bridge.connect();
+    const result = await h.sendRequest('ui/resource-teardown', {});
+    // The empty result object must satisfy McpUiResourceTeardownResultSchema.
+    expect(() => McpUiResourceTeardownResultSchema.parse(result)).not.toThrow();
+  });
+
+  it('Dockyard extension notifications are fenced out of the conformed surface (D-183)', () => {
+    // The conformed protocol surface must contain none of the Dockyard
+    // extension methods — they live in dockyard-ext, and the fence is exactly
+    // these two so it cannot silently grow.
+    const conformed = [
+      ...Object.values(ViewNotification),
+      ...Object.values(HostNotification),
+    ];
+    for (const m of DOCKYARD_EXT_METHODS) {
+      expect(conformed).not.toContain(m);
+    }
+    expect([...DOCKYARD_EXT_METHODS].sort()).toEqual([
+      'ui/notifications/elicitation-response',
+      'ui/notifications/task-progress',
+    ]);
+  });
+
+  it('the ui/notifications/request-teardown notification conforms (item B)', async () => {
+    const h = harness();
+    const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+    await bridge.connect();
+    bridge.requestTeardown();
+    await new Promise((r) => setTimeout(r, 0)); // drain the View→host post
+
+    const note = h.lastNotification('ui/notifications/request-teardown')!;
+    expect(() =>
+      McpUiRequestTeardownNotificationSchema.parse({
+        method: note.method,
+        params: note.params,
+      }),
+    ).not.toThrow();
   });
 });

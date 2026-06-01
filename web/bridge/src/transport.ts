@@ -11,6 +11,7 @@
 
 import {
   isJsonRpcNotification,
+  isJsonRpcRequest,
   isJsonRpcResponse,
   ReservedNotification,
   type JsonRpcId,
@@ -96,6 +97,9 @@ export class Transport {
   private readonly requestTimeoutMs: number;
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
   private readonly handlers = new Set<NotificationHandler>();
+  private requestHandler:
+    | ((params: unknown, method: string, id: JsonRpcId) => void)
+    | undefined;
   private nextId = 1;
   private closed = false;
   private readonly boundOnMessage: (ev: { data: unknown }) => void;
@@ -154,6 +158,29 @@ export class Transport {
   }
 
   /**
+   * Registers the handler for inbound host → View *requests* (the host half of
+   * the dialect makes these; the only one in this revision is
+   * `ui/resource-teardown`). The handler must call {@link respond} with the
+   * request id. Returns an unsubscribe function. A single handler suffices — the
+   * bridge routes by method internally.
+   */
+  onRequest(
+    handler: (params: unknown, method: string, id: JsonRpcId) => void,
+  ): () => void {
+    this.requestHandler = handler;
+    return () => {
+      if (this.requestHandler === handler) this.requestHandler = undefined;
+    };
+  }
+
+  /** Sends a JSON-RPC result for an inbound host → View request. */
+  respond(id: JsonRpcId, result: unknown): void {
+    if (this.closed) return;
+    const message: JsonRpcResponse = { jsonrpc: '2.0', id, result };
+    this.peer.postMessage(message);
+  }
+
+  /**
    * Registers a host → View notification handler. Returns an unsubscribe
    * function. Reserved sandbox-proxy notifications never reach a handler.
    */
@@ -192,8 +219,15 @@ export class Transport {
       }
       return;
     }
-    // An inbound *request* from the host is not part of the View's surface in
-    // this revision; ignore it rather than fail (forward-compatibility).
+    // An inbound *request* from the host (e.g. `ui/resource-teardown`) — route
+    // to the registered request handler, which must `respond(id, …)`. If none
+    // is registered, ignore it rather than fail (forward-compatibility).
+    // (TS over-narrows `message` to `never` here because a request is
+    // structurally a superset of a notification, so reach for `data`.)
+    const req = data as JsonRpcRequest;
+    if (this.requestHandler && isJsonRpcRequest(req)) {
+      this.requestHandler(req.params, req.method, req.id);
+    }
   }
 
   private resolveResponse(message: JsonRpcResponse): void {

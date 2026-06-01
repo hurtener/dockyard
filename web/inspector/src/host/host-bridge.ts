@@ -14,8 +14,9 @@
  *
  *   - it answers the View's `ui/initialize` request with an `InitializeResult`
  *     carrying `hostContext` and `hostCapabilities`;
- *   - it acks the handshake with a host→View `ui/notifications/initialized`
- *     (current Views resolve `ready` on their own and ignore this — D-180);
+ *   - it answers `ui/initialize` and then waits: a faithful spec host does NOT
+ *     send a host→View `initialized`; it marks itself ready when the View SENDS
+ *     `ui/notifications/initialized` (D-180/D-182);
  *   - it fans host→view notifications (`tool-input`, `tool-result`, …);
  *   - it answers `ui/request-display-mode`, granting only modes in
  *     `availableDisplayModes` — capability-driven, never a host matrix
@@ -32,6 +33,7 @@
  */
 
 import {
+  DockyardExtMethod,
   HostNotification,
   ViewMethod,
   ViewNotification,
@@ -206,10 +208,10 @@ export class HostBridge {
 
   /**
    * Resolves once the `ui/initialize` handshake is complete — the View sent
-   * `ui/initialize`, the host answered it, and the host sent
-   * `ui/notifications/initialized` (the host→View direction of the dialect,
-   * brief 01 §2.4). At that point the App has rendered and its bridge is up —
-   * the "the App completed its handshake" signal the inspector waits on.
+   * `ui/initialize`, the host answered it, and the View sent
+   * `ui/notifications/initialized` (the View → host readiness signal; D-182).
+   * At that point the App has rendered and its bridge is up — the "the App
+   * completed its handshake" signal the inspector waits on.
    */
   ready(): Promise<void> {
     return this.readyPromise;
@@ -255,7 +257,7 @@ export class HostBridge {
    * does not subscribe (or a run with no tasks) is unaffected.
    */
   sendTaskProgress(params: TaskProgressParams): void {
-    this.notify(HostNotification.taskProgress, params);
+    this.notify(DockyardExtMethod.taskProgress, params);
   }
 
   /** Notifies the View that a host-context field changed (a partial patch). */
@@ -337,7 +339,16 @@ export class HostBridge {
    */
   private handleNotification(notification: JsonRpcNotification): void {
     switch (notification.method) {
-      case ViewNotification.elicitationResponse: {
+      case ViewNotification.initialized:
+        // The View is the handshake initiator (D-180/D-182): it sends
+        // `ui/notifications/initialized` after the `ui/initialize` result and is
+        // then ready. A faithful spec host resolves *on receipt* — it does NOT
+        // send its own host→View `initialized` (the leniency that masked the
+        // v1.6.1 bugs; D-182 item 4). Idempotent against a duplicate.
+        this.viewReady = true;
+        this.resolveReady();
+        return;
+      case DockyardExtMethod.elicitationResponse: {
         // Phase 25 / D-134 — the App's reply to a task's input_required
         // prompt. Forward to the wired responder; the inspector wires
         // this to its backend POST that calls tasks/result on the
@@ -422,15 +433,11 @@ export class HostBridge {
       hostInfo: this.hostInfo,
     };
     this.respond(req.id, result);
-    // A spec-compliant View resolves `ready` on its own after the
-    // `ui/initialize` result and SENDS `ui/notifications/initialized`; it no
-    // longer waits to receive one (dockyard-bridge D-180). The inspector keeps
-    // emitting this host→View ack — current bridges ignore it — pending the
-    // inspector-handshake hardening that makes this host fully spec-faithful
-    // (D-181 follow-up). It is harmless and marks the host's side complete.
-    this.notify(ViewNotification.initialized, {});
-    this.viewReady = true;
-    this.resolveReady();
+    // A faithful spec host stops here: it does NOT send a host→View
+    // `ui/notifications/initialized`. The View resolves `ready` on its own and
+    // SENDS `initialized` (D-180/D-182, item 4); the host marks itself ready on
+    // *receipt* of that notification (handleNotification). Sending one here was
+    // the leniency that let the v1.6.1 View bugs pass locally.
   }
 
   private handleRequestDisplayMode(req: JsonRpcRequest): void {

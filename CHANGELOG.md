@@ -21,7 +21,47 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-(No entries yet — the next release surface will land here.)
+### Changed
+
+- **`dockyard-bridge`'s `ui/` wire layer is now pinned to the vendored official
+  `@modelcontextprotocol/ext-apps` schema. (D-182)** The bridge previously
+  hand-transcribed the MCP Apps wire dialect, which drifted silently (the cause
+  of the 1.6.1 handshake bugs). The schema is vendored into the repo by upstream
+  SHA, and a **wire-conformance test** now `.parse()`s the bridge's outbound wire
+  against it — a drift is a failing build, not a blank App in a host. The shipped
+  App bundle stays Zod-free and consumers need no schema dependency (the schema
+  is referenced only by the bridge's test layer).
+- **`HostContext` gains schema-accurate fields (additive).** `containerDimensions`
+  now models flexible sizing (`maxWidth`/`maxHeight`) alongside fixed
+  `width`/`height`; `styles` gains `css.fonts`; `toolInfo`, `platform`, and
+  `deviceCapabilities` match the schema.
+
+### Fixed
+
+- **`dockyard-bridge` advertises `appCapabilities.availableDisplayModes`, not
+  `displayModes`. (D-182, item A)** The host's parse silently stripped the
+  non-schema `displayModes` key, so it never learned which display modes an App
+  supported and fullscreen/pip degradation never worked. The public `displayModes`
+  bridge option is unchanged.
+- **`dockyard-bridge` handles `ui/resource-teardown` as a request, not a
+  notification. (D-182, item B)** A spec host sends teardown as a request and
+  waits for the View's response before tearing the iframe down; the bridge now
+  responds, then closes. Adds the app-initiated `ui/notifications/request-teardown`
+  (`BridgeShell.requestTeardown()`).
+- **`dockyard-bridge` applies host fonts. (D-182, item D)** Host-provided
+  `styles.css.fonts` CSS is injected into the View document so the host's fonts
+  load.
+- **The local inspector is a faithful spec host. (D-182, item 4)** It no longer
+  sends a host→View `ui/notifications/initialized`; it marks itself ready when the
+  View sends `initialized`, and reads `availableDisplayModes`. This removes the
+  leniency that let the 1.6.1 View bugs pass locally.
+
+### Notes
+
+- Dockyard's Tasks×Apps `ui/` notifications (`task-progress`,
+  `elicitation-response`) are now explicitly fenced as **Dockyard extensions**
+  outside the MCP Apps schema; they function only against a Dockyard-aware host
+  (the inspector, or Harbor). (D-183)
 
 ## [1.6.1] - 2026-06-01
 

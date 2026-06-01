@@ -13,8 +13,9 @@
 #   - twelve fixtures (six per tool) ship under the materialised tree
 #   - the shared FieldDiff lives in web/ui/ and is exported
 #   - CONVENTIONS.md §3 lists FieldDiff
-#   - the bridge ships ViewNotification.elicitationResponse and the
-#     sendElicitationResponse helper (D-134)
+#   - the bridge ships the elicitation-response message (fenced in
+#     dockyard-ext.ts as DockyardExtMethod.elicitationResponse per D-183) and
+#     the sendElicitationResponse helper (D-134)
 #   - the inspector backend exposes POST /api/tasks/elicitation
 #   - the AppShell supports fullViewport (Phase 25 cosmetic follow-up)
 #   - the rename is complete (approval-flow singular, brief carve-outs)
@@ -142,13 +143,16 @@ else
 fi
 
 # --- the bridge ships the elicitation-response message (D-134) --------------
-if grep -q "elicitationResponse" web/bridge/src/protocol.ts \
-   && grep -q "ui/notifications/elicitation-response" web/bridge/src/protocol.ts \
+# As of v1.7 wave A (D-183) the elicitation-response message + type are fenced
+# in dockyard-ext.ts (a Dockyard extension outside the MCP Apps schema); the
+# sendElicitationResponse helper stays on BridgeShell.
+if grep -q "elicitationResponse" web/bridge/src/dockyard-ext.ts \
+   && grep -q "ui/notifications/elicitation-response" web/bridge/src/dockyard-ext.ts \
    && grep -q "sendElicitationResponse" web/bridge/src/bridge.ts \
-   && grep -q "ElicitationResponseParams" web/bridge/src/protocol.ts; then
-  ok "the bridge ships the elicitation-response notification + the typed View helper (D-134)"
+   && grep -q "ElicitationResponseParams" web/bridge/src/dockyard-ext.ts; then
+  ok "the bridge ships the elicitation-response notification + the typed View helper (D-134; fenced per D-183)"
 else
-  fail "the bridge is missing one of: ViewNotification.elicitationResponse, sendElicitationResponse, ElicitationResponseParams"
+  fail "the bridge is missing one of: DockyardExtMethod.elicitationResponse, sendElicitationResponse, ElicitationResponseParams"
 fi
 
 # --- the host bridge dispatches the elicitation-response (D-134) ------------
