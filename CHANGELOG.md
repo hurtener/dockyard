@@ -51,10 +51,14 @@ deliberately deferred to V2.
 - **`dockyard-bridge` applies host fonts. (D-182, item D)** Host-provided
   `styles.css.fonts` CSS is injected into the View document so the host's fonts
   load.
-- **The local inspector is a faithful spec host. (D-182, item 4)** It no longer
-  sends a host→View `ui/notifications/initialized`; it marks itself ready when the
-  View sends `initialized`, and reads `availableDisplayModes`. This removes the
-  leniency that let the 1.6.1 View bugs pass locally.
+- **The local inspector is a faithful, validating spec host. (D-182, item 4)** It
+  no longer sends a host→View `ui/notifications/initialized`; it marks itself ready
+  when the View sends `initialized`, reads `availableDisplayModes`, and now
+  **validates the View's `ui/initialize` against the vendored schema**, rejecting a
+  non-spec shape with a JSON-RPC error. This removes the leniency that let the
+  1.6.1 View bugs pass locally — the inspector now catches them. The schema is
+  shared via a new opt-in `dockyard-bridge/spec` subpath (the package's `.` entry
+  stays Zod-free for App consumers).
 
 ### Notes
 

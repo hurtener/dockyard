@@ -302,20 +302,6 @@ recorded order in the decisions log. Each item carries:
   inspector host wired to answer/forward it. `resources/read` is the most
   likely first ask (a multi-resource App).
 
-### Inspector inbound-schema validation (full faithful host)
-
-- **Origin.** v1.7 wave A (D-182, item 4). The inspector host was made
-  behaviourally faithful (it no longer sends a host→View `initialized`; it reads
-  `availableDisplayModes`), which closes the leniency that masked the 1.6.1 bugs.
-- **What was deferred + why.** *Schema-validating* the inspector's inbound View
-  messages (so a non-spec View shape is rejected in the inspector too, not just
-  in the bridge's own conformance test) would add `zod` + the vendored schema to
-  `web/inspector`. The bridge's `conformance.test.ts` already guards the View
-  side at build time, so the marginal value is a belt-and-braces check.
-- **Definition of done.** `web/inspector` imports the vendored schema (dev
-  dependency) and `.parse()`s inbound `ui/initialize` params + View notifications
-  in its host-bridge, with a test asserting a malformed shape is rejected.
-
 ### Bridge View-side task-progress channel
 
 - **Origin.** Upstream-team feedback (2026-05-29). Related: D-119 / the

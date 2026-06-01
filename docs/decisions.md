@@ -6219,12 +6219,16 @@ they are what the schema forces into the open.
   self-contained would mean vendoring the entire SDK types closure. The ext-apps
   schema file itself is vendored by SHA (commit `7d4434e`, 2026-06-01); its
   `zod` + SDK imports resolve to devDeps.
-- **Full inspector inbound-schema validation is deferred** to a V2-BACKLOG entry.
-  Item 4 made the inspector host behaviourally faithful (no host-sent
-  `initialized`; ready on the View's `initialized`; reads `availableDisplayModes`),
-  which closes the leniency that masked the 1.6.1 bugs. `.parse()`-validating the
-  inspector's inbound messages adds Zod to `web/inspector` for marginal extra
-  value, since the bridge's `conformance.test.ts` already guards the View side.
+- **The inspector host validates inbound against the schema** (item 4, completed).
+  It `.safeParse()`s the View's `ui/initialize` params against
+  `McpUiInitializeRequestSchema` and rejects a non-spec shape with a JSON-RPC
+  `-32602` error — so the inspector now *catches* what only a real host used to
+  (a test sends the base-MCP `{capabilities, clientInfo}` shape that caused D-179
+  and asserts the rejection). The vendored schema is shared via a new
+  **`dockyard-bridge/spec` subpath export** — the opt-in, **Zod-bearing** surface;
+  `web/inspector` adds its own `zod` + `@modelcontextprotocol/sdk` devDeps. The
+  package's **`.` entry stays Zod-free** (the consumer zero-dep guarantee holds
+  for App authors; only `./spec`, imported by tooling/tests, pulls Zod).
 
 ---
 

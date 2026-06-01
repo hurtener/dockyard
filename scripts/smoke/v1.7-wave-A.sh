@@ -79,6 +79,16 @@ else
   skip "inspector host still sends host→View initialized (faithful-host not yet landed)"
 fi
 
+# The inspector validates inbound ui/initialize against the vendored schema
+# (via the dockyard-bridge/spec subpath) — a faithful spec host, not a lenient one.
+if grep -q "dockyard-bridge/spec" web/inspector/src/host/host-bridge.ts 2>/dev/null \
+   && grep -qE "McpUiInitializeRequestSchema.*safeParse|safeParse.*McpUiInitialize" web/inspector/src/host/host-bridge.ts 2>/dev/null \
+   && grep -q '"./spec"' web/bridge/package.json 2>/dev/null; then
+  ok "inspector validates inbound ui/initialize against the vendored schema"
+else
+  skip "inspector inbound-schema validation not yet wired"
+fi
+
 # --- §19: docs reflect the Tasks-extension host requirement ----------------
 
 if grep -qiE "Dockyard-aware host|Tasks.*host-only|only against.*host" \

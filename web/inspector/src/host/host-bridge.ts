@@ -52,6 +52,10 @@ import {
   type RequestDisplayModeResult,
   type TaskProgressParams,
 } from 'dockyard-bridge';
+// The vendored ext-apps schema (zod) — the `./spec` subpath is the opt-in,
+// zod-bearing surface; the inspector validates inbound View messages against it
+// (D-182, item 4). The bridge's `.` entry stays Zod-free for App consumers.
+import { McpUiInitializeRequestSchema } from 'dockyard-bridge/spec';
 
 /** The protocol revision the host half advertises (matches the View half). */
 export const HOST_PROTOCOL_VERSION = '2026-01-26';
@@ -409,6 +413,22 @@ export class HostBridge {
 
   private handleInitialize(req: JsonRpcRequest): void {
     this.initializeReceived = true;
+    // Validate the handshake against the vendored ext-apps schema (D-182 — the
+    // inspector is a faithful spec host, not a lenient one). A non-spec View
+    // (e.g. the base-MCP `{capabilities, clientInfo}` shape that caused the
+    // 1.6.1 bug) is REJECTED with a JSON-RPC error rather than silently
+    // accepted — the inspector now catches what only a real host used to.
+    const check = McpUiInitializeRequestSchema.shape.params.safeParse(
+      req.params,
+    );
+    if (!check.success) {
+      this.respondError(
+        req.id,
+        -32602,
+        `invalid ui/initialize params (not ext-apps-conformant): ${check.error.message}`,
+      );
+      return;
+    }
     const params = (req.params ?? {}) as Partial<InitializeParams>;
     // The View advertises the display modes its build supports; the host
     // narrows `availableDisplayModes` to that intersection — capability-driven

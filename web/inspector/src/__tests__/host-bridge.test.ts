@@ -51,6 +51,43 @@ describe('HostBridge handshake', () => {
     view.close();
   });
 
+  it('rejects a non-spec ui/initialize (base-MCP shape) with a JSON-RPC error (D-182, item 4)', async () => {
+    const channel = new MessageChannel();
+    const host = new HostBridge({
+      peer: channel.port1 as unknown as MessageSink,
+      source: portSource(channel.port1),
+    });
+    host.start();
+
+    const responses: Array<{ id?: number; error?: { code: number } }> = [];
+    channel.port2.addEventListener('message', (ev) =>
+      responses.push(ev.data as { id?: number; error?: { code: number } }),
+    );
+    channel.port2.start();
+
+    // The base-MCP shape that caused D-179 — `{capabilities, clientInfo}`
+    // instead of the ui/ dialect `{appInfo, appCapabilities, protocolVersion}`.
+    // A lenient host accepted this and masked the bug; the faithful inspector
+    // validates against the vendored schema and rejects it.
+    channel.port2.postMessage({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'ui/initialize',
+      params: {
+        protocolVersion: '2026-01-26',
+        capabilities: {},
+        clientInfo: { name: 'x', version: '1' },
+      },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const err = responses.find((m) => m && m.id === 1 && m.error);
+    expect(err).toBeDefined();
+    expect(err!.error!.code).toBe(-32602);
+    expect(host.isReady).toBe(false);
+    host.close();
+  });
+
   it('grants a display mode the App advertised and denies one it did not', async () => {
     const channel = new MessageChannel();
     const host = new HostBridge({

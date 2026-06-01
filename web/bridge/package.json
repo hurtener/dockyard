@@ -12,6 +12,11 @@
       "types": "./src/index.ts",
       "svelte": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./spec": {
+      "types": "./src/spec/ext-apps-schema.ts",
+      "svelte": "./src/spec/ext-apps-schema.ts",
+      "default": "./src/spec/ext-apps-schema.ts"
     }
   },
   "files": [
