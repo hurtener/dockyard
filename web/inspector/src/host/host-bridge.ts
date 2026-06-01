@@ -402,7 +402,7 @@ export class HostBridge {
     // The View advertises the display modes its build supports; the host
     // narrows `availableDisplayModes` to that intersection — capability-driven
     // negotiation, never a host matrix (RFC §7.5).
-    const appModes = params.appCapabilities?.displayModes;
+    const appModes = params.appCapabilities?.availableDisplayModes;
     if (appModes && appModes.length > 0) {
       const granted = (this.hostContext.availableDisplayModes ?? []).filter(
         (m) => appModes.includes(m),

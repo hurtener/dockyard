@@ -53,11 +53,16 @@ describe('BridgeShell — ui/initialize handshake', () => {
     const req = h.lastRequest('ui/initialize')!;
     expect(req.params).toEqual({
       protocolVersion: '2026-01-26',
-      appCapabilities: { displayModes: ['inline', 'fullscreen'] },
+      appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] },
       appInfo: { name: 'demo-app', version: '2.0.0' },
     });
     expect(req.params).not.toHaveProperty('capabilities');
     expect(req.params).not.toHaveProperty('clientInfo');
+    // Item A (D-182): the wire key is `availableDisplayModes`, never the
+    // silently-stripped `displayModes`.
+    expect((req.params as { appCapabilities?: object }).appCapabilities).not.toHaveProperty(
+      'displayModes',
+    );
   });
 
   it('resolves ready by SENDING ui/notifications/initialized, never awaiting one (D-180)', async () => {

@@ -191,7 +191,11 @@ export class BridgeShell {
   private async runHandshake(): Promise<void> {
     const appCapabilities: AppCapabilities = {};
     if (this.options.displayModes) {
-      appCapabilities.displayModes = this.options.displayModes;
+      // Wire key is `availableDisplayModes` per the ext-apps schema (D-182,
+      // item A); the public `displayModes` option name is retained. An earlier
+      // `displayModes` wire key was silently stripped by the host's parse, so
+      // the host never learned the App's modes and fullscreen/pip never worked.
+      appCapabilities.availableDisplayModes = this.options.displayModes;
     }
     // MCP Apps `ui/initialize` params use the ui/ dialect field names —
     // top-level `appCapabilities` + `appInfo` — NOT base-MCP `capabilities` +

@@ -19,12 +19,18 @@ else
   skip "vendored ext-apps schema not yet present under web/bridge/src/spec/"
 fi
 
-# protocol.ts derives its wire types from the vendored schema (inference, not hand-written).
-if [ -f web/bridge/src/protocol.ts ] \
-   && grep -qE "ext-apps-schema|z\.(input|infer)" web/bridge/src/protocol.ts 2>/dev/null; then
-  ok "protocol.ts derives wire types from the vendored schema"
+# The vendored schema is referenced ONLY by the test layer — the published
+# bridge source imports no Zod/schema, so consumers need no schema deps and the
+# App bundle stays Zod-free (D-182; implementation deviation from "derive in
+# protocol.ts", recorded in the plan + D-182).
+# Match actual import statements (not comments that merely mention the schema).
+runtime_refs="$(grep -rlE "from ['\"][^'\"]*ext-apps-schema" web/bridge/src --include='*.ts' 2>/dev/null \
+  | grep -v '__tests__' | grep -v 'src/spec/' || true)"
+if [ -n "${schema_file}" ] && [ -z "${runtime_refs}" ] \
+   && ! grep -qE "from ['\"]zod" web/bridge/src/protocol.ts web/bridge/src/bridge.ts 2>/dev/null; then
+  ok "vendored schema referenced only by tests (runtime Zod-free, consumer dep-free)"
 else
-  skip "protocol.ts still hand-declares the wire types"
+  skip "a runtime source file references the vendored schema / Zod (${runtime_refs})"
 fi
 
 # A conformance test parses the bridge's outbound wire against the vendored schema.

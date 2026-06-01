@@ -135,6 +135,34 @@ export class HostContextState {
     if (this.styleTarget) {
       this.applyStyleVars(this.styleTarget, vars);
     }
+    this.applyHostFonts(ctx.styles?.css?.fonts);
+  }
+
+  /**
+   * Injects the host's font CSS (`styles.css.fonts` — `@font-face`/`@import`
+   * rules) into the View document so the host's fonts load (D-182, item D — the
+   * `applyHostFonts` behaviour the ext-apps reference View performs). Managed in
+   * a single marked `<style>` in `document.head`: updated in place when the CSS
+   * changes, removed when the host sends no font CSS. No-op without a DOM.
+   */
+  private applyHostFonts(css: string | undefined): void {
+    if (typeof document === 'undefined') return;
+    const existing = document.head.querySelector(
+      'style[data-dockyard-host-fonts]',
+    );
+    if (!css) {
+      existing?.remove();
+      return;
+    }
+    const el =
+      (existing as HTMLStyleElement | null) ?? document.createElement('style');
+    if (!existing) {
+      el.setAttribute('data-dockyard-host-fonts', '');
+      document.head.appendChild(el);
+    }
+    if (el.textContent !== css) {
+      el.textContent = css;
+    }
   }
 
   private applyStyleVars(target: StyleTarget, vars: StyleVariables): void {

@@ -8,6 +8,17 @@
  *
  * Authoritative source: MCP Apps spec 2026-01-26 / SEP-1865, extension id
  * `io.modelcontextprotocol/ui` (brief 01 §2.4).
+ *
+ * The wire shapes here are pinned to the vendored official ext-apps schema
+ * (`./spec/ext-apps-schema`, D-182), but this file does **not** import it:
+ * `dockyard-bridge` is published as source (D-172), so importing the schema
+ * here would force every consuming project to install `zod` +
+ * `@modelcontextprotocol/sdk` just to type-check the bridge. Instead the schema
+ * is referenced only by the test layer — `conformance.test.ts` `.parse()`s this
+ * file's emitted wire against it (the drift guard that catches a renamed field a
+ * structural `extends` would miss, via round-trip preservation). The runtime
+ * therefore carries zero Zod (RFC §7.4 — the App bundle stays Zod-free) and
+ * imposes no schema dependency on consumers.
  */
 
 /** The Apps extension capability id used in MCP capability negotiation. */
@@ -161,8 +172,15 @@ export function isJsonRpcNotification(
 
 /** Capabilities the View advertises in `ui/initialize` (brief 01 §2.4). */
 export interface AppCapabilities {
-  /** Display modes the App's build supports (manifest `display_modes`). */
-  displayModes?: DisplayMode[];
+  /**
+   * Display modes the App's build supports (manifest `display_modes`).
+   *
+   * Wire key is `availableDisplayModes` per `McpUiAppCapabilitiesSchema`
+   * (D-182, item A) — an earlier `displayModes` key was silently stripped by
+   * the host's `z.object()` parse, so the host never learned the App's
+   * supported modes and fullscreen/pip degradation never worked.
+   */
+  availableDisplayModes?: DisplayMode[];
 }
 
 export interface InitializeParams {
@@ -176,26 +194,60 @@ export interface InitializeParams {
 /** Standardized host CSS custom properties (brief 01 §2.4 — `styles.variables`). */
 export type StyleVariables = Record<string, string>;
 
+/**
+ * Host style configuration (`McpUiHostStylesSchema`). `variables` are CSS custom
+ * properties; `css.fonts` is `@font-face`/`@import` CSS an App must inject so the
+ * host's fonts load (D-182, item D — the bridge applies it via `applyHostFonts`).
+ */
+export interface HostStyles {
+  variables?: StyleVariables;
+  css?: { fonts?: string };
+}
+
+/**
+ * Container dimensions (`McpUiHostContext.containerDimensions`, D-182 item C).
+ * The schema specifies *either* a fixed `width`/`height` *or* a flexible
+ * `maxWidth`/`maxHeight` — modelled here as an all-optional superset so a host
+ * sending either form is reflected without collapsing to `undefined`.
+ */
 export interface ContainerDimensions {
-  width: number;
-  height: number;
+  width?: number;
+  height?: number;
+  maxWidth?: number;
+  maxHeight?: number;
+}
+
+/**
+ * Metadata of the tool call that instantiated this App
+ * (`McpUiHostContext.toolInfo`). The schema carries the JSON-RPC request `id`
+ * and the full MCP `Tool` definition; modelled here dependency-free (a structural
+ * `tool` object) so the published bridge source imposes no SDK type dependency
+ * on consumers. Pinned to the schema by `conformance.test.ts` (D-182).
+ */
+export interface ToolInfo {
+  /** JSON-RPC id of the `tools/call` request that instantiated the App. */
+  id?: string | number;
+  /** The MCP tool definition (`name`, `inputSchema`, …). */
+  tool?: { name?: string; title?: string; [key: string]: unknown };
 }
 
 /**
  * The host-supplied context delivered in the `ui/initialize` result and patched
- * by `ui/notifications/host-context-changed` (brief 01 §2.4).
+ * by `ui/notifications/host-context-changed` (brief 01 §2.4). Shapes pinned to
+ * `McpUiHostContextSchema` (D-182).
  */
 export interface HostContext {
   theme?: 'light' | 'dark' | string;
-  styles?: { variables?: StyleVariables };
+  styles?: HostStyles;
   displayMode?: DisplayMode;
   availableDisplayModes?: DisplayMode[];
   locale?: string;
   timeZone?: string;
   containerDimensions?: ContainerDimensions;
   userAgent?: string;
-  platform?: string;
-  toolInfo?: { name?: string; title?: string };
+  platform?: 'web' | 'desktop' | 'mobile';
+  deviceCapabilities?: { touch?: boolean; hover?: boolean };
+  toolInfo?: ToolInfo;
   safeAreaInsets?: {
     top: number;
     right: number;
