@@ -1,4 +1,4 @@
-.PHONY: help build test vet lint preflight drift-audit check-mirror install-hooks clean dev generate web web-install coverage bench inspector-bundle docs docs-install
+.PHONY: help build test vet lint preflight drift-audit check-mirror install-hooks clean dev generate web web-install coverage bench inspector-bundle inspector-bundle-check docs docs-install
 
 help:
 	@echo "Dockyard — make targets"
@@ -28,10 +28,11 @@ GO_SOURCES := $(shell find . -name '*.go' -not -path './vendor/*' 2>/dev/null | 
 # this so a `bin/dockyard` produced by the canonical build always embeds the
 # real Svelte SPA, not the in-Go placeholder page (remediation R4 B1).
 #
-# The staged tree is .gitignored apart from a .gitkeep anchor, so rebuilds
-# never dirty the working tree. Skips gracefully when npm or web/inspector is
-# absent — the Go build then embeds only the .gitkeep, and the inspector
-# falls back to its in-Go placeholder page.
+# The staged tree is COMMITTED (D-187) so `go install …@latest` and the
+# cross-compiled release binaries — neither of which runs this target — ship
+# the real inspector instead of the placeholder. `inspector-bundle-check`
+# regenerates it in CI and fails on drift. Skips gracefully when npm or
+# web/inspector is absent — the Go build then embeds whatever is committed.
 inspector-bundle:
 	@if [ ! -f web/inspector/package.json ]; then \
 		echo "skip inspector-bundle: web/inspector not landed"; \
@@ -45,6 +46,23 @@ inspector-bundle:
 		mkdir -p internal/inspector/dist; \
 		find internal/inspector/dist -mindepth 1 ! -name '.gitkeep' -exec rm -rf {} +; \
 		cp -R web/inspector/dist/. internal/inspector/dist/; \
+	fi
+
+# inspector-bundle-check — the committed-bundle freshness gate (D-187). It
+# rebuilds the SPA and fails if the committed internal/inspector/dist/ tree
+# differs from a fresh build — so the bundle a `go install` user gets can never
+# drift from web/inspector source. CI runs this with the same pinned node +
+# committed package-lock as the committer, so vite's content-hashed output is
+# reproducible. Skips gracefully where npm / web/inspector is absent.
+inspector-bundle-check: inspector-bundle
+	@if [ ! -f web/inspector/package.json ] || ! command -v npm >/dev/null 2>&1; then \
+		echo "skip inspector-bundle-check: web/inspector or npm absent"; \
+	elif ! git diff --quiet -- internal/inspector/dist; then \
+		echo "ERROR: committed internal/inspector/dist is stale — run 'make inspector-bundle' and commit the result:"; \
+		git --no-pager diff --stat -- internal/inspector/dist; \
+		exit 1; \
+	else \
+		echo "inspector-bundle-check: committed SPA bundle is fresh"; \
 	fi
 
 build: inspector-bundle

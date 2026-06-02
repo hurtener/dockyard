@@ -97,6 +97,32 @@ func TestEmbeddedAssets(t *testing.T) {
 	t.Cleanup(func() { _ = insp.Close() })
 }
 
+// TestEmbeddedAssets_RealBundleCommitted asserts the committed inspector bundle
+// is the real SPA, not the bare .gitkeep anchor — the regression guard for
+// D-187. The bundle is committed precisely so a `go install …@latest` binary
+// and the cross-compiled release downloads (neither of which runs
+// `make inspector-bundle`) serve the real inspector instead of the in-Go
+// placeholder. A fresh checkout carries the committed index.html; if it is ever
+// dropped, this fails and so does the distributed inspector.
+func TestEmbeddedAssets_RealBundleCommitted(t *testing.T) {
+	t.Parallel()
+	assets := EmbeddedAssets()
+	if !hasIndex(assets) {
+		t.Fatal("committed inspector bundle has no index.html — the real SPA is not committed; " +
+			"`go install` and the release binaries would ship only the placeholder (D-187). " +
+			"Run `make inspector-bundle` and commit internal/inspector/dist/.")
+	}
+	// The SPA entry document references its hashed JS bundle under assets/ — a
+	// cheap structural check that this is a built Vite bundle, not a stub.
+	index, err := fs.ReadFile(assets, "index.html")
+	if err != nil {
+		t.Fatalf("read committed index.html: %v", err)
+	}
+	if !contains(string(index), "assets/index-") {
+		t.Errorf("committed index.html does not reference a hashed assets/index-*.js bundle:\n%s", index)
+	}
+}
+
 // TestRelay_Accessors covers the relay's small read-only accessors.
 func TestRelay_Accessors(t *testing.T) {
 	t.Parallel()

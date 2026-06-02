@@ -109,6 +109,15 @@ func requireVersion(v string) string {
 	return v
 }
 
+// RequireVersion is the exported face of requireVersion for the builtin
+// template packages (analyticswidgets, approvalflows), which live outside this
+// package and so cannot reach the unexported helper. A template's go.mod.tmpl
+// carries a __DOCKYARD_VERSION__ token that resolves to this value — the same
+// version-pin logic the blank scaffold's renderGoMod applies — so a released
+// CLI scaffolding a template pins the real release version (not the v0.0.0
+// placeholder) and `go mod tidy` resolves the published module flag-free.
+func RequireVersion(v string) string { return requireVersion(v) }
+
 // WebDepSpecs returns the npm dependency specs a scaffolded project's
 // web/package.json uses for dockyard-bridge and dockyard-ui — the values the
 // __DOCKYARD_BRIDGE_SPEC__ / __DOCKYARD_UI_SPEC__ tokens resolve to. The two

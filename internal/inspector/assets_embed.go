@@ -7,22 +7,24 @@ import (
 
 // distFS embeds the inspector frontend bundle. The directive points at the
 // in-package dist/ tree; a tracked .gitkeep anchor keeps the directory
-// resolvable so the Go build never fails for lack of an embed target.
+// resolvable even if the bundle is ever pruned.
 //
-// The real bundle is produced by the `make inspector-bundle` target (a
-// prerequisite of `make build`), which runs `vite build` for `web/inspector`
-// and stages the output into this tree — so a `bin/dockyard` produced by
-// `make build` serves the production SPA. The bundle output (the real
-// index.html plus the hashed assets/) is .gitignored — only the .gitkeep
-// anchor is committed, keeping the working tree clean across rebuilds
-// (remediation R4 B1; supersedes D-098's committed-placeholder scheme).
+// The real bundle (the SPA index.html plus the hashed assets/) is produced by
+// `make inspector-bundle` (a prerequisite of `make build`), which runs
+// `vite build` for `web/inspector` and stages the output here — and it is
+// COMMITTED to the repository (D-187). It must be: `go install …@latest` builds
+// from the module proxy's committed source, and the cross-compiled release
+// binaries build from a fresh checkout — neither runs `make inspector-bundle`,
+// so a gitignored bundle (the earlier D-098 / .gitkeep-only scheme) left every
+// distributed binary embedding only the placeholder. CI's
+// `make inspector-bundle-check` rebuilds the SPA and fails on any drift, so the
+// committed bundle cannot go stale against web/inspector source.
 //
-// When no real bundle has been staged (a fresh clone before `make build`,
-// or a developer who runs `go build` directly), the embedded FS still
-// resolves but carries no index.html — the inspector backend's frontend
-// handler falls back to its in-Go placeholder page (see assets.go), so the
-// backend is always usable. Any caller may also pass a freshly built bundle
-// via [Options.Assets] — the embed is the default, not the only, source.
+// If the bundle is ever absent (a hand-pruned tree), the embedded FS still
+// resolves but carries no index.html — the inspector backend's frontend handler
+// falls back to its in-Go placeholder page (see assets.go), so the backend is
+// always usable. Any caller may also pass a freshly built bundle via
+// [Options.Assets] — the embed is the default, not the only, source.
 //
 //go:embed all:dist
 var distFS embed.FS

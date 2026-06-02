@@ -8,11 +8,16 @@ counterpart to [`analytics-widgets`](analytics-widgets).
 ## Scaffold
 
 ```bash
-dockyard new my-approvals \
-  --template approval-flows \
-  --dockyard-path /path/to/dockyard   # pre-publish only
+dockyard new my-approvals --template approval-flows
 cd my-approvals
 ```
+
+If you installed Dockyard via `go install …@latest`, that's all — the
+generated `go.mod` pins the published module and resolves with no extra
+flag. If you built Dockyard from source, add
+`--dockyard-path /path/to/dockyard` so the generated `go.mod` and
+`web/package.json` point at your local checkout
+([D-080](/reference/decisions)).
 
 The scaffold produces a project with:
 
@@ -47,15 +52,37 @@ the real `runtime/server`.
 ## Run + inspect
 
 `dockyard new` already ran `go mod tidy` and `dockyard generate`, so the
-project's dependencies and contract artifacts (JSON Schema + TS) are ready.
+project's Go dependencies and contract artifacts (JSON Schema + TS) are ready.
 (If you scaffolded with `--no-postgen`, run those two first.)
 
-```bash
-dockyard build
-DOCKYARD_TRANSPORT=http dockyard run
+A template ships a Svelte UI, so two one-time steps come **before** the dev
+loop — skip them and `dockyard dev` fails with `vite: command not found`
+(web deps not installed) and `open web/dist/index.html: file does not exist`
+(the embedded bundle hasn't been built yet):
 
-# In another terminal:
-dockyard inspect --url http://127.0.0.1:8080 --dir .
+```bash
+# 1. Install the web deps once (provides the Vite bundler):
+(cd web && npm install)
+
+# 2. Build once so the embedded UI bundle (web/dist) exists:
+dockyard build
+```
+
+Now run the dev loop, which **auto-attaches the inspector** and prints its
+URL (`cmd-click` to open):
+
+```bash
+dockyard dev
+# ...
+# INFO inspector ready at http://127.0.0.1:54321
+```
+
+Prefer a standalone inspector against a built server? Run it on HTTP in one
+terminal and attach in another:
+
+```bash
+DOCKYARD_TRANSPORT=http dockyard run                   # terminal 1
+dockyard inspect --url http://127.0.0.1:8080 --dir .   # terminal 2
 ```
 
 Fire `request_approval` from the Tools tab. The App renders an approval
