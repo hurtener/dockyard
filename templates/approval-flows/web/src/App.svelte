@@ -88,6 +88,9 @@
   // reflects the latest assignment from `onToolResult`.
   let payloadEverSet = false;
 
+  // Advertise the App's supported display modes to the host (sent on the wire as
+  // appCapabilities.availableDisplayModes). Keep in sync with dockyard.app.yaml
+  // `apps[].display_modes`.
   const bridge = createBridge({ displayModes: ['inline'] });
 
   // Subscription at module-init — same pattern analytics-widgets uses;

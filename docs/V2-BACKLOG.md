@@ -285,6 +285,23 @@ recorded order in the decisions log. Each item carries:
   related "UI tool emits `_meta.ui` on the wire" assertion lands as an
   ephemeral-server run if pursued at the same time.
 
+### Bridge additive-capability parity (`resources/read`, `ping`, logging)
+
+- **Origin.** v1.7 wave A (D-182) — the ext-apps schema diff. The vendored
+  schema defines View-side capabilities `dockyard-bridge` does not implement:
+  a View `resources/read` request (an App reading a sibling `ui://`/resource),
+  `ping` (liveness), and `notifications/message` (View→host logging).
+- **What was deferred + why.** These are **additive capabilities, not
+  conformance bugs** — a host does not require an App to support them, so the
+  bridge is spec-conformant without them. v1.7 wave A was scoped to remove wire
+  *drift* (shape/behaviour mismatches), not to add new surface; bundling these
+  would have turned a conformance wave into a feature wave.
+- **Definition of done.** When an App needs one of these: implement the
+  View-side helper(s) in `web/bridge` against the vendored schema, with a
+  wire-conformance test (`conformance.test.ts`) per added message, and the
+  inspector host wired to answer/forward it. `resources/read` is the most
+  likely first ask (a multi-resource App).
+
 ### Bridge View-side task-progress channel
 
 - **Origin.** Upstream-team feedback (2026-05-29). Related: D-119 / the

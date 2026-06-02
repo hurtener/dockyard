@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { get } from 'svelte/store';
 import { createBridge } from '../bridge.js';
 import { NotificationRouter } from '../notifications.js';
+import { DockyardExtMethod } from '../dockyard-ext.js';
 import { HostNotification } from '../protocol.js';
 import { HostHarness } from './harness.js';
 
@@ -27,7 +28,7 @@ describe('NotificationRouter', () => {
     router.dispatch(HostNotification.toolCancelled, {});
     router.dispatch(HostNotification.sizeChanged, { width: 1, height: 1 });
     router.dispatch(HostNotification.hostContextChanged, {});
-    router.dispatch(HostNotification.taskProgress, { taskId: 't1' });
+    router.dispatch(DockyardExtMethod.taskProgress, { taskId: 't1' });
 
     expect(calls).toEqual([
       'tool-input',
@@ -138,7 +139,7 @@ describe('BridgeShell — notification fan-out end-to-end', () => {
     const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
     await bridge.connect();
 
-    const sizes: { width: number; height: number }[] = [];
+    const sizes: { width?: number; height?: number }[] = [];
     bridge.onSizeChanged((s) => sizes.push(s));
     h.notify(HostNotification.sizeChanged, { width: 320, height: 240 });
 
@@ -154,14 +155,14 @@ describe('BridgeShell — notification fan-out end-to-end', () => {
     const points: { taskId: string; fraction?: number; message?: string }[] = [];
     const off = bridge.onTaskProgress((p) => points.push(p));
 
-    h.notify(HostNotification.taskProgress, {
+    h.notify(DockyardExtMethod.taskProgress, {
       taskId: 't1',
       fraction: 0.62,
       message: 'halfway',
       status: 'working',
     });
     // A status-only point (a phase change a fraction cannot express).
-    h.notify(HostNotification.taskProgress, { taskId: 't1', message: 'finalising' });
+    h.notify(DockyardExtMethod.taskProgress, { taskId: 't1', message: 'finalising' });
 
     await new Promise((r) => setTimeout(r, 0));
     expect(points).toEqual([
@@ -171,7 +172,7 @@ describe('BridgeShell — notification fan-out end-to-end', () => {
 
     // Unsubscribe stops further delivery.
     off();
-    h.notify(HostNotification.taskProgress, { taskId: 't1', fraction: 1 });
+    h.notify(DockyardExtMethod.taskProgress, { taskId: 't1', fraction: 1 });
     await new Promise((r) => setTimeout(r, 0));
     expect(points).toHaveLength(2);
   });
@@ -226,7 +227,7 @@ describe('BridgeShell — handshake retention + resource teardown (wiring audit)
     expect(get(bridge.hostInfo)).toEqual({ name: 'test-host', version: '0.0.0' });
   });
 
-  it('ui/resource-teardown closes the bridge (drops subscribers, clears ready)', async () => {
+  it('responds to the ui/resource-teardown request, then closes (D-182, item B)', async () => {
     const h = harness();
     const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
     await bridge.connect();
@@ -235,9 +236,11 @@ describe('BridgeShell — handshake retention + resource teardown (wiring audit)
     const seen: unknown[] = [];
     bridge.onSizeChanged((s) => seen.push(s));
 
-    // The host tears the resource down — the View must release its listeners.
-    h.notify(HostNotification.resourceTeardown, {});
-    await new Promise((r) => setTimeout(r, 0));
+    // The host tears the resource down as a REQUEST and waits for the View's
+    // response before tearing the iframe down. The View must respond (not just
+    // close) — a spec host blocks on it.
+    const result = await h.sendRequest('ui/resource-teardown', {});
+    expect(result).toEqual({}); // McpUiResourceTeardownResult — empty object
 
     expect(get(bridge.ready)).toBe(false);
     // A notification after teardown reaches no subscriber.

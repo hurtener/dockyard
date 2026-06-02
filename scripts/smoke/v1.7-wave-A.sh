@@ -19,12 +19,18 @@ else
   skip "vendored ext-apps schema not yet present under web/bridge/src/spec/"
 fi
 
-# protocol.ts derives its wire types from the vendored schema (inference, not hand-written).
-if [ -f web/bridge/src/protocol.ts ] \
-   && grep -qE "ext-apps-schema|z\.(input|infer)" web/bridge/src/protocol.ts 2>/dev/null; then
-  ok "protocol.ts derives wire types from the vendored schema"
+# The vendored schema is referenced ONLY by the test layer — the published
+# bridge source imports no Zod/schema, so consumers need no schema deps and the
+# App bundle stays Zod-free (D-182; implementation deviation from "derive in
+# protocol.ts", recorded in the plan + D-182).
+# Match actual import statements (not comments that merely mention the schema).
+runtime_refs="$(grep -rlE "from ['\"][^'\"]*ext-apps-schema" web/bridge/src --include='*.ts' 2>/dev/null \
+  | grep -v '__tests__' | grep -v 'src/spec/' || true)"
+if [ -n "${schema_file}" ] && [ -z "${runtime_refs}" ] \
+   && ! grep -qE "from ['\"]zod" web/bridge/src/protocol.ts web/bridge/src/bridge.ts 2>/dev/null; then
+  ok "vendored schema referenced only by tests (runtime Zod-free, consumer dep-free)"
 else
-  skip "protocol.ts still hand-declares the wire types"
+  skip "a runtime source file references the vendored schema / Zod (${runtime_refs})"
 fi
 
 # A conformance test parses the bridge's outbound wire against the vendored schema.
@@ -32,6 +38,27 @@ if ls web/bridge/src/__tests__/conformance*.test.ts >/dev/null 2>&1; then
   ok "web/bridge wire-conformance test exists"
 else
   skip "web/bridge wire-conformance test not yet added"
+fi
+
+# The zod-bearing `dockyard-bridge/spec` subpath must stay resolvable for its
+# consumer (the inspector). The export must exist + point at a shipped file, and
+# the CONSUMER (web/inspector) must provide zod + the SDK. zod/sdk are NOT
+# declared as optional peers of dockyard-bridge: a bundler (Vite/rollup) stubs an
+# optional peer as `__vite-optional-peer-dep`, which breaks `make build`. The `.`
+# entry stays Zod-free regardless, so `.`-only App authors install nothing extra.
+if [ -f web/bridge/src/spec/ext-apps-schema.ts ] && node -e '
+  const b = require("./web/bridge/package.json");
+  const i = require("./web/inspector/package.json");
+  const dep = (p, n) => (p.dependencies && p.dependencies[n]) || (p.devDependencies && p.devDependencies[n]);
+  const ok = !!(b.exports && b.exports["./spec"]
+    && dep(b, "zod") && dep(b, "@modelcontextprotocol/sdk")
+    && dep(i, "zod") && dep(i, "@modelcontextprotocol/sdk")
+    && !(b.peerDependencies && b.peerDependencies.zod));
+  process.exit(ok ? 0 : 1);
+' 2>/dev/null; then
+  ok "dockyard-bridge/spec resolvable (export ships; consumer provides zod+sdk; not an optional peer)"
+else
+  skip "dockyard-bridge/spec packaging contract not satisfied"
 fi
 
 # --- Item A: appCapabilities.availableDisplayModes -------------------------
@@ -71,6 +98,16 @@ if [ -f web/inspector/src/host/host-bridge.ts ] \
   ok "inspector host no longer sends host→View ui/notifications/initialized"
 else
   skip "inspector host still sends host→View initialized (faithful-host not yet landed)"
+fi
+
+# The inspector validates inbound ui/initialize against the vendored schema
+# (via the dockyard-bridge/spec subpath) — a faithful spec host, not a lenient one.
+if grep -q "dockyard-bridge/spec" web/inspector/src/host/host-bridge.ts 2>/dev/null \
+   && grep -qE "McpUiInitializeRequestSchema.*safeParse|safeParse.*McpUiInitialize" web/inspector/src/host/host-bridge.ts 2>/dev/null \
+   && grep -q '"./spec"' web/bridge/package.json 2>/dev/null; then
+  ok "inspector validates inbound ui/initialize against the vendored schema"
+else
+  skip "inspector inbound-schema validation not yet wired"
 fi
 
 # --- §19: docs reflect the Tasks-extension host requirement ----------------

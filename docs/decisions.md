@@ -6194,6 +6194,81 @@ open questions in the plan and locked at implementation. The four conformance
 fixes (A–D) ride this decision as acceptance criteria, not separate decisions —
 they are what the schema forces into the open.
 
+**Implementation notes (deviations, recorded per CLAUDE.md §4.3 — v1.7 wave A).**
+
+- **The schema is referenced only by the test layer; `protocol.ts` imports
+  neither it nor Zod.** `dockyard-bridge` is published as *source* (D-172), so a
+  schema import in the runtime/public type graph would force every consuming
+  project to install `zod` + `@modelcontextprotocol/sdk` just to type-check the
+  bridge. Keeping the schema test-only preserves the consumer zero-dep property
+  and the Zod-free App bundle. The plan's "derive the types in `protocol.ts` by
+  inference" is therefore realised as: hand-written clean public types in
+  `protocol.ts`, **pinned by the runtime `conformance.test.ts`** that `.parse()`s
+  the bridge's emitted wire against the schema. This is in fact the *stronger*
+  guard — a structural `extends` assertion cannot catch a renamed field (excess
+  properties pass), whereas the round-trip `.parse()` does (it caught item A).
+- **The "bundle is Zod-free" guard is the static "schema referenced only by
+  tests" check** (`scripts/smoke/v1.7-wave-A.sh`), not a build-and-grep of a
+  template's output. Zod can only enter the App bundle via a runtime import,
+  which the static check forbids — a stronger and cheaper guarantee than
+  inspecting a built artifact.
+- **Pure file-vendoring was impractical → `zod` + `@modelcontextprotocol/sdk`
+  are `web/bridge` devDeps** (the documented fallback). The upstream
+  `src/generated/schema.ts` imports seven base schemas from
+  `@modelcontextprotocol/sdk/types.js`, so vendoring the ext-apps schema
+  self-contained would mean vendoring the entire SDK types closure. The ext-apps
+  schema file itself is vendored by SHA (commit `7d4434e`, 2026-06-01); its
+  `zod` + SDK imports resolve to devDeps.
+- **The inspector host validates inbound against the schema** (item 4, completed).
+  It `.safeParse()`s the View's `ui/initialize` params against
+  `McpUiInitializeRequestSchema` and rejects a non-spec shape with a JSON-RPC
+  `-32602` error — so the inspector now *catches* what only a real host used to
+  (a test sends the base-MCP `{capabilities, clientInfo}` shape that caused D-179
+  and asserts the rejection). The vendored schema is shared via a new
+  **`dockyard-bridge/spec` subpath export** — the opt-in, **Zod-bearing** surface;
+  `web/inspector` adds its own `zod` + `@modelcontextprotocol/sdk` devDeps. The
+  package's **`.` entry stays Zod-free** (the consumer zero-dep guarantee holds
+  for App authors; only `./spec`, imported by tooling/tests, pulls Zod).
+- **Checkpoint audit (§17) fixes.** A wave-boundary audit surfaced and closed:
+  (a) the `./spec` subpath's `zod` + `@modelcontextprotocol/sdk` imports — its
+  consumer must provide them; they are `devDependencies` of both `dockyard-bridge`
+  (its own tests) and `web/inspector` (the only `/spec` consumer). They are
+  **deliberately NOT declared as `peerDependencies`**: an *optional* peer makes a
+  bundler (Vite/rollup) stub it as `__vite-optional-peer-dep` — which breaks
+  `make build` — and a *required* peer would nag `.`-only App authors. The `.`
+  entry imports no zod, so `.`-only authors install nothing extra regardless; a
+  future external `/spec` consumer installs zod+sdk itself (documented). (An
+  earlier revision of this fix declared optional peers and broke CI's production
+  bundle — caught by `make build`, which the test gate does not exercise.)
+  (b) `ui/message` and `ui/update-model-context` sent a bare-string
+  `content` where the schema requires `ContentBlock[]` (and `ui/message` allowed a
+  non-`user` role) — a real outbound drift a spec host would reject, now fixed and
+  guarded; (c) the conformance test only `.parse()`d the handshake, so the item-3
+  claim "every View→host request is conformance-tested" was inaccurate — it now
+  covers all four schema-defined View→host requests (open-link, message,
+  request-display-mode, update-model-context), making the claim true; (d) the
+  inspector silently dropped the View's `size-changed` and `request-teardown` — it
+  now sizes the preview iframe to the reported content height and remounts on a
+  teardown request.
+- **Second checkpoint-audit pass (§17).** A deeper pass over the *other* halves of
+  the wire closed: (e) **inbound conformance** — nothing tested that the bridge
+  correctly READS a schema-valid host→View message; added, with inbound
+  notification types (`arguments`, size `width`/`height`) made optional to match
+  the schema; (f) **inspector-outbound conformance** — the reference host's
+  host→View sends (`ui/initialize` result, `request-display-mode` result, the
+  notifications) were unguarded; a `host-conformance.test.ts` now `.parse()`s them;
+  (g) **server↔schema crossing** — `McpUiResourceMetaSchema` / `McpUiToolMetaSchema`
+  / `McpUiClientCapabilitiesSchema` were never parsed against the Go-emitted
+  shapes; a representative sample is now pinned; (h) **two-vendored-spec
+  divergence** — the prose `apps.mdx` (`298e884e`) and the schema (`7d4434e`) are
+  the same revision at different upstream commits; documented the relationship +
+  a "reconcile both on bump" checklist (`docs/specifications/README.md`); (i)
+  **`./spec` packaging guard** — added a smoke that the subpath ships and its
+  consumer (`web/inspector`) provides `zod`/`sdk` (and that they are NOT an
+  optional peer, which would break the bundler). The inspector's `apps`/`tasks`
+  host-capability flags are documented as Dockyard-private emulation keys (not in
+  `McpUiHostCapabilities`).
+
 ---
 
 ## D-183 — Dockyard's Tasks×Apps `ui/` notifications are explicit extensions outside the MCP Apps schema

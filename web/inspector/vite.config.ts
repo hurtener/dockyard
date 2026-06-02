@@ -8,6 +8,15 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 export default defineConfig({
   plugins: [svelte()],
   base: './',
+  // `dockyard-bridge` is a `file:`-linked source package (D-172). Its `./spec`
+  // subpath imports `zod` + `@modelcontextprotocol/sdk`, which the inspector
+  // provides as its own devDeps. Dedupe them from the inspector root so they
+  // resolve from web/inspector/node_modules — Vite otherwise resolves the
+  // symlinked bridge's imports from web/bridge/node_modules, which the
+  // `make build` job does not install (it `npm ci`s web/inspector only).
+  resolve: {
+    dedupe: ['zod', '@modelcontextprotocol/sdk', 'svelte'],
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

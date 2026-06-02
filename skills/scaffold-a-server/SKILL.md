@@ -112,8 +112,8 @@ contracts under `internal/contracts/`, and the handlers under
 
 ## `--dockyard-path` — a build-from-source convenience (optional)
 
-The Dockyard **Go module** and the frontend packages **`@dockyard/bridge`
-and `@dockyard/ui`** are all published, so every scaffold — a blank Go-only
+The Dockyard **Go module** and the frontend packages **`dockyard-bridge`
+and `dockyard-ui`** are all published, so every scaffold — a blank Go-only
 server or any `--template` with a `web/` — resolves its dependencies from
 npm + the Go proxy with **no local checkout**. `dockyard new --template
 analytics-widgets` then `cd web && npm install` just works.
@@ -132,7 +132,7 @@ dockyard new my-widgets \
 | Scaffold | Needs `--dockyard-path`? |
 |---|---|
 | Blank, no UI (Go only) | No — the published Go module resolves from the proxy |
-| Any `--template`, or a server you'll add a `web/` UI to | No — `@dockyard/bridge` / `@dockyard/ui` resolve from npm |
+| Any `--template`, or a server you'll add a `web/` UI to | No — `dockyard-bridge` / `dockyard-ui` resolve from npm |
 
 The flag is hidden from `--help` (D-080 / D-140 filters hidden flags).
 Publishing the frontend packages to npm in v1.3 wave B (D-172) removed the

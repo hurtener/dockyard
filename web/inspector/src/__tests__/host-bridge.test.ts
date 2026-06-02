@@ -51,6 +51,74 @@ describe('HostBridge handshake', () => {
     view.close();
   });
 
+  it('rejects a non-spec ui/initialize (base-MCP shape) with a JSON-RPC error (D-182, item 4)', async () => {
+    const channel = new MessageChannel();
+    const host = new HostBridge({
+      peer: channel.port1 as unknown as MessageSink,
+      source: portSource(channel.port1),
+    });
+    host.start();
+
+    const responses: Array<{ id?: number; error?: { code: number } }> = [];
+    channel.port2.addEventListener('message', (ev) =>
+      responses.push(ev.data as { id?: number; error?: { code: number } }),
+    );
+    channel.port2.start();
+
+    // The base-MCP shape that caused D-179 — `{capabilities, clientInfo}`
+    // instead of the ui/ dialect `{appInfo, appCapabilities, protocolVersion}`.
+    // A lenient host accepted this and masked the bug; the faithful inspector
+    // validates against the vendored schema and rejects it.
+    channel.port2.postMessage({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'ui/initialize',
+      params: {
+        protocolVersion: '2026-01-26',
+        capabilities: {},
+        clientInfo: { name: 'x', version: '1' },
+      },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const err = responses.find((m) => m && m.id === 1 && m.error);
+    expect(err).toBeDefined();
+    expect(err!.error!.code).toBe(-32602);
+    expect(host.isReady).toBe(false);
+    host.close();
+  });
+
+  it('forwards View size-changed and request-teardown to its callbacks (D-182, item 4)', async () => {
+    const channel = new MessageChannel();
+    const sizes: Array<{ width?: number; height?: number }> = [];
+    let teardowns = 0;
+    const host = new HostBridge({
+      peer: channel.port1 as unknown as MessageSink,
+      source: portSource(channel.port1),
+      onViewSize: (s) => sizes.push(s),
+      onViewRequestTeardown: () => {
+        teardowns += 1;
+      },
+    });
+    host.start();
+
+    channel.port2.postMessage({
+      jsonrpc: '2.0',
+      method: 'ui/notifications/size-changed',
+      params: { width: 320, height: 480 },
+    });
+    channel.port2.postMessage({
+      jsonrpc: '2.0',
+      method: 'ui/notifications/request-teardown',
+      params: {},
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(sizes).toEqual([{ width: 320, height: 480 }]);
+    expect(teardowns).toBe(1);
+    host.close();
+  });
+
   it('grants a display mode the App advertised and denies one it did not', async () => {
     const channel = new MessageChannel();
     const host = new HostBridge({
@@ -93,7 +161,10 @@ describe('HostBridge handshake', () => {
 
     expect(entries).toContain('inbound:ui/initialize');
     expect(entries).toContain('outbound:response');
-    expect(entries).toContain('outbound:ui/notifications/initialized');
+    // A faithful spec host does NOT send a host→View `initialized`; it receives
+    // the View's `initialized` and is ready on receipt (D-182, item 4).
+    expect(entries).toContain('inbound:ui/notifications/initialized');
+    expect(entries).not.toContain('outbound:ui/notifications/initialized');
     host.close();
     view.close();
   });

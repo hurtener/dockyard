@@ -14,11 +14,14 @@
  */
 
 import {
+  DockyardExtMethod,
+  type TaskProgressParams,
+} from './dockyard-ext.js';
+import {
   HostNotification,
   type CallToolResult,
   type HostContextChangedParams,
   type SizeChangedParams,
-  type TaskProgressParams,
   type ToolCancelledParams,
   type ToolInputParams,
 } from './protocol.js';
@@ -85,11 +88,11 @@ export class NotificationRouter {
           (params ?? {}) as HostContextChangedParams,
         );
         break;
-      case HostNotification.taskProgress:
+      case DockyardExtMethod.taskProgress:
         this.taskProgress.emit((params ?? {}) as TaskProgressParams);
         break;
-      // `resourceTeardown` and any unknown method are intentionally ignored
-      // here; teardown is handled by BridgeShell.close().
+      // `ui/resource-teardown` (a host→View request) and any unknown method are
+      // intentionally ignored here; teardown is handled by BridgeShell.onRequest.
       default:
         break;
     }

@@ -21,7 +21,81 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-(No entries yet — the next release surface will land here.)
+### Changed
+
+- **`dockyard-bridge`'s `ui/` wire layer is now pinned to the vendored official
+  `@modelcontextprotocol/ext-apps` schema. (D-182)** The bridge previously
+  hand-transcribed the MCP Apps wire dialect, which drifted silently (the cause
+  of the 1.6.1 handshake bugs). The schema is vendored into the repo by upstream
+  SHA, and a **wire-conformance test** now `.parse()`s the bridge's outbound wire
+  against it — a drift is a failing build, not a blank App in a host. The shipped
+  App bundle stays Zod-free and consumers need no schema dependency (the schema
+  is referenced only by the bridge's test layer).
+- **`HostContext` gains schema-accurate fields (additive).** `containerDimensions`
+  now models flexible sizing (`maxWidth`/`maxHeight`) alongside fixed
+  `width`/`height`; `styles` gains `css.fonts`; `toolInfo`, `platform`, and
+  `deviceCapabilities` match the schema.
+
+### Fixed
+
+- **`dockyard-bridge` advertises `appCapabilities.availableDisplayModes`, not
+  `displayModes`. (D-182, item A)** The host's parse silently stripped the
+  non-schema `displayModes` key, so it never learned which display modes an App
+  supported and fullscreen/pip degradation never worked. The public `displayModes`
+  bridge option is unchanged.
+- **`dockyard-bridge` handles `ui/resource-teardown` as a request, not a
+  notification. (D-182, item B)** A spec host sends teardown as a request and
+  waits for the View's response before tearing the iframe down; the bridge now
+  responds, then closes. Adds the app-initiated `ui/notifications/request-teardown`
+  (`BridgeShell.requestTeardown()`).
+- **`dockyard-bridge` applies host fonts. (D-182, item D)** Host-provided
+  `styles.css.fonts` CSS is injected into the View document so the host's fonts
+  load.
+- **`ui/message` and `ui/update-model-context` now send schema-conformant
+  content. (D-182 — checkpoint audit)** Both sent a bare-string `content` (and
+  `ui/message` allowed a non-`user` role); the schema requires `content:
+  ContentBlock[]` (and `role: "user"`), so a spec host would have rejected them.
+  `sendMessage` now wraps a string into a text block; `UpdateModelContextParams.content`
+  is `ContentBlock[]`. The conformance test now `.parse()`s **every** View→host
+  request (open-link, message, request-display-mode, update-model-context), not
+  just the handshake.
+- **The local inspector consumes the View's `size-changed` and `request-teardown`.
+  (D-182, item 4 — checkpoint audit)** It sizes the preview iframe to the App's
+  reported content height (mirroring a real host) and remounts on a teardown
+  request, instead of silently dropping both.
+- **Conformance coverage extended to the full wire (D-182 — second audit pass).**
+  The conformance layer now also guards the bridge's **inbound** reads (a
+  schema-valid `tool-input`/`tool-result`/`tool-cancelled`/`host-context-changed`
+  reaches the App subscriber with every field intact), the **inspector's
+  outbound** host→View wire (the reference host's `ui/initialize` result,
+  `request-display-mode` result, and notifications `.parse()` clean), and the
+  **server-emitted** `_meta.ui` + capability shapes. Inbound notification types
+  (`arguments`, `width`/`height`) are now optional to match the schema.
+
+### Packaging
+
+- **`dockyard-bridge/spec`** exposes the vendored ext-apps schema (used by the
+  inspector and the bridge's own conformance tests). Its `zod` +
+  `@modelcontextprotocol/sdk` imports are provided by the consumer (`devDependencies`
+  of both `dockyard-bridge` and `web/inspector`); they are intentionally **not**
+  declared as peer dependencies — an optional peer makes a bundler stub it and
+  breaks the production build. The package's `.` entry imports no zod, so App
+  authors importing only `.` install nothing extra.
+- **The local inspector is a faithful, validating spec host. (D-182, item 4)** It
+  no longer sends a host→View `ui/notifications/initialized`; it marks itself ready
+  when the View sends `initialized`, reads `availableDisplayModes`, and now
+  **validates the View's `ui/initialize` against the vendored schema**, rejecting a
+  non-spec shape with a JSON-RPC error. This removes the leniency that let the
+  1.6.1 View bugs pass locally — the inspector now catches them. The schema is
+  shared via a new opt-in `dockyard-bridge/spec` subpath (the package's `.` entry
+  stays Zod-free for App consumers).
+
+### Notes
+
+- Dockyard's Tasks×Apps `ui/` notifications (`task-progress`,
+  `elicitation-response`) are now explicitly fenced as **Dockyard extensions**
+  outside the MCP Apps schema; they function only against a Dockyard-aware host
+  (the inspector, or Harbor). (D-183)
 
 ## [1.6.1] - 2026-06-01
 

@@ -88,6 +88,37 @@ describe('HostContextState', () => {
     expect(second.props.get('--c')).toBe('3');
   });
 
+  it('reflects flexible containerDimensions (maxWidth/maxHeight) — item C', () => {
+    const state = new HostContextState();
+    state.set({ containerDimensions: { maxHeight: 600, maxWidth: 800 } });
+    expect(get(state.stores.containerDimensions)).toEqual({
+      maxHeight: 600,
+      maxWidth: 800,
+    });
+    // A later fixed-size patch is reflected without collapsing to undefined.
+    state.patch({ containerDimensions: { width: 320, height: 240 } });
+    expect(get(state.stores.containerDimensions)).toEqual({
+      width: 320,
+      height: 240,
+    });
+  });
+
+  it('injects host font CSS (styles.css.fonts) into document.head and removes it — item D', () => {
+    const state = new HostContextState();
+    const sel = 'style[data-dockyard-host-fonts]';
+    expect(document.head.querySelector(sel)).toBeNull();
+
+    const fontCss = "@font-face{font-family:'Acme';src:url(/acme.woff2)}";
+    state.set({ styles: { css: { fonts: fontCss } } });
+    const el = document.head.querySelector(sel);
+    expect(el).not.toBeNull();
+    expect(el!.textContent).toBe(fontCss);
+
+    // A later context with no font CSS removes the injected style.
+    state.patch({ styles: {} });
+    expect(document.head.querySelector(sel)).toBeNull();
+  });
+
   it('exposes the current display mode and modes without subscribing', () => {
     const state = new HostContextState();
     state.set({

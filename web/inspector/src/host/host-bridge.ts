@@ -14,16 +14,19 @@
  *
  *   - it answers the View's `ui/initialize` request with an `InitializeResult`
  *     carrying `hostContext` and `hostCapabilities`;
- *   - it acks the handshake with a host→View `ui/notifications/initialized`
- *     (current Views resolve `ready` on their own and ignore this — D-180);
- *   - it fans host→view notifications (`tool-input`, `tool-result`, …);
+ *   - it answers `ui/initialize` and then waits: a faithful spec host does NOT
+ *     send a host→View `initialized`; it marks itself ready when the View SENDS
+ *     `ui/notifications/initialized` (D-180/D-182);
+ *   - it fans host→view notifications (`tool-input`, `tool-result`, …) and
+ *     consumes the View's `size-changed` (sizes the preview) and
+ *     `request-teardown` (closes the preview) — D-182 item 4;
  *   - it answers `ui/request-display-mode`, granting only modes in
  *     `availableDisplayModes` — capability-driven, never a host matrix
  *     (RFC §7.5);
- *   - it answers `ui/open-link` / `ui/message` / `ui/update-model-context` /
- *     `tools/call` with a benign result — the inspector is read-only and is
- *     never an arbitrary-execution proxy (RFC §12); a real `tools/call` proxy
- *     is wired by Phase 23.
+ *   - it answers `ui/open-link` / `ui/message` / `ui/update-model-context` with
+ *     a benign ack, and `tools/call` from the wired fixture responder (or a
+ *     "not wired" error) — the inspector is read-only and never an
+ *     arbitrary-execution proxy (RFC §12).
  *
  * It is transport-agnostic: it takes a `MessageSink` (where it posts to the
  * View) and a `MessageSource` (where View messages arrive), exactly like the
@@ -32,6 +35,7 @@
  */
 
 import {
+  DockyardExtMethod,
   HostNotification,
   ViewMethod,
   ViewNotification,
@@ -50,6 +54,12 @@ import {
   type RequestDisplayModeResult,
   type TaskProgressParams,
 } from 'dockyard-bridge';
+// The vendored ext-apps schema (zod) — the `./spec` subpath is the opt-in,
+// zod-bearing surface; the inspector validates the inbound `ui/initialize`
+// handshake against it (D-182, item 4) — the message whose mis-shape caused
+// D-179. (The bridge's own conformance test guards the View's full outbound
+// wire.) The bridge's `.` entry stays Zod-free for App consumers.
+import { McpUiInitializeRequestSchema } from 'dockyard-bridge/spec';
 
 /** The protocol revision the host half advertises (matches the View half). */
 export const HOST_PROTOCOL_VERSION = '2026-01-26';
@@ -100,6 +110,17 @@ export interface HostBridgeOptions {
   hostInfo?: { name: string; version: string };
   /** Called for every JSON-RPC message in either direction (the RPC log). */
   onRpc?: (entry: HostRpcLogEntry) => void;
+  /**
+   * Called when the View reports its content size via
+   * `ui/notifications/size-changed` (D-182, item 4) — the inspector sizes the
+   * App preview iframe to it, mirroring how a real host content-sizes the App.
+   */
+  onViewSize?: (size: { width?: number; height?: number }) => void;
+  /**
+   * Called when the App asks to be torn down via
+   * `ui/notifications/request-teardown`. The inspector closes the preview frame.
+   */
+  onViewRequestTeardown?: () => void;
 }
 
 /**
@@ -143,6 +164,10 @@ export class HostBridge {
   private readonly hostCapabilities: HostCapabilities;
   private readonly hostInfo: { name: string; version: string };
   private readonly onRpc: ((entry: HostRpcLogEntry) => void) | undefined;
+  private readonly onViewSize:
+    | ((size: { width?: number; height?: number }) => void)
+    | undefined;
+  private readonly onViewRequestTeardown: (() => void) | undefined;
 
   private readonly boundOnMessage: (ev: HostInboundEvent) => void;
   private started = false;
@@ -190,6 +215,8 @@ export class HostBridge {
       version: '0.1.0',
     };
     this.onRpc = options.onRpc;
+    this.onViewSize = options.onViewSize;
+    this.onViewRequestTeardown = options.onViewRequestTeardown;
     this.boundOnMessage = (ev) => this.onMessage(ev.data);
     this.readyPromise = new Promise<void>((resolve) => {
       this.resolveReady = resolve;
@@ -206,10 +233,10 @@ export class HostBridge {
 
   /**
    * Resolves once the `ui/initialize` handshake is complete — the View sent
-   * `ui/initialize`, the host answered it, and the host sent
-   * `ui/notifications/initialized` (the host→View direction of the dialect,
-   * brief 01 §2.4). At that point the App has rendered and its bridge is up —
-   * the "the App completed its handshake" signal the inspector waits on.
+   * `ui/initialize`, the host answered it, and the View sent
+   * `ui/notifications/initialized` (the View → host readiness signal; D-182).
+   * At that point the App has rendered and its bridge is up — the "the App
+   * completed its handshake" signal the inspector waits on.
    */
   ready(): Promise<void> {
     return this.readyPromise;
@@ -255,7 +282,7 @@ export class HostBridge {
    * does not subscribe (or a run with no tasks) is unaffected.
    */
   sendTaskProgress(params: TaskProgressParams): void {
-    this.notify(HostNotification.taskProgress, params);
+    this.notify(DockyardExtMethod.taskProgress, params);
   }
 
   /** Notifies the View that a host-context field changed (a partial patch). */
@@ -337,7 +364,33 @@ export class HostBridge {
    */
   private handleNotification(notification: JsonRpcNotification): void {
     switch (notification.method) {
-      case ViewNotification.elicitationResponse: {
+      case ViewNotification.initialized:
+        // The View is the handshake initiator (D-180/D-182): it sends
+        // `ui/notifications/initialized` after the `ui/initialize` result and is
+        // then ready. A faithful spec host resolves *on receipt* — it does NOT
+        // send its own host→View `initialized` (the leniency that masked the
+        // v1.6.1 bugs; D-182 item 4). Idempotent against a duplicate.
+        this.viewReady = true;
+        this.resolveReady();
+        return;
+      case HostNotification.sizeChanged: {
+        // The View → host direction of `size-changed`: the App reports its
+        // content size (D-182, item 4). A faithful host sizes the App's frame
+        // to it; the inspector forwards it so the preview iframe grows to fit,
+        // mirroring a real host rather than a fixed-height box.
+        const size = (notification.params ?? {}) as {
+          width?: number;
+          height?: number;
+        };
+        this.onViewSize?.(size);
+        return;
+      }
+      case ViewNotification.requestTeardown:
+        // The App asks the host to tear it down (D-182, item B). The inspector
+        // closes the preview frame rather than dropping the request silently.
+        this.onViewRequestTeardown?.();
+        return;
+      case DockyardExtMethod.elicitationResponse: {
         // Phase 25 / D-134 — the App's reply to a task's input_required
         // prompt. Forward to the wired responder; the inspector wires
         // this to its backend POST that calls tasks/result on the
@@ -398,11 +451,27 @@ export class HostBridge {
 
   private handleInitialize(req: JsonRpcRequest): void {
     this.initializeReceived = true;
+    // Validate the handshake against the vendored ext-apps schema (D-182 — the
+    // inspector is a faithful spec host, not a lenient one). A non-spec View
+    // (e.g. the base-MCP `{capabilities, clientInfo}` shape that caused the
+    // 1.6.1 bug) is REJECTED with a JSON-RPC error rather than silently
+    // accepted — the inspector now catches what only a real host used to.
+    const check = McpUiInitializeRequestSchema.shape.params.safeParse(
+      req.params,
+    );
+    if (!check.success) {
+      this.respondError(
+        req.id,
+        -32602,
+        `invalid ui/initialize params (not ext-apps-conformant): ${check.error.message}`,
+      );
+      return;
+    }
     const params = (req.params ?? {}) as Partial<InitializeParams>;
     // The View advertises the display modes its build supports; the host
     // narrows `availableDisplayModes` to that intersection — capability-driven
     // negotiation, never a host matrix (RFC §7.5).
-    const appModes = params.appCapabilities?.displayModes;
+    const appModes = params.appCapabilities?.availableDisplayModes;
     if (appModes && appModes.length > 0) {
       const granted = (this.hostContext.availableDisplayModes ?? []).filter(
         (m) => appModes.includes(m),
@@ -422,15 +491,11 @@ export class HostBridge {
       hostInfo: this.hostInfo,
     };
     this.respond(req.id, result);
-    // A spec-compliant View resolves `ready` on its own after the
-    // `ui/initialize` result and SENDS `ui/notifications/initialized`; it no
-    // longer waits to receive one (dockyard-bridge D-180). The inspector keeps
-    // emitting this host→View ack — current bridges ignore it — pending the
-    // inspector-handshake hardening that makes this host fully spec-faithful
-    // (D-181 follow-up). It is harmless and marks the host's side complete.
-    this.notify(ViewNotification.initialized, {});
-    this.viewReady = true;
-    this.resolveReady();
+    // A faithful spec host stops here: it does NOT send a host→View
+    // `ui/notifications/initialized`. The View resolves `ready` on its own and
+    // SENDS `initialized` (D-180/D-182, item 4); the host marks itself ready on
+    // *receipt* of that notification (handleNotification). Sending one here was
+    // the leniency that let the v1.6.1 View bugs pass locally.
   }
 
   private handleRequestDisplayMode(req: JsonRpcRequest): void {

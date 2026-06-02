@@ -12,8 +12,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createBridge } from '../bridge.js';
 import {
-  ViewNotification,
+  DockyardExtMethod,
   type ElicitationResponseParams,
+} from '../dockyard-ext.js';
+import {
   type JsonRpcMessage,
   type JsonRpcNotification,
 } from '../protocol.js';
@@ -70,8 +72,8 @@ describe('BridgeShell.sendElicitationResponse (D-134)', () => {
     harnesses = [];
   });
 
-  it('exposes elicitation-response on ViewNotification', () => {
-    expect(ViewNotification.elicitationResponse).toBe(
+  it('exposes elicitation-response on DockyardExtMethod (D-183)', () => {
+    expect(DockyardExtMethod.elicitationResponse).toBe(
       'ui/notifications/elicitation-response',
     );
   });

@@ -104,10 +104,13 @@ else
   skip "require_spec_compliance gate not enforced yet"
 fi
 
+# v1.7 wave A (D-182, item B): resource-teardown is now a host→View *request*
+# (HostRequest.resourceTeardown) the bridge responds to then closes — no longer
+# a notification (HostNotification.resourceTeardown).
 if [ -f web/bridge/src/bridge.ts ] && \
-   grep -q "HostNotification.resourceTeardown" web/bridge/src/bridge.ts && \
+   grep -q "HostRequest.resourceTeardown" web/bridge/src/bridge.ts && \
    grep -q "negotiatedProtocolVersion" web/bridge/src/bridge.ts; then
-  ok "bridge wires resource-teardown → close() and retains the negotiated protocolVersion"
+  ok "bridge wires resource-teardown (request → respond+close) and retains the negotiated protocolVersion"
 else
   skip "bridge resource-teardown / protocolVersion retention not wired yet"
 fi
