@@ -1,4 +1,4 @@
-.PHONY: help build test vet lint preflight drift-audit check-mirror install-hooks clean dev generate web web-install coverage bench inspector-bundle docs docs-install
+.PHONY: help build test vet lint preflight drift-audit check-mirror install-hooks clean dev generate web web-install coverage bench inspector-bundle inspector-bundle-check docs docs-install
 
 help:
 	@echo "Dockyard — make targets"
@@ -28,10 +28,11 @@ GO_SOURCES := $(shell find . -name '*.go' -not -path './vendor/*' 2>/dev/null | 
 # this so a `bin/dockyard` produced by the canonical build always embeds the
 # real Svelte SPA, not the in-Go placeholder page (remediation R4 B1).
 #
-# The staged tree is .gitignored apart from a .gitkeep anchor, so rebuilds
-# never dirty the working tree. Skips gracefully when npm or web/inspector is
-# absent — the Go build then embeds only the .gitkeep, and the inspector
-# falls back to its in-Go placeholder page.
+# The staged tree is COMMITTED (D-187) so `go install …@latest` and the
+# cross-compiled release binaries — neither of which runs this target — ship
+# the real inspector instead of the placeholder. `inspector-bundle-check`
+# regenerates it in CI and fails on drift. Skips gracefully when npm or
+# web/inspector is absent — the Go build then embeds whatever is committed.
 inspector-bundle:
 	@if [ ! -f web/inspector/package.json ]; then \
 		echo "skip inspector-bundle: web/inspector not landed"; \
@@ -46,6 +47,40 @@ inspector-bundle:
 		find internal/inspector/dist -mindepth 1 ! -name '.gitkeep' -exec rm -rf {} +; \
 		cp -R web/inspector/dist/. internal/inspector/dist/; \
 	fi
+
+# inspector-bundle-check — the committed-bundle reality gate (D-187). It
+# validates that the COMMITTED internal/inspector/dist/ is a real Vite SPA, not
+# the in-Go placeholder / an empty tree — so the bundle a `go install` user and
+# the release downloads embed is always a working inspector. It is deliberately
+# STRUCTURAL, not a byte-diff against a fresh build: vite/rollup output is not
+# reproducible across platforms (a macOS-built bundle and an ubuntu CI rebuild
+# differ in bytes and size), so a `git diff --exit-code` gate could never pass
+# cross-platform. Keeping the committed bundle current when web/inspector source
+# changes is a committer/reviewer responsibility (run `make inspector-bundle`
+# and commit). This runs against git-tracked content, so it is unaffected by a
+# local `make build` having just overwritten dist with platform-specific hashes.
+inspector-bundle-check:
+	@idx=internal/inspector/dist/index.html; \
+	if ! git ls-files --error-unmatch "$$idx" >/dev/null 2>&1; then \
+		echo "ERROR: $$idx is not committed — the inspector SPA bundle is missing (D-187)."; \
+		echo "       Run 'make inspector-bundle' and commit internal/inspector/dist/."; \
+		exit 1; \
+	fi; \
+	if git show "HEAD:$$idx" 2>/dev/null | grep -q 'has not been built yet'; then \
+		echo "ERROR: committed $$idx is the in-Go PLACEHOLDER, not a real SPA (D-187)."; \
+		echo "       Run 'make inspector-bundle' and commit internal/inspector/dist/."; \
+		exit 1; \
+	fi; \
+	if ! git show "HEAD:$$idx" 2>/dev/null | grep -qE 'assets/index-[A-Za-z0-9_-]+\.js'; then \
+		echo "ERROR: committed $$idx does not reference a hashed assets/index-*.js bundle (D-187)."; \
+		exit 1; \
+	fi; \
+	js=$$(git ls-files 'internal/inspector/dist/assets/index-*.js' | head -1); \
+	if [ -z "$$js" ] || [ "$$(git cat-file -s ":$$js" 2>/dev/null || echo 0)" -lt 50000 ]; then \
+		echo "ERROR: committed inspector JS bundle is missing or implausibly small (D-187)."; \
+		exit 1; \
+	fi; \
+	echo "inspector-bundle-check: committed dist is a real SPA ($$js)"
 
 build: inspector-bundle
 	@if [ -f cmd/dockyard/main.go ]; then \

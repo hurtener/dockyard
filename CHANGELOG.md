@@ -21,7 +21,39 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-(No entries yet — the next release surface will land here.)
+### Fixed
+
+- **Template scaffolds no longer pin `v0.0.0`.** `dockyard new --template
+  analytics-widgets` / `--template approval-flows` previously hardcoded
+  `require github.com/hurtener/dockyard v0.0.0` in the generated `go.mod`, so a
+  project scaffolded with a published CLI failed `go mod tidy` with
+  `unknown revision v0.0.0` unless `--dockyard-path` (and its `replace`
+  directive) was supplied. The template `go.mod.tmpl` now resolves the Dockyard
+  version through a `__DOCKYARD_VERSION__` token — the same release-version pin
+  the blank scaffold already applied — so a `go install …@latest` CLI pins the
+  real release version and resolves the published module flag-free
+  ([D-186](docs/decisions.md)).
+- **The distributed inspector now actually works.** Every distributed `dockyard`
+  binary — both `go install …@latest` and the cross-compiled GitHub Release
+  downloads — previously shipped a non-functional inspector: `dockyard dev` /
+  `dockyard inspect` served a placeholder page (*"The inspector frontend has not
+  been built yet"*) because the embedded Svelte SPA bundle was gitignored and
+  neither distribution channel ran the local `make inspector-bundle` step. The
+  bundle (`internal/inspector/dist/`) is now committed, so the embedded inspector
+  is the real SPA on every channel; a CI freshness gate
+  (`make inspector-bundle-check`) keeps the committed bundle in lock-step with
+  `web/inspector` source ([D-187](docs/decisions.md)).
+
+### Documentation
+
+- **Template walkthroughs now spell out the web setup before the dev loop.** The
+  getting-started and template-walkthrough pages make explicit that a template
+  ships a Svelte UI requiring `(cd web && npm install)` and a one-time
+  `dockyard build` before `dockyard dev` — without them the dev loop fails with
+  `vite: command not found` and `open web/dist/index.html: file does not
+  exist`. The pages also document that `dockyard dev` auto-attaches the inspector
+  (and the standalone `dockyard inspect` alternative), and lead the scaffold
+  commands with the flag-free published-CLI form.
 
 ## [1.7.2] - 2026-06-02
 

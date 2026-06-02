@@ -123,6 +123,7 @@ func substitutionsFor(opts scaffold.Options) []scaffold.Substitution {
 		{From: "__PROJECT_NAME__", To: opts.Name},
 		{From: "__PROJECT_TITLE__", To: titleCase(opts.Name)},
 		{From: "__MODULE_PATH__", To: module},
+		{From: "__DOCKYARD_VERSION__", To: scaffold.RequireVersion(opts.DockyardVersion)},
 		{From: "__DOCKYARD_REPLACE_BLOCK__", To: replaceBlock},
 		{From: "__DOCKYARD_BRIDGE_SPEC__", To: bridgeSpec},
 		{From: "__DOCKYARD_UI_SPEC__", To: uiSpec},

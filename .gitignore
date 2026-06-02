@@ -35,14 +35,19 @@ go.work.sum
 # Private, non-repo discussion notes (monetization, etc. — never committed)
 /_private/
 
-# The inspector's embedded SPA bundle is built by `make build` from
-# web/inspector/dist/ and staged into internal/inspector/dist/ so the
-# `//go:embed all:dist` directive in internal/inspector/assets_embed.go picks
-# it up. The directory is anchored by a tracked .gitkeep so the embed is
-# always resolvable; the bundle output itself is a build artifact, never
-# committed (otherwise every `make build` would dirty the working tree).
-internal/inspector/dist/*
-!internal/inspector/dist/.gitkeep
+# The inspector's embedded SPA bundle (built by `make inspector-bundle` from
+# web/inspector into internal/inspector/dist/ for the `//go:embed all:dist`
+# directive in internal/inspector/assets_embed.go) is now COMMITTED, not
+# gitignored (D-187). The earlier "never commit the build artifact" scheme
+# (D-098, then the .gitkeep-only anchor) left every distributed binary —
+# `go install …@latest` and the cross-compiled GitHub Release downloads alike —
+# embedding only the placeholder page, because neither channel runs the local
+# `make inspector-bundle` step. Committing the bundle is the only way
+# `go install` (which builds from the module proxy's committed source) ships a
+# working inspector. CI's `make inspector-bundle-check` fails the build if the
+# committed bundle is missing/placeholder/empty (a structural check — vite
+# output is not byte-reproducible across platforms, so refreshing the bundle
+# when web/inspector source changes is a committer/reviewer responsibility).
 
 # VitePress docs site (Phase 29) — install + build artefacts. The site source
 # is tracked under docs/site/ (.vitepress/config.ts, index.md, etc.); the

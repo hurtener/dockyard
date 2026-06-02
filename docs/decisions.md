@@ -6367,3 +6367,133 @@ in preflight and must be run by hand** when their inputs change
 (`npx markdownlint-cli2 "**/*.md" "!**/node_modules"` and `make docs`). This
 trades a heavier required-gate for an explicit contributor obligation; promoting
 the docs build to a required check is a future option if doc breakage recurs.
+
+## D-186 — A template's `go.mod.tmpl` resolves the Dockyard version through `__DOCKYARD_VERSION__`, never a hardcoded `v0.0.0`
+
+**Date:** 2026-06-02
+**Status:** Settled (v1.7.3 — template scaffold version-pin fix).
+**Where it lives:** `templates/{analytics-widgets,approval-flows}/go.mod.tmpl`,
+`templates/*/builtin.go` (`substitutionsFor`), `internal/scaffold/templates.go`
+(`RequireVersion`), regression tests `TestBuiltin_GoModPinsReleaseVersion` in
+both template packages.
+
+**Why.** The v1.3 fix for the `v0.0.0: unknown revision` sharp edge
+(`requireVersion`, the blank-scaffold `renderGoMod`) pins the CLI's own release
+version into a scaffolded `go.mod` so a published-CLI scaffold resolves the
+module from the proxy flag-free. But that fix only covered the **blank** scaffold
+path. The two product templates carry a static `go.mod.tmpl` that hardcoded
+`require github.com/hurtener/dockyard v0.0.0` and only substituted the
+`__DOCKYARD_REPLACE_BLOCK__` token — so the `--template` path pinned `v0.0.0`
+**regardless of CLI version**. A user following the quickstart
+(`dockyard new my-widgets --template analytics-widgets`) with a published
+`@latest` CLI still got `v0.0.0` and `go mod tidy` failed with
+`unknown revision v0.0.0`. The replace directive (only present with
+`--dockyard-path`) masked it locally, and every template smoke scaffolds *with*
+`--dockyard-path`, so CI never caught it.
+
+**The decision.** The template `go.mod.tmpl` carries a `__DOCKYARD_VERSION__`
+token, substituted at materialisation time with
+`scaffold.RequireVersion(opts.DockyardVersion)` — the exported face of the same
+`requireVersion` logic the blank scaffold's `renderGoMod` already applies. A
+released CLI scaffolding a template now pins the real release version (no
+replace); a build-from-source CLI still pins `v0.0.0`/a pseudo-version resolved
+through the `--dockyard-path` replace. Each template package carries a hermetic
+`TestBuiltin_GoModPinsReleaseVersion` regression guard (materialise with a
+release-shaped `DockyardVersion`, assert the pin and the absence of both
+`v0.0.0` and a `replace`) — the guard the template smoke could not provide
+because it always supplies `--dockyard-path`.
+
+## D-187 — The inspector SPA bundle is committed to the repo, not gitignored
+
+**Date:** 2026-06-02
+**Status:** Settled (v1.7.3 — distributed-inspector fix). Supersedes the
+gitignored-bundle half of remediation R4 B1; supersedes D-098.
+**Where it lives:** `internal/inspector/dist/` (committed), `.gitignore`,
+`Makefile` (`inspector-bundle`, new `inspector-bundle-check`),
+`.github/workflows/ci.yml` (the `go` job runs `make inspector-bundle-check`),
+`internal/inspector/assets_embed.go`, regression guard
+`TestEmbeddedAssets_RealBundleCommitted`.
+
+**Why.** The inspector frontend is `//go:embed all:dist` into the `dockyard`
+CLI. The real Vite SPA is staged into `internal/inspector/dist/` only by the
+local `make inspector-bundle` target; under the prior scheme that tree was
+gitignored (only a `.gitkeep` anchor committed) to keep the working tree clean
+across rebuilds. The consequence — verified at runtime on v1.7.2 — was that
+**every distributed binary shipped a non-functional inspector**: both
+`go install github.com/hurtener/dockyard/cmd/dockyard@latest` (which compiles
+from the module proxy's *committed* source) and the cross-compiled GitHub
+Release downloads (whose `build` job runs `go run releasebuild` on a fresh
+checkout with no `npm`/`make inspector-bundle` step) embedded only `.gitkeep`,
+so `dockyard dev` / `dockyard inspect` served the in-Go placeholder page
+("The inspector frontend has not been built yet"). A headline feature was dead
+on every channel except a local `make build`.
+
+**The decision.** Commit the built bundle (`internal/inspector/dist/index.html`
+plus the hashed `assets/`). This is the *only* fix that repairs the `go install`
+path — the proxy serves committed source, so the SPA must be committed; it
+repairs the release downloads for free (their fresh checkout now carries the
+committed bundle, which `go build` embeds without an npm step). The cost — built
+JS in the repo — is guarded by a CI **reality** gate, `make inspector-bundle-check`
+(in the `go` job): it fails the build if the committed `internal/inspector/dist/`
+is missing, the in-Go placeholder, or empty/implausibly small.
+
+The gate is deliberately **structural, not a byte-diff against a fresh build.**
+The first CI run of the byte-diff version proved why: vite/rollup output is **not
+reproducible across platforms** — an ubuntu CI rebuild differed from the macOS-
+committed bundle in both hashes *and* size (CSS 28.58 vs 28.62 kB, JS 221.49 vs
+221.51 kB), so `git diff --exit-code` could never pass cross-platform. The gate
+therefore validates that the committed bundle is a *real SPA* (the property that
+fixes the bug — `go install`/release no longer ship a placeholder), and keeping
+it current when `web/inspector` source changes is a committer/reviewer
+responsibility (`make inspector-bundle` + commit; a future path-diff gate —
+"`web/inspector/**` changed but `internal/inspector/dist/**` did not" — could
+automate the staleness signal without depending on byte reproducibility).
+`TestEmbeddedAssets_RealBundleCommitted` is the hermetic Go-side guard that the
+embedded bundle carries a real `index.html` referencing a hashed
+`assets/index-*.js`, not the bare anchor.
+
+## D-188 — The preflight smoke phase runs its scripts concurrently
+
+**Date:** 2026-06-02
+**Status:** Settled (v1.7.3 — preflight wall-clock).
+**Where it lives:** `scripts/preflight.sh`.
+
+**Why.** `scripts/preflight.sh` ran its ~40 per-phase + per-wave smoke scripts
+**sequentially**, and the count grows by one every phase/wave. Each script
+spawns its own `go build` / `go test` / occasional `npm`, so the gate's
+wall-clock had become the sum of forty independent, individually-fast scripts —
+minutes of mostly-idle cores on a pre-commit hook a contributor runs on every
+commit.
+
+**The decision.** Run the smoke scripts concurrently with bounded parallelism,
+with **one carve-out**: a script that exercises the shared in-repo `web/`
+workspace (npm install + `vitest --coverage` in `web/{bridge,ui,inspector}`) is
+**not** hermetic — two such runs clobber each other's `web/<pkg>/coverage/.tmp`
+and race the `node_modules` install. The first CI run of the all-parallel
+version proved it (a `web/inspector/coverage/.tmp/coverage-0.json` ENOENT when
+phase-11's `make web` and phase-23's `npm run gate` overlapped). Those scripts
+carry a `# preflight: serial` marker and run **sequentially**, after the
+parallel batch; the parallel batch contains no web-workspace *writer* (the
+scaffold smokes build their own temp `web/`; the rest only read in-repo `web/`
+files), so the two batches cannot collide either. Scripts are hermetic
+otherwise — own `mktemp -d` / OS-assigned ports — and no smoke sends a broadcast
+`pkill`/`killall` that would cross-terminate a sibling. Implementation notes that
+make it safe and reviewable:
+
+- **Bounded:** `PREFLIGHT_JOBS` overrides; default `min(cores, 6)` — `go` already
+  parallelises internally, so over-subscribing the cores is counter-productive.
+- **Portable:** `xargs -P` (not bash 4's `wait -n`), so it runs on the macOS
+  system bash 3.2.
+- **Deterministic log:** each script's combined output is captured to a
+  per-script file and **replayed in stable collection order** after the run, so
+  the gate's log reads identically to the old sequential one regardless of finish
+  order; a live `ok`/`FAIL <name>` line per script gives progress. The aggregate
+  verdict is computed from per-script failure markers, so one failing smoke still
+  fails the gate (and is summarised under "smoke FAILURES").
+
+**Operational caveat.** Interrupting the gate mid-run (a killed pre-commit hook,
+a sandbox SIGTERM) can orphan a smoke's `go run ./.dockyard-gen-*` codegen
+child, which then holds the Go build-cache lock and stalls the next run — true
+of the sequential gate too, but more reachable now that more codegen runs
+concurrently. The cure is environmental, not a gate change:
+`pkill -f '\.dockyard-gen-'` before re-running.

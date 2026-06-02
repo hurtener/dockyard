@@ -5,6 +5,9 @@
 # A check against an unbuilt surface SKIPs rather than FAILs (the common.sh
 # convention). The §19 drift hook itself is exercised by injecting a synthetic
 # malformed-SKILL.md fixture and asserting the skillcheck CLI catches it.
+# preflight: serial — builds the shared in-repo docs/site (VitePress writes
+# docs/site/.vitepress/{cache,dist}), so the preflight gate runs it sequentially,
+# never concurrently with another docs/site build (D-188).
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 . scripts/smoke/common.sh

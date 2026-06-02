@@ -7,11 +7,16 @@ tools rendered inline by one Svelte App.
 ## Scaffold
 
 ```bash
-dockyard new my-widgets \
-  --template analytics-widgets \
-  --dockyard-path /path/to/dockyard   # pre-publish only
+dockyard new my-widgets --template analytics-widgets
 cd my-widgets
 ```
+
+If you installed Dockyard via `go install …@latest`, that's all — the
+generated `go.mod` pins the published module and resolves with no extra
+flag. If you built Dockyard from source, add
+`--dockyard-path /path/to/dockyard` so the generated `go.mod` and
+`web/package.json` point at your local checkout
+([D-080](/reference/decisions)).
 
 The scaffold produces:
 
@@ -57,18 +62,40 @@ The output of each tool carries a `Kind` discriminator (`"chart"`,
 ## Run + inspect
 
 `dockyard new` already ran `go mod tidy` and `dockyard generate`, so the
-project's dependencies and contract artifacts (JSON Schema + TS) are ready.
+project's Go dependencies and contract artifacts (JSON Schema + TS) are ready.
 (If you scaffolded with `--no-postgen`, run those two first.)
 
+A template ships a Svelte UI, so two one-time steps come **before** the dev
+loop — skip them and `dockyard dev` fails with `vite: command not found`
+(web deps not installed) and `open web/dist/index.html: file does not exist`
+(the embedded bundle hasn't been built yet):
+
 ```bash
-# Build the project once so web/dist exists
+# 1. Install the web deps once (provides the Vite bundler):
+(cd web && npm install)
+
+# 2. Build once so the embedded UI bundle (web/dist) exists:
 dockyard build
+```
 
-# Run on HTTP so the inspector can attach
-DOCKYARD_TRANSPORT=http dockyard run
+Now you can run the dev loop, which **auto-attaches the inspector** and
+prints its URL:
 
-# In another terminal:
-dockyard inspect --url http://127.0.0.1:8080 --dir .
+```bash
+dockyard dev
+# ...
+# INFO inspector ready at http://127.0.0.1:54321   ← cmd-click to open
+```
+
+`dockyard dev` supervises the Go server, regenerates contracts on a change,
+and runs Vite (Svelte HMR) for the App. Ctrl-C tears the whole tree down.
+
+Prefer a standalone inspector against a built server? Run it on HTTP in one
+terminal and attach in another:
+
+```bash
+DOCKYARD_TRANSPORT=http dockyard run                   # terminal 1
+dockyard inspect --url http://127.0.0.1:8080 --dir .   # terminal 2
 ```
 
 The inspector renders the App in a sandboxed iframe. The Fixtures

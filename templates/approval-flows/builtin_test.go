@@ -61,6 +61,7 @@ func TestBuiltin_SubstitutionsFor(t *testing.T) {
 				"__PROJECT_NAME__":           "approver-test",
 				"__PROJECT_TITLE__":          "Approver Test",
 				"__MODULE_PATH__":            "example.com/approver-test",
+				"__DOCKYARD_VERSION__":       "v0.0.0",
 				"__DOCKYARD_REPLACE_BLOCK__": "",
 				"__DOCKYARD_BRIDGE_SPEC__":   "*",
 				"__DOCKYARD_UI_SPEC__":       "*",
@@ -79,6 +80,7 @@ func TestBuiltin_SubstitutionsFor(t *testing.T) {
 				"__PROJECT_NAME__":         "ops",
 				"__PROJECT_TITLE__":        "Ops",
 				"__MODULE_PATH__":          "github.com/acme/ops",
+				"__DOCKYARD_VERSION__":     "v0.0.0",
 				"__DOCKYARD_BRIDGE_SPEC__": "file:/some/path/web/bridge",
 				"__DOCKYARD_UI_SPEC__":     "file:/some/path/web/ui",
 				"github.com/hurtener/dockyard/templates/approval-flows/pkg": "github.com/acme/ops/internal",
@@ -166,5 +168,31 @@ func TestBuiltin_MaterialiseSampleProject(t *testing.T) {
 	// Builtin.go must NOT have been materialised — it is framework glue.
 	if _, ok := files["builtin.go"]; ok {
 		t.Error("builtin.go leaked into the materialised project")
+	}
+}
+
+// TestBuiltin_GoModPinsReleaseVersion is the template-path counterpart of
+// internal/scaffold.TestGenerate_PinsReleaseVersion. A released CLI scaffolding
+// `--template approval-flows` WITHOUT --dockyard-path must pin the real release
+// version in go.mod (no replace) so `go mod tidy` resolves the published module
+// instead of failing on the `v0.0.0: unknown revision` sharp edge. Regression
+// guard for the v1.7.3 fix: the template's go.mod.tmpl used to hardcode
+// `v0.0.0`, so every template scaffold was broken flag-free even from a
+// published CLI.
+func TestBuiltin_GoModPinsReleaseVersion(t *testing.T) {
+	t.Parallel()
+	files, err := builtin().Materialise(scaffold.Options{Name: "pinned", DockyardVersion: "v1.7.3"})
+	if err != nil {
+		t.Fatalf("Materialise: %v", err)
+	}
+	goMod := string(files["go.mod"])
+	if !strings.Contains(goMod, "require github.com/hurtener/dockyard v1.7.3") {
+		t.Errorf("go.mod did not pin the release version:\n%s", goMod)
+	}
+	if strings.Contains(goMod, "v0.0.0") {
+		t.Errorf("go.mod still carries the v0.0.0 placeholder:\n%s", goMod)
+	}
+	if strings.Contains(goMod, "replace ") {
+		t.Errorf("go.mod has a replace directive without --dockyard-path:\n%s", goMod)
 	}
 }

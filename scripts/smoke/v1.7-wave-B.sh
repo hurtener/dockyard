@@ -2,6 +2,9 @@
 # Smoke script for v1.7 wave B — published-docs refresh.
 # Plan: docs/plans/v1.7-wave-B-docs-refresh.md
 # A check against an unbuilt surface should skip(), not fail() — see common.sh.
+# preflight: serial — builds the shared in-repo docs/site (VitePress writes
+# docs/site/.vitepress/{cache,dist}), so the preflight gate runs it sequentially,
+# never concurrently with another docs/site build (D-188).
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 . scripts/smoke/common.sh

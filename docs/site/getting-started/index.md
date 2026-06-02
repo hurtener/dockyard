@@ -86,6 +86,21 @@ the `dockyard new` invocation: the flag wires the local Dockyard
 checkout into the generated `go.mod` and `web/package.json` (decision
 [D-080](/reference/decisions)).
 
+::: warning A template ships a Svelte UI — set it up before the dev loop
+Unlike the blank server, a template has a `web/` UI that must be installed
+and built once before step 3. Skip this and `dockyard dev` fails with
+`vite: command not found` and `open web/dist/index.html: file does not exist`:
+
+```bash
+(cd web && npm install)   # install the web deps (provides Vite)
+dockyard build            # build once so the embedded bundle (web/dist) exists
+```
+
+Then `dockyard dev` (step 3) runs and auto-attaches the inspector. The
+[analytics-widgets](analytics-widgets) and [approval-flows](approval-flows)
+walkthroughs spell this out end to end.
+:::
+
 ## 3. Run the dev loop
 
 ```bash
