@@ -6465,11 +6465,20 @@ wall-clock had become the sum of forty independent, individually-fast scripts �
 minutes of mostly-idle cores on a pre-commit hook a contributor runs on every
 commit.
 
-**The decision.** Run the smoke scripts concurrently with bounded parallelism.
-Each script is hermetic — its own `mktemp -d` / OS-assigned ports, or a distinct
-fixed `/tmp` name — so they parallelise without colliding (no smoke script
-sends a broadcast `pkill`/`killall` that would cross-terminate a sibling).
-Implementation notes that make it safe and reviewable:
+**The decision.** Run the smoke scripts concurrently with bounded parallelism,
+with **one carve-out**: a script that exercises the shared in-repo `web/`
+workspace (npm install + `vitest --coverage` in `web/{bridge,ui,inspector}`) is
+**not** hermetic — two such runs clobber each other's `web/<pkg>/coverage/.tmp`
+and race the `node_modules` install. The first CI run of the all-parallel
+version proved it (a `web/inspector/coverage/.tmp/coverage-0.json` ENOENT when
+phase-11's `make web` and phase-23's `npm run gate` overlapped). Those scripts
+carry a `# preflight: serial` marker and run **sequentially**, after the
+parallel batch; the parallel batch contains no web-workspace *writer* (the
+scaffold smokes build their own temp `web/`; the rest only read in-repo `web/`
+files), so the two batches cannot collide either. Scripts are hermetic
+otherwise — own `mktemp -d` / OS-assigned ports — and no smoke sends a broadcast
+`pkill`/`killall` that would cross-terminate a sibling. Implementation notes that
+make it safe and reviewable:
 
 - **Bounded:** `PREFLIGHT_JOBS` overrides; default `min(cores, 6)` — `go` already
   parallelises internally, so over-subscribing the cores is counter-productive.

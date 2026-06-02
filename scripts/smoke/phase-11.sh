@@ -4,6 +4,9 @@
 # stores, notification fan-out, display-mode negotiation, viewUUID view-state.
 # One assertion per acceptance criterion (docs/plans/phase-11-bridge-shell.md).
 # A check against an unbuilt surface, or a missing npm, skips rather than fails.
+# preflight: serial — exercises the shared in-repo web/ workspace (`make web`,
+# vitest coverage), so the preflight gate runs it sequentially, never
+# concurrently with another web gate (D-188).
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 . scripts/smoke/common.sh

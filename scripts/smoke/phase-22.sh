@@ -2,6 +2,9 @@
 # Smoke script for Phase 22 — Inspector core: bridge host-half + obs view.
 # One assertion per acceptance criterion (master plan / RFC §12).
 # A check against an unbuilt surface skips(), never fails() — see common.sh.
+# preflight: serial — exercises the shared in-repo web/ workspace (npm/vitest
+# coverage), so the preflight gate runs it sequentially, never concurrently
+# with another web gate (D-188).
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 . scripts/smoke/common.sh

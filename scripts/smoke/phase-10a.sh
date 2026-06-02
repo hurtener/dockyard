@@ -2,6 +2,9 @@
 # Smoke script for Phase 10a — UI design system, tokens & conventions.
 # One assertion per acceptance criterion (docs/plans/phase-10a-design-system.md).
 # A check against an unbuilt surface skips rather than fails — see common.sh.
+# preflight: serial — exercises the shared in-repo web/ workspace (npm/vitest
+# coverage), so the preflight gate runs it sequentially, never concurrently
+# with another web gate (D-188).
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 . scripts/smoke/common.sh
