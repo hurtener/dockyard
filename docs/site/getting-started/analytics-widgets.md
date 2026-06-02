@@ -107,27 +107,56 @@ by `Kind`. Sketch:
 
 ```svelte
 <script lang="ts">
-  import { onToolResult } from 'dockyard-bridge';
+  import { createBridge } from 'dockyard-bridge';
+  import { PageState, type PageStateValue } from 'dockyard-ui';
   import Chart from './widgets/Chart.svelte';
   import Table from './widgets/Table.svelte';
   import MetricCardWidget from './widgets/MetricCardWidget.svelte';
 
-  let result: any;
-  onToolResult((p) => { result = p; });
+  type Payload =
+    | ({ kind: 'chart' } & ChartProps)
+    | ({ kind: 'table' } & TableProps)
+    | ({ kind: 'metric_card' } & MetricProps);
+
+  let pageState = $state<PageStateValue>('loading');
+  let payload = $state<Payload | null>(null);
+
+  // createBridge() returns the bridge; subscriptions are live immediately.
+  // `displayModes` is advertised to the host as appCapabilities.availableDisplayModes
+  // (keep it in sync with `display_modes` in dockyard.app.yaml).
+  const bridge = createBridge({ displayModes: ['inline'] });
+
+  // The callback receives a CallToolResult — the widget payload is on
+  // `structuredContent` (typed by the generated contract).
+  bridge.onToolResult<Payload>((r) => {
+    payload = r.structuredContent ?? null;
+    pageState = payload ? 'ready' : 'error';
+  });
+
+  // Host theme variables arrive here (and via the reactive `bridge.hostContext`
+  // stores); apply them to your root element.
+  bridge.onHostContextChanged((p) => {
+    if (p.styles?.variables) applyHostVariables(p.styles.variables);
+  });
+
+  // Kick the ui/initialize handshake. Route a rejection to your error state.
+  bridge.connect().catch(() => (pageState = 'error'));
 </script>
 
-{#if result?.kind === 'chart'}
-  <Chart {...result} />
-{:else if result?.kind === 'table'}
-  <Table {...result} />
-{:else if result?.kind === 'metric_card'}
-  <MetricCardWidget {...result} />
-{/if}
+<!-- PageState (from dockyard-ui) routes every async state — the four-state rule. -->
+<PageState state={pageState}>
+  {#if payload?.kind === 'chart'}
+    <Chart {...payload} />
+  {:else if payload?.kind === 'table'}
+    <Table {...payload} />
+  {:else if payload?.kind === 'metric_card'}
+    <MetricCardWidget {...payload} />
+  {/if}
+</PageState>
 ```
 
-The host theme is propagated automatically via
-`hostContext.styles.variables`; each contract has an explicit `theme`
-field so a tool call can override the host default.
+Each contract also carries an explicit `theme` field so a tool call can override
+the host default; the App resolves it against the host's `styles.variables`.
 
 ## Adapt it
 

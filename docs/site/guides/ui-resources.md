@@ -141,25 +141,47 @@ marks the flat form deprecated. ([D-177](/reference/decisions))
 
 ```svelte
 <script lang="ts">
-  import { hostContext, onToolResult } from 'dockyard-bridge';
+  import { createBridge } from 'dockyard-bridge';
+  import { PageState, type PageStateValue } from 'dockyard-ui';
   import Chart from './widgets/Chart.svelte';
   import Table from './widgets/Table.svelte';
 
-  let result: any;
-  onToolResult((p) => { result = p; });
+  let pageState = $state<PageStateValue>('loading');
+  let payload = $state<{ kind: string } | null>(null);
+
+  // `displayModes` is advertised as appCapabilities.availableDisplayModes —
+  // keep it in sync with `display_modes` in dockyard.app.yaml.
+  const bridge = createBridge({ displayModes: ['inline'] });
+
+  // The callback receives a CallToolResult; the typed payload is on
+  // `structuredContent`.
+  bridge.onToolResult<{ kind: string }>((r) => {
+    payload = r.structuredContent ?? null;
+    pageState = payload ? 'ready' : 'error';
+  });
+
+  // Host theme variables (and the rest of hostContext) arrive here.
+  bridge.onHostContextChanged((p) => {
+    if (p.styles?.variables) applyHostVariables(p.styles.variables);
+  });
+
+  bridge.connect().catch(() => (pageState = 'error'));   // run the handshake
 </script>
 
-{#if !result}
-  <p>Waiting for tool result…</p>
-{:else if result.kind === 'chart'}
-  <Chart {...result} />
-{:else if result.kind === 'table'}
-  <Table {...result} />
-{/if}
+<!-- PageState (dockyard-ui) covers loading / empty / error / ready. -->
+<PageState state={pageState}>
+  {#if payload?.kind === 'chart'}
+    <Chart {...payload} />
+  {:else if payload?.kind === 'table'}
+    <Table {...payload} />
+  {/if}
+</PageState>
 ```
 
-The host theme arrives on `hostContext.styles.variables`; the bridge
-propagates it automatically.
+The host theme arrives via `bridge.onHostContextChanged` (`p.styles.variables`),
+or the reactive `bridge.hostContext` stores — apply it to your App's root.
+Compose the shared `dockyard-ui` inventory (`PageState`, `DataTable`,
+`MetricCard`, …) rather than rolling your own primitives.
 
 ## Build + verify
 
@@ -182,7 +204,7 @@ explicit UI action.
 If your App renders fine in the inspector but shows as a blank/white area
 in a host like Claude Desktop, work through these in order:
 
-- **Use a current `dockyard-bridge` (≥ 1.6.1).** Earlier bridge builds
+- **Use a current `dockyard-bridge` (≥ 1.7.0).** Earlier bridge builds
   spoke a non-spec handshake that a strict host rejected (or deadlocked
   against), and never reported the App's content size — so the host sized
   the iframe to ~0px and the App looked blank with no error. The current

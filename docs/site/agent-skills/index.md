@@ -15,7 +15,7 @@ many others) discovers Dockyard's skills automatically when the
 
 | Skill                          | What it teaches                                                                               |
 | ------------------------------ | --------------------------------------------------------------------------------------------- |
-| `scaffold-a-server`            | `dockyard new` (blank + the two V1 templates); the `--dockyard-path` pre-publish replace      |
+| `scaffold-a-server`            | `dockyard new` (blank + the two templates); the `--dockyard-path` build-from-source replace    |
 | `add-a-tool`                   | Define a typed Go contract pair, write the handler, register it, regenerate, validate         |
 | `attach-a-ui-resource`         | The MCP App pattern: manifest, `//go:embed`, the bridge handshake, the deny-by-default CSP    |
 | `define-contracts`             | Design A in depth: the Go struct as source of truth; `dockyard generate` + drift detection    |
