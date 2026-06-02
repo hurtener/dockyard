@@ -6298,3 +6298,49 @@ requirement, so an App author does not expect task progress / elicitation to wor
 on a stock host. This neither promotes the extensions into the spec nor removes
 them — it fences them honestly. A future upstream MCP Apps Tasks integration would
 let these migrate from `dockyard-ext` into the conformed surface.
+
+---
+
+## D-184 — The drift cross-check skips JSDoc comment content; the template smoke runs `dockyard validate`
+
+**Date:** 2026-06-02
+**Status:** Settled (1.7.1 — bugfix). The `approval-flows` template could not
+`dockyard build`.
+**Where it lives:** `internal/codegen/drift.go` (`parseTSInterface`),
+`internal/codegen/drift_test.go`, `scripts/smoke/phase-25.sh`,
+`templates/{analytics-widgets,approval-flows}/README.md.tmpl`.
+
+**The problem.** A scaffolded `approval-flows` project failed `dockyard build` at
+the validate gate with a spurious `stale-codegen` blocker:
+`RequestApprovalInput: property "metadata" is in the schema but missing from
+TypeScript`. The generated code was actually correct — the schema and the
+TypeScript both carried `metadata` (a free-shape `map[string]any` field). The
+fault was in the **drift cross-check's TypeScript parser**
+(`CrossCheck` → `parseTSInterface`): it is line-oriented and treats any line with
+`}` and no `{` as the interface's closing brace. The `Metadata` field's Go doc
+comment contains an example object literal that the generator renders as JSDoc:
+
+```text
+* key/value table for context (e.g. {"subscribers": 1247, "since":
+* "Mon 09:00"}). Optional.
+```
+
+The example's closing `}` lands on a comment line with no `{`, so the parser
+decided the interface ended *before* the `metadata` field, truncated the field
+list, and reported `metadata` as missing. `dockyard generate` (a byte-exact
+stale-check) was happy; only the cross-check parser tripped — so the two
+disagreed.
+
+**Why it shipped undetected.** The `approval-flows` template smoke
+(`scripts/smoke/phase-25.sh`) only ran `go build ./...` on the scaffolded
+project, which does **not** run the contract drift cross-check. The validate
+gate had never been exercised against the template.
+
+**The decision.** (1) `parseTSInterface` now tracks `/* … */` block comments and
+strips single-line comments, so a `}` inside a JSDoc comment is never mistaken
+for the interface close (pinned by
+`TestCrossCheck_DocCommentBraceNotInterfaceClose`). (2) `phase-25.sh` now runs
+`dockyard validate` on the scaffolded project so a contract drift is caught by
+the smoke, not by a user — closing the "no silent caps" gap (AGENTS.md §11). The
+generated output and the contract authoring model are unchanged; this is purely a
+cross-check robustness fix plus a gate that should have existed.

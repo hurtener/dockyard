@@ -110,6 +110,17 @@ else
   fail "the materialised approval-flows project does not build"; sed 's/^/    /' "$WORK/proj-build.log"
 fi
 
+# --- the scaffolded project passes `dockyard validate` (the contract gate) ---
+# `go build` does NOT run the schema↔TS drift cross-check; only `dockyard
+# validate`/`build` does. Run it here so a contract drift (e.g. the
+# `}`-in-doc-comment parse bug that blocked this template's build) is caught by
+# the smoke, not by a user. Warnings are fine; a build blocker fails the gate.
+if ( cd "$SRV" && "$DOCKYARD" validate ) >"$WORK/validate.log" 2>&1; then
+  ok "the materialised approval-flows project passes dockyard validate"
+else
+  fail "dockyard validate failed on the scaffolded project"; sed 's/^/    /' "$WORK/validate.log"
+fi
+
 if ( cd "$SRV" && CGO_ENABLED=0 go test ./... ) >"$WORK/proj-test.log" 2>&1; then
   ok "the materialised approval-flows project's contract tests pass"
 else

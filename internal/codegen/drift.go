@@ -365,8 +365,14 @@ func tsTypeKind(expr string) string {
 // TypeScript. It returns the fields and true when the interface is found.
 //
 // The parse is line-oriented and deliberately small: the input is Dockyard's
-// own boring, generated TypeScript (one field per line, no inline object
-// types), not arbitrary TypeScript. A field carrying a `?` is optional.
+// own boring, generated TypeScript (one field per line), not arbitrary
+// TypeScript. A field carrying a `?` is optional.
+//
+// JSDoc block comments (`/** … */`) are skipped: a Go doc comment can contain an
+// example object literal whose `}` lands on a comment line with no matching `{`,
+// and that brace must NOT be mistaken for the interface's closing brace — doing
+// so truncated the field list and reported a real field as "missing from
+// TypeScript" (pinned by TestCrossCheck_DocCommentBraceNotInterfaceClose).
 func parseTSInterface(ts, name string) ([]tsField, bool) {
 	lines := strings.Split(ts, "\n")
 	for i := 0; i < len(lines); i++ {
@@ -375,12 +381,30 @@ func parseTSInterface(ts, name string) ([]tsField, bool) {
 			continue
 		}
 		var fields []tsField
+		inComment := false
 		for j := i + 1; j < len(lines); j++ {
 			line := lines[j]
-			if strings.Contains(line, "}") && !strings.Contains(line, "{") {
+			// Inside a block comment: skip until it closes. The braces in a
+			// JSDoc example are comment text, not structure.
+			if inComment {
+				if strings.Contains(line, "*/") {
+					inComment = false
+				}
+				continue
+			}
+			// A block comment that opens here but does not close on this line.
+			if open := strings.Index(line, "/*"); open >= 0 &&
+				!strings.Contains(line[open+2:], "*/") {
+				inComment = true
+				continue
+			}
+			// Strip any single-line `/* … */` so its braces don't confuse the
+			// close-brace detection.
+			clean := tsLineCommentRe.ReplaceAllString(line, "")
+			if strings.Contains(clean, "}") && !strings.Contains(clean, "{") {
 				return fields, true
 			}
-			fm := tsFieldRe.FindStringSubmatch(line)
+			fm := tsFieldRe.FindStringSubmatch(clean)
 			if fm == nil {
 				continue // blank line, comment, or continuation
 			}

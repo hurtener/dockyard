@@ -21,7 +21,20 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-(No entries yet — the next release surface will land here.)
+### Fixed
+
+- **The `approval-flows` template now passes `dockyard build`. (D-184)** A
+  contract with a free-shape `map[string]any` field whose Go doc comment contains
+  an example object literal (e.g. `{"subscribers": 1247}`) was wrongly reported as
+  a schema↔TypeScript drift, blocking the build. The generated code was correct;
+  the drift cross-check's line-oriented TypeScript parser mistook the example's
+  closing `}` (on a JSDoc comment line) for the interface's closing brace and
+  truncated the field list. The parser now skips comment content. Surfaced because
+  the template smoke only ran `go build`, never `dockyard validate` — it now runs
+  `dockyard validate` so this class of drift is gated.
+- **Both templates' READMEs gain a step-by-step build-and-run Quickstart**
+  (`dockyard new` → `go run` / `dockyard dev` → `dockyard build` →
+  `dockyard install`).
 
 ## [1.7.0] - 2026-06-02
 
