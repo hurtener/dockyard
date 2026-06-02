@@ -21,6 +21,10 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
+(No entries yet — the next release surface will land here.)
+
+## [1.7.1] - 2026-06-02
+
 ### Fixed
 
 - **The `approval-flows` template now passes `dockyard build`. (D-184)** A
@@ -816,7 +820,8 @@ Vite, [tygo](https://github.com/gzuidhof/tygo),
 [modernc.org/sqlite](https://gitlab.com/cznic/sqlite), and
 [VitePress](https://vitepress.dev). Apache-2.0 licensed.
 
-[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/hurtener/dockyard/releases/tag/v1.7.1
 [1.7.0]: https://github.com/hurtener/dockyard/releases/tag/v1.7.0
 [1.6.1]: https://github.com/hurtener/dockyard/releases/tag/v1.6.1
 [1.6.0]: https://github.com/hurtener/dockyard/releases/tag/v1.6.0
