@@ -63,6 +63,14 @@ deliberately deferred to V2.
   (D-182, item 4 — checkpoint audit)** It sizes the preview iframe to the App's
   reported content height (mirroring a real host) and remounts on a teardown
   request, instead of silently dropping both.
+- **Conformance coverage extended to the full wire (D-182 — second audit pass).**
+  The conformance layer now also guards the bridge's **inbound** reads (a
+  schema-valid `tool-input`/`tool-result`/`tool-cancelled`/`host-context-changed`
+  reaches the App subscriber with every field intact), the **inspector's
+  outbound** host→View wire (the reference host's `ui/initialize` result,
+  `request-display-mode` result, and notifications `.parse()` clean), and the
+  **server-emitted** `_meta.ui` + capability shapes. Inbound notification types
+  (`arguments`, `width`/`height`) are now optional to match the schema.
 
 ### Packaging
 

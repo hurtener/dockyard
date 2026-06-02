@@ -108,6 +108,12 @@ export function hostContextFor(set: CapabilitySet): HostContext {
  * Derives the `hostCapabilities` block the host advertises. The Apps and Tasks
  * toggles surface as explicit capability flags; an App reads them from the
  * handshake result and degrades on absence (capability-driven, never a matrix).
+ *
+ * `apps`/`tasks` are **Dockyard-private emulation flags**, not keys in the
+ * `McpUiHostCapabilities` schema (which a strict `.parse()` would strip). They
+ * exist so the inspector can emulate a host with Apps/Tasks toggled on or off;
+ * `hostCapabilities` is forwarded to the View as an opaque record, so the flags
+ * reach a Dockyard App but carry no meaning to a stock host. (D-182 audit.)
  */
 export function hostCapabilitiesFor(set: CapabilitySet): HostCapabilities {
   return {

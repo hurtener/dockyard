@@ -40,6 +40,24 @@ else
   skip "web/bridge wire-conformance test not yet added"
 fi
 
+# The zod-bearing `dockyard-bridge/spec` subpath must stay resolvable for
+# consumers: the export must exist + point at a shipped file, and zod + the SDK
+# must be declared as OPTIONAL peer deps (so a `.`-only App author installs
+# nothing extra, but a `/spec` consumer knows to provide them) — D-182 audit.
+if [ -f web/bridge/src/spec/ext-apps-schema.ts ] && node -e '
+  const p = require("./web/bridge/package.json");
+  const ok = !!(p.exports && p.exports["./spec"]
+    && p.peerDependencies && p.peerDependencies.zod
+    && p.peerDependencies["@modelcontextprotocol/sdk"]
+    && p.peerDependenciesMeta && p.peerDependenciesMeta.zod
+    && p.peerDependenciesMeta.zod.optional);
+  process.exit(ok ? 0 : 1);
+' 2>/dev/null; then
+  ok "dockyard-bridge/spec subpath is resolvable (export ships; zod+sdk optional-peer-declared)"
+else
+  skip "dockyard-bridge/spec packaging contract not satisfied"
+fi
+
 # --- Item A: appCapabilities.availableDisplayModes -------------------------
 
 if [ -f web/bridge/src/bridge.ts ] \

@@ -6243,6 +6243,23 @@ they are what the schema forces into the open.
   inspector silently dropped the View's `size-changed` and `request-teardown` — it
   now sizes the preview iframe to the reported content height and remounts on a
   teardown request.
+- **Second checkpoint-audit pass (§17).** A deeper pass over the *other* halves of
+  the wire closed: (e) **inbound conformance** — nothing tested that the bridge
+  correctly READS a schema-valid host→View message; added, with inbound
+  notification types (`arguments`, size `width`/`height`) made optional to match
+  the schema; (f) **inspector-outbound conformance** — the reference host's
+  host→View sends (`ui/initialize` result, `request-display-mode` result, the
+  notifications) were unguarded; a `host-conformance.test.ts` now `.parse()`s them;
+  (g) **server↔schema crossing** — `McpUiResourceMetaSchema` / `McpUiToolMetaSchema`
+  / `McpUiClientCapabilitiesSchema` were never parsed against the Go-emitted
+  shapes; a representative sample is now pinned; (h) **two-vendored-spec
+  divergence** — the prose `apps.mdx` (`298e884e`) and the schema (`7d4434e`) are
+  the same revision at different upstream commits; documented the relationship +
+  a "reconcile both on bump" checklist (`docs/specifications/README.md`); (i)
+  **`./spec` packaging guard** — added a smoke that the subpath ships and
+  `zod`/`sdk` are optional-peer-declared. The inspector's `apps`/`tasks`
+  host-capability flags are documented as Dockyard-private emulation keys (not in
+  `McpUiHostCapabilities`).
 
 ---
 

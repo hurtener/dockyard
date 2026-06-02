@@ -314,7 +314,9 @@ export interface CallToolResult<S = unknown> {
 /* --- host → view notification params --------------------------------- */
 
 export interface ToolInputParams<I = unknown> {
-  arguments: I;
+  // Optional per `McpUiToolInputNotificationSchema` — a partial (`tool-input-
+  // partial`) may arrive with no `arguments` yet (D-182).
+  arguments?: I;
 }
 
 export interface ToolCancelledParams {
@@ -322,8 +324,10 @@ export interface ToolCancelledParams {
 }
 
 export interface SizeChangedParams {
-  width: number;
-  height: number;
+  // Optional per `McpUiSizeChangedNotificationSchema` — a host may report a
+  // single dimension (D-182). The bridge's own outbound emit always sends both.
+  width?: number;
+  height?: number;
 }
 
 /** `host-context-changed` delivers a partial patch of `HostContext`. */

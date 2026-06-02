@@ -139,7 +139,7 @@ describe('BridgeShell — notification fan-out end-to-end', () => {
     const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
     await bridge.connect();
 
-    const sizes: { width: number; height: number }[] = [];
+    const sizes: { width?: number; height?: number }[] = [];
     bridge.onSizeChanged((s) => sizes.push(s));
     h.notify(HostNotification.sizeChanged, { width: 320, height: 240 });
 

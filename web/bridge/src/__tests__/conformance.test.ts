@@ -17,18 +17,26 @@
  * Zod-free (RFC §7.4).
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { get } from 'svelte/store';
 import { createBridge } from '../bridge.js';
 import { DOCKYARD_EXT_METHODS } from '../dockyard-ext.js';
 import { HostNotification, ViewNotification } from '../protocol.js';
 import {
+  McpUiClientCapabilitiesSchema,
+  McpUiHostContextChangedNotificationSchema,
   McpUiInitializeRequestSchema,
   McpUiInitializedNotificationSchema,
   McpUiMessageRequestSchema,
   McpUiOpenLinkRequestSchema,
   McpUiRequestDisplayModeRequestSchema,
   McpUiRequestTeardownNotificationSchema,
+  McpUiResourceMetaSchema,
   McpUiResourceTeardownResultSchema,
   McpUiSizeChangedNotificationSchema,
+  McpUiToolCancelledNotificationSchema,
+  McpUiToolInputNotificationSchema,
+  McpUiToolMetaSchema,
+  McpUiToolResultNotificationSchema,
   McpUiUpdateModelContextRequestSchema,
 } from '../spec/ext-apps-schema.js';
 import { HostHarness } from './harness.js';
@@ -227,6 +235,134 @@ describe('wire conformance — the bridge emits schema-valid ui/ wire (D-182)', 
       McpUiRequestTeardownNotificationSchema.parse({
         method: note.method,
         params: note.params,
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe('wire conformance — the bridge reads schema-valid INBOUND wire (D-182)', () => {
+  let harnesses: HostHarness[] = [];
+  afterEach(() => {
+    harnesses.forEach((h) => h.close());
+    harnesses = [];
+  });
+  function harness(opts?: ConstructorParameters<typeof HostHarness>[0]) {
+    const h = new HostHarness(opts);
+    harnesses.push(h);
+    return h;
+  }
+
+  // For each host→View notification, send a payload the schema accepts and
+  // assert the bridge delivers every field to the App-facing subscriber — so a
+  // named field the host sends can never be silently hidden by the consumer type
+  // (the inbound twin of the outbound conformance above).
+  async function deliver<T>(
+    method: string,
+    params: unknown,
+    subscribe: (b: ReturnType<typeof createBridge>, cb: (p: T) => void) => void,
+  ): Promise<T> {
+    const h = harness();
+    const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+    await bridge.connect();
+    return await new Promise<T>((resolve) => {
+      subscribe(bridge, resolve);
+      h.notify(method, params);
+    });
+  }
+
+  it('tool-input: a schema-valid payload reaches onToolInput intact', async () => {
+    const params = { arguments: { city: 'oslo', units: 'metric' } };
+    McpUiToolInputNotificationSchema.parse({
+      method: HostNotification.toolInput,
+      params,
+    });
+    const got = await deliver(HostNotification.toolInput, params, (b, cb) =>
+      b.onToolInput(cb),
+    );
+    expect(got).toEqual(params);
+  });
+
+  it('tool-result: content + structuredContent + isError survive to onToolResult', async () => {
+    const params = {
+      content: [{ type: 'text', text: 'ok' }],
+      structuredContent: { total: 42 },
+      isError: false,
+    };
+    McpUiToolResultNotificationSchema.parse({
+      method: HostNotification.toolResult,
+      params,
+    });
+    const got = await deliver(HostNotification.toolResult, params, (b, cb) =>
+      b.onToolResult(cb),
+    );
+    expect(got).toMatchObject({
+      structuredContent: { total: 42 },
+      isError: false,
+    });
+  });
+
+  it('tool-cancelled: reason survives to onToolCancelled', async () => {
+    const params = { reason: 'user cancelled' };
+    McpUiToolCancelledNotificationSchema.parse({
+      method: HostNotification.toolCancelled,
+      params,
+    });
+    const got = await deliver(HostNotification.toolCancelled, params, (b, cb) =>
+      b.onToolCancelled(cb),
+    );
+    expect(got).toEqual(params);
+  });
+
+  it('host-context-changed: a schema-valid patch (incl. timeZone) patches the context', async () => {
+    const params = { theme: 'dark', timeZone: 'America/New_York', locale: 'fr-FR' };
+    McpUiHostContextChangedNotificationSchema.parse({
+      method: HostNotification.hostContextChanged,
+      params,
+    });
+    const h = harness();
+    const bridge = createBridge({ peer: h.peer, source: h.source, styleTarget: null });
+    await bridge.connect();
+    h.notify(HostNotification.hostContextChanged, params);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(get(bridge.hostContext.theme)).toBe('dark');
+    // The full patch — including the named `timeZone` field — is retained on raw.
+    expect(get(bridge.hostContext.raw).timeZone).toBe('America/New_York');
+  });
+});
+
+describe('wire conformance — server-emitted _meta.ui + capability shapes (D-182)', () => {
+  // The Go runtime (internal/protocolcodec) emits these shapes server-side; pin
+  // a representative sample to the vendored schema so the server↔View crossing
+  // is mechanically guarded, not only hand-verified.
+  it('a resource _meta.ui (csp + permissions + domain + prefersBorder) conforms', () => {
+    expect(() =>
+      McpUiResourceMetaSchema.parse({
+        csp: {
+          connectDomains: ['https://api.example.com'],
+          resourceDomains: ['https://cdn.example.com'],
+          frameDomains: [],
+          baseUriDomains: [],
+        },
+        permissions: { clipboardWrite: {} },
+        domain: 'abc.example-host.com',
+        prefersBorder: true,
+      }),
+    ).not.toThrow();
+  });
+
+  it('a tool _meta.ui (resourceUri + visibility) conforms', () => {
+    expect(() =>
+      McpUiToolMetaSchema.parse({
+        resourceUri: 'ui://server/widget/index.html',
+        visibility: ['model', 'app'],
+      }),
+    ).not.toThrow();
+  });
+
+  it('the apps extension capability block conforms', () => {
+    expect(() =>
+      McpUiClientCapabilitiesSchema.parse({
+        mimeTypes: ['text/html;profile=mcp-app'],
       }),
     ).not.toThrow();
   });
