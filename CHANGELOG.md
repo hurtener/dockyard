@@ -21,6 +21,10 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
+(No entries yet — the next release surface will land here.)
+
+## [1.7.3] - 2026-06-02
+
 ### Fixed
 
 - **Template scaffolds no longer pin `v0.0.0`.** `dockyard new --template
@@ -873,7 +877,8 @@ Vite, [tygo](https://github.com/gzuidhof/tygo),
 [modernc.org/sqlite](https://gitlab.com/cznic/sqlite), and
 [VitePress](https://vitepress.dev). Apache-2.0 licensed.
 
-[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.7.2...HEAD
+[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.7.3...HEAD
+[1.7.3]: https://github.com/hurtener/dockyard/releases/tag/v1.7.3
 [1.7.2]: https://github.com/hurtener/dockyard/releases/tag/v1.7.2
 [1.7.1]: https://github.com/hurtener/dockyard/releases/tag/v1.7.1
 [1.7.0]: https://github.com/hurtener/dockyard/releases/tag/v1.7.0
