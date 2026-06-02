@@ -6320,10 +6320,8 @@ fault was in the **drift cross-check's TypeScript parser**
 `}` and no `{` as the interface's closing brace. The `Metadata` field's Go doc
 comment contains an example object literal that the generator renders as JSDoc:
 
-```text
-* key/value table for context (e.g. {"subscribers": 1247, "since":
-* "Mon 09:00"}). Optional.
-```
+    * key/value table for context (e.g. {"subscribers": 1247, "since":
+    * "Mon 09:00"}). Optional.
 
 The example's closing `}` lands on a comment line with no `{`, so the parser
 decided the interface ended *before* the `metadata` field, truncated the field
