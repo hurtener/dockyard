@@ -4,11 +4,10 @@ Build a working MCP server with Dockyard in five minutes.
 
 ## 1. Install the CLI
 
-Dockyard ships one binary, `dockyard`. The recommended path post-v1.0.0
-is one command:
+Dockyard ships one binary, `dockyard`. The recommended path is one command:
 
 ```bash
-go install github.com/hurtener/dockyard/cmd/dockyard@v1.0.0
+go install github.com/hurtener/dockyard/cmd/dockyard@latest
 export PATH="$(go env GOPATH)/bin:$PATH"   # if it isn't already
 dockyard --help
 ```
@@ -66,7 +65,7 @@ skill that documents the full flag set.
 
 ### b) Scaffold a template
 
-The two shipped V1 templates exercise the framework end-to-end:
+The two shipped templates exercise the framework end-to-end:
 
 - **analytics-widgets** — three widget tools rendered inline by a Svelte
   App. The read-side example. [Walkthrough →](analytics-widgets)
@@ -79,7 +78,7 @@ dockyard new my-widgets --template analytics-widgets
 cd my-widgets
 ```
 
-If you installed Dockyard via `go install …@v1.0.0`, `dockyard new`
+If you installed Dockyard via `go install …@latest`, `dockyard new`
 resolves dependencies against the published module — no extra flag.
 
 If you built from source, add `--dockyard-path /path/to/dockyard` to
@@ -105,7 +104,7 @@ In another terminal, attach the inspector:
 
 ```bash
 # Start the server on HTTP so the inspector can attach
-DOCKYARD_TRANSPORT=http dockyard run
+dockyard run --transport http
 
 # Then in a third terminal:
 dockyard inspect --url http://127.0.0.1:8080

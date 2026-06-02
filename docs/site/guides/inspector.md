@@ -80,6 +80,13 @@ A non-loopback `--port` host is refused before the listener opens
 
 ![events](/screenshots/phase-24-finish/events.png)
 
+The Apps preview is a **faithful host**: it validates your App's `ui/initialize`
+handshake against the MCP Apps schema (rejecting a non-spec shape instead of
+silently accepting it) and sizes the preview iframe to the App's reported
+content height — so a handshake or rendering problem surfaces here, not only in
+a real host. If an App renders blank, see the
+[blank-App troubleshooting](/guides/ui-resources#troubleshooting-a-blank-app-in-the-host).
+
 ## The Prompts panel
 
 MCP separates two model-facing primitives. **Tools** are things the

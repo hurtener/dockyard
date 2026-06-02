@@ -47,8 +47,8 @@ contract-first tool, its generated JSON Schema and TypeScript, a runnable main,
 and a contract test. The generated project builds and serves immediately.
 
 The no-template path is first-class — no --template flag is required to get a
-working server. Templates (analytics-widgets, approval-flows, inspector) are
-optional product-pattern showcases; pass --template <name> to scaffold one.`,
+working server. Templates (analytics-widgets, approval-flows) are optional
+product-pattern showcases; pass --template <name> to scaffold one.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]

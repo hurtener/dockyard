@@ -9,7 +9,7 @@ Three verbs ship the packaging surface
   "I want to see it now" verb.
 - **`dockyard install <host>`** — write the host's MCP config so the
   host launches your built server; verify it boots with a real MCP
-  `initialize` handshake. V1 hosts: `claude`, `cursor`.
+  `initialize` handshake. Supported hosts: `claude`, `cursor`.
 
 ## `dockyard build`
 
@@ -65,7 +65,7 @@ dockyard install claude --config /custom/path/to/mcp.json
 ## CGo-free guarantee
 
 The shipped binary is always built with `CGO_ENABLED=0`. The
-runtime's lone persistence driver in V1 is `modernc.org/sqlite` (pure
+runtime's persistence driver is `modernc.org/sqlite` (pure
 Go, no CGo); the SDK is pure Go; the obs stack is pure Go. A
 dependency that would force CGo is rejected
 ([AGENTS.md §13](https://github.com/hurtener/dockyard/blob/main/AGENTS.md)).

@@ -73,11 +73,6 @@ The Tasks panel renders each task's lifecycle as a Timeline:
 
 ![tasks panel](/screenshots/phase-25/tasks-panel-live.png)
 
-The inspector body is 100vh with scrollable regions (the
-phase-25 layout fix):
-
-![full vh layout](/screenshots/phase-25/layout-fullvh.png)
-
 ## How the round-trip works
 
 1. Host calls `tools/call request_approval` → server returns a
@@ -94,6 +89,15 @@ phase-25 layout fix):
 
 The Tasks panel renders the whole sequence as a Timeline so you can
 correlate UI events with task state transitions.
+
+::: warning Dockyard-host-only
+The inline elicitation round-trip and live task progress are **Dockyard
+extensions** — they work against a Dockyard-aware host (the inspector, or Harbor
+as the MCP client), but a stock host (e.g. Claude Desktop) renders the App and
+ignores them. Design the App so its core value does not depend on the
+round-trip. See the
+[Tasks×Apps note in the UI-resources guide](/guides/ui-resources).
+:::
 
 ## Capability degradation
 

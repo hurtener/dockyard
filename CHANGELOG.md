@@ -21,7 +21,24 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-(No entries yet — the next release surface will land here.)
+### Changed
+
+- **Published-docs refresh.** The docs site (`docs/site/`) no longer reads as
+  v1.0.0: install commands use `@latest`, the home "Released" callout is
+  version-agnostic, and "V1" era phrasing is removed. The Svelte App sketches in
+  the getting-started and UI-resources guides were rewritten to the real
+  `dockyard-bridge` API (`createBridge()` → `bridge.onToolResult(r =>
+  r.structuredContent)` → `bridge.connect()`) — the previous sketches showed a
+  top-level API that no longer exists — and now compose `dockyard-ui`'s
+  `PageState`. The inspector guide notes it validates the App handshake and sizes
+  the preview; the approval-flows guide flags inline elicitation as
+  Dockyard-host-only.
+
+### Fixed
+
+- **`dockyard new --help` no longer lists a non-existent `inspector` template**
+  (only `analytics-widgets` and `approval-flows` ship). The auto-generated CLI
+  reference is regenerated accordingly.
 
 ## [1.7.1] - 2026-06-02
 

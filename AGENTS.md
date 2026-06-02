@@ -165,6 +165,7 @@ make vet           # go vet ./...
 make lint          # golangci-lint run
 make web           # frontend gate: type-check + unit tests + coverage for web/
 make web-install   # install web/ frontend dependencies
+make docs          # regenerate the CLI reference + build the docs site (VitePress)
 make drift-audit   # design-coherence checks (RFC/plans/briefs/mirror/forbidden names)
 make check-mirror  # verify AGENTS.md == CLAUDE.md
 make preflight     # build + smoke checks + drift-audit
@@ -177,6 +178,16 @@ make install-hooks # install the pre-commit hook (one-time, per clone)
 runs every per-phase smoke script (which SKIP gracefully where the surface isn't
 built yet), and runs `drift-audit`. Do not bypass the pre-commit hook with
 `--no-verify` outside a documented emergency.
+
+**Two CI checks are NOT in `make preflight` — run them by hand when you touch
+their inputs.** (1) **markdownlint** — CI runs `npx markdownlint-cli2
+"**/*.md" "!**/node_modules"` as its own job; the pre-commit hook does not, so a
+Markdown change that passes preflight can still fail CI. (2) **The docs site**
+(`make docs` — regenerate the CLI reference, then a dead-link-gated VitePress
+build) is built and deployed by `.github/workflows/docs.yml`; it is deliberately
+**not** a required merge check, so a `docs/site/` change that breaks the build is
+not caught by preflight or by a required gate — build it locally with `make docs`
+before pushing.
 
 ### 4.2 Phase implementor contract
 

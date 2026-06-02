@@ -6342,3 +6342,28 @@ for the interface close (pinned by
 the smoke, not by a user — closing the "no silent caps" gap (AGENTS.md §11). The
 generated output and the contract authoring model are unchanged; this is purely a
 cross-check robustness fix plus a gate that should have existed.
+
+---
+
+## D-185 — The docs-site build + markdownlint are not in `make preflight`; the docs build is not a required merge check
+
+**Date:** 2026-06-02
+**Status:** Settled (v1.7 wave B — docs refresh).
+**Where it lives:** `AGENTS.md`/`CLAUDE.md` §4 + §4.1, `.github/workflows/docs.yml`,
+`.github/workflows/ci.yml`, plan `docs/plans/v1.7-wave-B-docs-refresh.md`.
+
+**Why.** Two CI checks live outside the pre-commit `make preflight` gate:
+markdownlint (its own `ci.yml` job) and the docs-site VitePress build (its own
+`docs.yml` workflow). Twice during the v1.6/v1.7 work a change passed preflight
+locally but failed CI — once on markdownlint (`MD046`), once on the production
+bundle — because preflight does not run them. The docs-site staleness audit
+(v1.7 wave B) made the gap explicit.
+
+**The decision.** Keep the docs build **out of the required merge checks for
+now** (it builds + deploys via `docs.yml`, but a docs break does not block a
+merge — a deliberate, revisitable scope choice). To compensate, **§4/§4.1 of
+the contributor normatives now state that markdownlint and `make docs` are not
+in preflight and must be run by hand** when their inputs change
+(`npx markdownlint-cli2 "**/*.md" "!**/node_modules"` and `make docs`). This
+trades a heavier required-gate for an explicit contributor obligation; promoting
+the docs build to a required check is a future option if doc breakage recurs.
