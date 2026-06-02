@@ -6230,10 +6230,17 @@ they are what the schema forces into the open.
   package's **`.` entry stays Zod-free** (the consumer zero-dep guarantee holds
   for App authors; only `./spec`, imported by tooling/tests, pulls Zod).
 - **Checkpoint audit (§17) fixes.** A wave-boundary audit surfaced and closed:
-  (a) the `./spec` subpath was unresolvable for external consumers — `zod` +
-  `@modelcontextprotocol/sdk` are now declared **optional `peerDependencies`** of
-  `dockyard-bridge` (the `.` entry stays Zod-free, so `.`-only App authors are
-  unaffected); (b) `ui/message` and `ui/update-model-context` sent a bare-string
+  (a) the `./spec` subpath's `zod` + `@modelcontextprotocol/sdk` imports — its
+  consumer must provide them; they are `devDependencies` of both `dockyard-bridge`
+  (its own tests) and `web/inspector` (the only `/spec` consumer). They are
+  **deliberately NOT declared as `peerDependencies`**: an *optional* peer makes a
+  bundler (Vite/rollup) stub it as `__vite-optional-peer-dep` — which breaks
+  `make build` — and a *required* peer would nag `.`-only App authors. The `.`
+  entry imports no zod, so `.`-only authors install nothing extra regardless; a
+  future external `/spec` consumer installs zod+sdk itself (documented). (An
+  earlier revision of this fix declared optional peers and broke CI's production
+  bundle — caught by `make build`, which the test gate does not exercise.)
+  (b) `ui/message` and `ui/update-model-context` sent a bare-string
   `content` where the schema requires `ContentBlock[]` (and `ui/message` allowed a
   non-`user` role) — a real outbound drift a spec host would reject, now fixed and
   guarded; (c) the conformance test only `.parse()`d the handshake, so the item-3
@@ -6256,8 +6263,9 @@ they are what the schema forces into the open.
   divergence** — the prose `apps.mdx` (`298e884e`) and the schema (`7d4434e`) are
   the same revision at different upstream commits; documented the relationship +
   a "reconcile both on bump" checklist (`docs/specifications/README.md`); (i)
-  **`./spec` packaging guard** — added a smoke that the subpath ships and
-  `zod`/`sdk` are optional-peer-declared. The inspector's `apps`/`tasks`
+  **`./spec` packaging guard** — added a smoke that the subpath ships and its
+  consumer (`web/inspector`) provides `zod`/`sdk` (and that they are NOT an
+  optional peer, which would break the bundler). The inspector's `apps`/`tasks`
   host-capability flags are documented as Dockyard-private emulation keys (not in
   `McpUiHostCapabilities`).
 

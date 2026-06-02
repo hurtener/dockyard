@@ -33,17 +33,7 @@
     "gate": "npm run check && npm run coverage"
   },
   "peerDependencies": {
-    "svelte": "^5.0.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "zod": "^3.25.0 || ^4.0.0"
-  },
-  "peerDependenciesMeta": {
-    "@modelcontextprotocol/sdk": {
-      "optional": true
-    },
-    "zod": {
-      "optional": true
-    }
+    "svelte": "^5.0.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

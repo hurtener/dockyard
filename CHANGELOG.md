@@ -74,11 +74,13 @@ deliberately deferred to V2.
 
 ### Packaging
 
-- **`dockyard-bridge` declares `zod` + `@modelcontextprotocol/sdk` as optional
-  peer dependencies** so the `dockyard-bridge/spec` subpath (the vendored
-  ext-apps schema, used by tooling and the inspector) resolves for any consumer.
-  The `.` entry remains Zod-free, so App authors importing only `.` install
-  nothing extra.
+- **`dockyard-bridge/spec`** exposes the vendored ext-apps schema (used by the
+  inspector and the bridge's own conformance tests). Its `zod` +
+  `@modelcontextprotocol/sdk` imports are provided by the consumer (`devDependencies`
+  of both `dockyard-bridge` and `web/inspector`); they are intentionally **not**
+  declared as peer dependencies — an optional peer makes a bundler stub it and
+  breaks the production build. The package's `.` entry imports no zod, so App
+  authors importing only `.` install nothing extra.
 - **The local inspector is a faithful, validating spec host. (D-182, item 4)** It
   no longer sends a host→View `ui/notifications/initialized`; it marks itself ready
   when the View sends `initialized`, reads `availableDisplayModes`, and now

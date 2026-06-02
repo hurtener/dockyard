@@ -40,20 +40,23 @@ else
   skip "web/bridge wire-conformance test not yet added"
 fi
 
-# The zod-bearing `dockyard-bridge/spec` subpath must stay resolvable for
-# consumers: the export must exist + point at a shipped file, and zod + the SDK
-# must be declared as OPTIONAL peer deps (so a `.`-only App author installs
-# nothing extra, but a `/spec` consumer knows to provide them) — D-182 audit.
+# The zod-bearing `dockyard-bridge/spec` subpath must stay resolvable for its
+# consumer (the inspector). The export must exist + point at a shipped file, and
+# the CONSUMER (web/inspector) must provide zod + the SDK. zod/sdk are NOT
+# declared as optional peers of dockyard-bridge: a bundler (Vite/rollup) stubs an
+# optional peer as `__vite-optional-peer-dep`, which breaks `make build`. The `.`
+# entry stays Zod-free regardless, so `.`-only App authors install nothing extra.
 if [ -f web/bridge/src/spec/ext-apps-schema.ts ] && node -e '
-  const p = require("./web/bridge/package.json");
-  const ok = !!(p.exports && p.exports["./spec"]
-    && p.peerDependencies && p.peerDependencies.zod
-    && p.peerDependencies["@modelcontextprotocol/sdk"]
-    && p.peerDependenciesMeta && p.peerDependenciesMeta.zod
-    && p.peerDependenciesMeta.zod.optional);
+  const b = require("./web/bridge/package.json");
+  const i = require("./web/inspector/package.json");
+  const dep = (p, n) => (p.dependencies && p.dependencies[n]) || (p.devDependencies && p.devDependencies[n]);
+  const ok = !!(b.exports && b.exports["./spec"]
+    && dep(b, "zod") && dep(b, "@modelcontextprotocol/sdk")
+    && dep(i, "zod") && dep(i, "@modelcontextprotocol/sdk")
+    && !(b.peerDependencies && b.peerDependencies.zod));
   process.exit(ok ? 0 : 1);
 ' 2>/dev/null; then
-  ok "dockyard-bridge/spec subpath is resolvable (export ships; zod+sdk optional-peer-declared)"
+  ok "dockyard-bridge/spec resolvable (export ships; consumer provides zod+sdk; not an optional peer)"
 else
   skip "dockyard-bridge/spec packaging contract not satisfied"
 fi
