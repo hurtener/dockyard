@@ -21,6 +21,19 @@ const driftRevenueSource = "type ShowRevenueOutput struct {\n" +
 	"\tCurrency string  `json:\"currency,omitempty\"`\n" +
 	"}\n"
 
+// approvalLike mirrors the approval-flows template's RequestApprovalInput: a
+// free-shape `map[string]any` field (`metadata`) whose Go doc comment carries an
+// example object literal. The generated TS renders that comment as JSDoc, and the
+// example's closing `}` lands on a comment line with no `{` — the case that used
+// to truncate parseTSInterface and report `metadata` as missing.
+type approvalLike struct {
+	Title string `json:"title"`
+	// Metadata is an opaque, free-shape JSON object the App renders as a
+	// key/value table for context (e.g. {"subscribers": 1247, "since":
+	// "Mon 09:00"}). Optional.
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
 // --- CrossCheck: passing -----------------------------------------------------
 
 func TestCrossCheck_Match(t *testing.T) {
@@ -35,6 +48,32 @@ func TestCrossCheck_Match(t *testing.T) {
 	}
 	if err := codegen.CrossCheck(schema, "ShowRevenueOutput", ts); err != nil {
 		t.Errorf("CrossCheck on a matched schema/TS pair should pass, got: %v", err)
+	}
+}
+
+// TestCrossCheck_DocCommentBraceNotInterfaceClose pins the fix for the
+// approval-flows `dockyard build` blocker: a `}` inside a field's JSDoc comment
+// (here, an example object in the `metadata` doc) must not be read as the
+// interface's closing brace, which truncated the field list and falsely reported
+// the trailing `metadata` field as "missing from TypeScript".
+func TestCrossCheck_DocCommentBraceNotInterfaceClose(t *testing.T) {
+	t.Parallel()
+	schema, err := codegen.SchemaFor[approvalLike]()
+	if err != nil {
+		t.Fatalf("SchemaFor: %v", err)
+	}
+	// The TS exactly as generated: a JSDoc example whose closing `}` is on a
+	// comment line with no `{`, then the real `metadata` field after it.
+	ts := []byte("export interface ApprovalLike {\n" +
+		"  title: string;\n" +
+		"  /**\n" +
+		"   * Metadata is an opaque, free-shape JSON object (e.g.\n" +
+		"   * {\"subscribers\": 1247, \"since\": \"Mon 09:00\"}). Optional.\n" +
+		"   */\n" +
+		"  metadata?: { [key: string]: any};\n" +
+		"}\n")
+	if err := codegen.CrossCheck(schema, "ApprovalLike", ts); err != nil {
+		t.Errorf("a }-in-doc-comment must not truncate the interface; got drift: %v", err)
 	}
 }
 

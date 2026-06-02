@@ -23,6 +23,23 @@ deliberately deferred to V2.
 
 (No entries yet — the next release surface will land here.)
 
+## [1.7.1] - 2026-06-02
+
+### Fixed
+
+- **The `approval-flows` template now passes `dockyard build`. (D-184)** A
+  contract with a free-shape `map[string]any` field whose Go doc comment contains
+  an example object literal (e.g. `{"subscribers": 1247}`) was wrongly reported as
+  a schema↔TypeScript drift, blocking the build. The generated code was correct;
+  the drift cross-check's line-oriented TypeScript parser mistook the example's
+  closing `}` (on a JSDoc comment line) for the interface's closing brace and
+  truncated the field list. The parser now skips comment content. Surfaced because
+  the template smoke only ran `go build`, never `dockyard validate` — it now runs
+  `dockyard validate` so this class of drift is gated.
+- **Both templates' READMEs gain a step-by-step build-and-run Quickstart**
+  (`dockyard new` → `go run` / `dockyard dev` → `dockyard build` →
+  `dockyard install`).
+
 ## [1.7.0] - 2026-06-02
 
 ### Changed
@@ -803,7 +820,8 @@ Vite, [tygo](https://github.com/gzuidhof/tygo),
 [modernc.org/sqlite](https://gitlab.com/cznic/sqlite), and
 [VitePress](https://vitepress.dev). Apache-2.0 licensed.
 
-[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/hurtener/dockyard/releases/tag/v1.7.1
 [1.7.0]: https://github.com/hurtener/dockyard/releases/tag/v1.7.0
 [1.6.1]: https://github.com/hurtener/dockyard/releases/tag/v1.6.1
 [1.6.0]: https://github.com/hurtener/dockyard/releases/tag/v1.6.0

@@ -3,6 +3,61 @@
 An MCP server scaffolded from the **`analytics-widgets`** template — Dockyard's
 template that demonstrates inline UI widgets backed by contract-first tools.
 
+## Quickstart — build & run
+
+**Prerequisites:** Go 1.26+, Node 20+, and the `dockyard` CLI:
+
+```sh
+go install github.com/hurtener/dockyard/cmd/dockyard@latest
+```
+
+This project was created with
+`dockyard new --template analytics-widgets <name>`. To build and run it:
+
+1. **Install dependencies** — already done by `dockyard new` (skip unless you
+   scaffolded with `--no-postgen`):
+
+   ```sh
+   go mod tidy
+   ( cd web && npm install )
+   dockyard generate            # regenerate contract schema + TS (no-op if current)
+   ```
+
+2. **Run it** — `go run .` serves over stdio (the usual MCP transport); set
+   `DOCKYARD_TRANSPORT=http` for streamable-HTTP on `127.0.0.1:8080`:
+
+   ```sh
+   go run .
+   DOCKYARD_TRANSPORT=http go run .
+   ```
+
+3. **See the App render** — the live inspector watches files, rebuilds, and shows
+   the App in a sandboxed iframe with every fixture state:
+
+   ```sh
+   dockyard dev
+   ```
+
+4. **Build the shippable artifact** — one CGo-free static binary with the UI
+   embedded (lands in `dist/`):
+
+   ```sh
+   dockyard build
+   ```
+
+5. **Install into a host** so Claude Desktop / Cursor can use it:
+
+   ```sh
+   dockyard install claude      # or: dockyard install cursor
+   ```
+
+6. **Check it** before shipping:
+
+   ```sh
+   dockyard validate            # manifest + contract + spec gates
+   go test ./...                # contract tests
+   ```
+
 ## What this template ships
 
 One MCP App that exposes three widget tools, each rendered inline in the host's
