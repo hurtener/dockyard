@@ -56,12 +56,12 @@ jobs:
             web/ui/package-lock.json
             web/inspector/package-lock.json
       - run: make build
-      # The committed-bundle freshness gate (D-187). The inspector SPA bundle
-      # is committed (so `go install` and the release downloads ship the real
+      # The committed-bundle reality gate (D-187). The inspector SPA bundle is
+      # committed (so `go install` and the release downloads ship the real
       # inspector, not the placeholder); this fails the build if the committed
-      # internal/inspector/dist/ drifts from a fresh `vite build` of
-      # web/inspector — node + the pinned lockfile above make the content hashes
-      # reproducible.
+      # internal/inspector/dist/ is missing, the placeholder, or an empty/tiny
+      # tree. It is structural (validates git-tracked content), NOT a byte-diff
+      # against a fresh build — vite output is not reproducible across platforms.
       - run: make inspector-bundle-check
       - run: make vet
       - run: make test

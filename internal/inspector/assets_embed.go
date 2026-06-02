@@ -17,8 +17,10 @@ import (
 // binaries build from a fresh checkout — neither runs `make inspector-bundle`,
 // so a gitignored bundle (the earlier D-098 / .gitkeep-only scheme) left every
 // distributed binary embedding only the placeholder. CI's
-// `make inspector-bundle-check` rebuilds the SPA and fails on any drift, so the
-// committed bundle cannot go stale against web/inspector source.
+// `make inspector-bundle-check` fails the build if the committed bundle is
+// missing, the placeholder, or empty (a structural check — vite output is not
+// byte-reproducible across platforms, so refreshing the bundle when
+// web/inspector source changes is a committer/reviewer responsibility).
 //
 // If the bundle is ever absent (a hand-pruned tree), the embedded FS still
 // resolves but carries no index.html — the inspector backend's frontend handler

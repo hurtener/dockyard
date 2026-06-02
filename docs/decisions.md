@@ -6433,15 +6433,24 @@ plus the hashed `assets/`). This is the *only* fix that repairs the `go install`
 path — the proxy serves committed source, so the SPA must be committed; it
 repairs the release downloads for free (their fresh checkout now carries the
 committed bundle, which `go build` embeds without an npm step). The cost — built
-JS in the repo and bundle diffs on inspector changes — is paid down by a CI
-freshness gate: `make inspector-bundle-check` rebuilds the SPA and
-`git diff --exit-code`s `internal/inspector/dist`, failing the build if the
-committed bundle drifts from `web/inspector` source. The gate runs in the `go`
-CI job with the same pinned node (22) + committed `package-lock.json` the
-committer uses, so Vite's content-hashed output is reproducible (a drift = a
-real stale-bundle, not environment noise). `TestEmbeddedAssets_RealBundleCommitted`
-adds a hermetic guard that the committed embed carries a real `index.html`
-referencing a hashed `assets/index-*.js`, not the bare anchor.
+JS in the repo — is guarded by a CI **reality** gate, `make inspector-bundle-check`
+(in the `go` job): it fails the build if the committed `internal/inspector/dist/`
+is missing, the in-Go placeholder, or empty/implausibly small.
+
+The gate is deliberately **structural, not a byte-diff against a fresh build.**
+The first CI run of the byte-diff version proved why: vite/rollup output is **not
+reproducible across platforms** — an ubuntu CI rebuild differed from the macOS-
+committed bundle in both hashes *and* size (CSS 28.58 vs 28.62 kB, JS 221.49 vs
+221.51 kB), so `git diff --exit-code` could never pass cross-platform. The gate
+therefore validates that the committed bundle is a *real SPA* (the property that
+fixes the bug — `go install`/release no longer ship a placeholder), and keeping
+it current when `web/inspector` source changes is a committer/reviewer
+responsibility (`make inspector-bundle` + commit; a future path-diff gate —
+"`web/inspector/**` changed but `internal/inspector/dist/**` did not" — could
+automate the staleness signal without depending on byte reproducibility).
+`TestEmbeddedAssets_RealBundleCommitted` is the hermetic Go-side guard that the
+embedded bundle carries a real `index.html` referencing a hashed
+`assets/index-*.js`, not the bare anchor.
 
 ## D-188 — The preflight smoke phase runs its scripts concurrently
 

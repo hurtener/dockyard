@@ -44,9 +44,10 @@ go.work.sum
 # embedding only the placeholder page, because neither channel runs the local
 # `make inspector-bundle` step. Committing the bundle is the only way
 # `go install` (which builds from the module proxy's committed source) ships a
-# working inspector. CI regenerates it and `git diff --exit-code`s the tree
-# (`make inspector-bundle-check`) so the committed bundle can never drift from
-# web/inspector source.
+# working inspector. CI's `make inspector-bundle-check` fails the build if the
+# committed bundle is missing/placeholder/empty (a structural check — vite
+# output is not byte-reproducible across platforms, so refreshing the bundle
+# when web/inspector source changes is a committer/reviewer responsibility).
 
 # VitePress docs site (Phase 29) — install + build artefacts. The site source
 # is tracked under docs/site/ (.vitepress/config.ts, index.md, etc.); the
