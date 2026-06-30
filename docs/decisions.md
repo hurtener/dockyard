@@ -6531,8 +6531,11 @@ read-only accessor pair — `RequestMeta(ctx) map[string]any` and
   `map[string]any` so `RequestMeta`'s type assertion matches exactly.
 - **Defensive copy.** `WithRequestMeta` shallow-copies its input. The inbound
   `_meta` is the SDK's live request map, shared with the protocol machinery and
-  carrying protocol-reserved keys (e.g. `progressToken`); a per-call copy means a
-  handler mutating the returned map cannot reach in-flight protocol state.
+  carrying protocol-reserved keys (e.g. `progressToken`); a per-call shallow copy
+  means a handler mutating a *top-level* key cannot reach in-flight protocol
+  state. The copy is shallow — a nested map/slice value stays shared — so the
+  seam is documented read-only rather than relied on as a deep clone. This is
+  still strictly stronger than `RawArguments`, which copies nothing.
 - **Read-only consumer — no outbound surface.** We emit nothing, so no
   `protocolcodec` outbound-encoding rule (D-046/D-048) is touched. Reading
   `params._meta` is spec-compliant.

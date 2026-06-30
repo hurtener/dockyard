@@ -38,9 +38,10 @@ deliberately deferred to V2.
   map verbatim and never populates, derives, or inspects any key — the key set is
   the host's contract with the app. The accessor exposes the stdlib
   `map[string]any` (not the SDK's `_meta` type) so a handler-facing API leaks no
-  raw protocol type, and the map is shallow-copied per call so a handler cannot
-  reach in-flight protocol state. Mirrors the existing `RawArguments` seam.
-  Additive and backwards-compatible ([D-189](docs/decisions.md)).
+  raw protocol type, and the map is shallow-copied per call so a handler mutating
+  a top-level key cannot reach in-flight protocol state (nested values stay
+  shared — the seam is documented read-only). Mirrors the existing `RawArguments`
+  seam. Additive and backwards-compatible ([D-189](docs/decisions.md)).
 
 ## [1.7.3] - 2026-06-02
 

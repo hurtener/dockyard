@@ -107,8 +107,10 @@ type requestMetaKey struct{}
 // returned type is the stdlib map[string]any, not the SDK's `_meta` type).
 //
 // The map MAY carry protocol-reserved keys (e.g. progressToken). The returned
-// value is a per-call copy, so mutating it cannot reach the in-flight protocol
-// state — but treat it as read-only and do not retain it past the call.
+// value is a per-call shallow copy: mutating a top-level key cannot reach the
+// in-flight protocol state, but a nested value (a map/slice under a key) is
+// shared with it — so treat the whole map as read-only and do not retain it
+// past the call.
 func RequestMeta(ctx context.Context) map[string]any {
 	v, _ := ctx.Value(requestMetaKey{}).(map[string]any)
 	return v
@@ -122,7 +124,8 @@ func RequestMeta(ctx context.Context) map[string]any {
 //
 // The map is shallow-copied so the value RequestMeta later returns is insulated
 // from a mutation of the caller's source map (the inbound `_meta` is the SDK's
-// live request map, shared with the protocol machinery).
+// live request map, shared with the protocol machinery). The copy is shallow:
+// top-level keys are insulated; a nested map/slice value stays shared.
 func WithRequestMeta(ctx context.Context, m map[string]any) context.Context {
 	if len(m) == 0 {
 		return ctx

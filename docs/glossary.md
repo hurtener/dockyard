@@ -760,8 +760,10 @@ handle, an agent id — that a host attaches *outside* the model-filled
 inspects any key: the key set is the host's contract with the app, opaque to the
 runtime. Exposed as the stdlib `map[string]any`, not the SDK's `mcpsdk.Meta`, so a
 handler-facing API leaks no raw protocol type (P3); shallow-copied per call so a
-handler cannot reach in-flight protocol state (it may carry reserved keys such as
-`progressToken`). The read-only sibling of **`RawArguments`**. RFC §5, §6.3. D-189.
+handler mutating a top-level key cannot reach in-flight protocol state (nested
+values stay shared — the seam is documented read-only; it may carry reserved keys
+such as `progressToken`). The read-only sibling of **`RawArguments`**. RFC §5,
+§6.3. D-189.
 
 **Ring-buffer emitter** — the in-memory, bounded obs/v1 emitter driver
 (`obs.RingBuffer`, registered as `"ringbuffer"`) Phase 15 ships — the source the

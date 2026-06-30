@@ -85,6 +85,31 @@ func TestRequestMetaDefensiveCopy(t *testing.T) {
 	}
 }
 
+// TestRequestMetaShallowCopyIsShallow pins the documented limit of the per-call
+// copy: it is shallow. A top-level key is isolated, but a nested map/slice value
+// stays shared with the caller's source — which is why the seam's godoc/D-189
+// document RequestMeta as read-only rather than a deep clone.
+func TestRequestMetaShallowCopyIsShallow(t *testing.T) {
+	t.Parallel()
+
+	nested := map[string]any{"x": 1}
+	src := map[string]any{"top": "v", "nested": nested}
+	got := server.RequestMeta(server.WithRequestMeta(context.Background(), src))
+
+	// Top level is isolated: replacing the source's key does not change the copy.
+	src["top"] = "changed"
+	if got["top"] != "v" {
+		t.Errorf("top-level key not isolated: got[top] = %v, want v", got["top"])
+	}
+
+	// Nested value is shared: a mutation through the copy reaches the source's
+	// nested map (the documented shallow-copy limit).
+	got["nested"].(map[string]any)["x"] = 99
+	if nested["x"] != 99 {
+		t.Errorf("nested value unexpectedly deep-copied: nested[x] = %v, want 99 (shared)", nested["x"])
+	}
+}
+
 // metaRecorder captures the `_meta` a handler observed via RequestMeta. The
 // mutex makes the handler-goroutine write and the test-goroutine read race-free
 // under -race (AGENTS.md §5, §11).
