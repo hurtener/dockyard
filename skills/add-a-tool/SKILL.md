@@ -95,6 +95,32 @@ return a `tool.Result[Out]` with a UI-state field for a domain "empty" /
 "permission denied". The runtime never panics across the MCP boundary
 (AGENTS.md §13) — your handler must not panic either.
 
+### Reading host-injected per-call context (`_meta`)
+
+The model fills `arguments`. A host may *also* attach per-call context — a
+user identity, a session handle, an agent id — on the request's `_meta`,
+outside the arguments. Read it from the handler `ctx` (name the parameter,
+don't blank it) with `server.RequestMeta`:
+
+```go
+import "github.com/hurtener/dockyard/runtime/server"
+
+func Summarise(ctx context.Context, in contracts.SummariseInput) (tool.Result[contracts.SummariseOutput], error) {
+    if meta := server.RequestMeta(ctx); meta != nil {
+        if agent, ok := meta["agent_id"].(string); ok {
+            // use the host-injected agent id …
+        }
+    }
+    // …
+}
+```
+
+`RequestMeta` returns the inbound `_meta` as a read-only `map[string]any`
+(or nil if the host sent none). The keys are the host's contract with your
+app — Dockyard surfaces the map verbatim and never injects or interprets
+any key. Treat it as read-only; it may also carry protocol-reserved keys
+(e.g. `progressToken`).
+
 ## 3. Register the tool
 
 Add one builder chain to `registerTools` (or the equivalent file the

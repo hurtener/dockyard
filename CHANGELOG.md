@@ -23,6 +23,26 @@ deliberately deferred to V2.
 
 (No entries yet — the next release surface will land here.)
 
+## [1.8.0] - 2026-06-30
+
+### Added
+
+- **Tool handlers can now read the inbound request `_meta`.** A typed tool
+  handler decoded only `arguments` and had no path to `params._meta` — the
+  sibling field a host uses to attach per-call context (a user identity, a
+  session handle, an agent id) *outside* the model-filled arguments. The runtime
+  now threads `params._meta` onto the handler context in both registration
+  wrappers, surfaced read-only via the new `runtime/server.RequestMeta(ctx)
+  map[string]any` accessor (with `WithRequestMeta` as its in-process setter, for
+  tests and the inspector). Dockyard is a pure consumer: it surfaces the host's
+  map verbatim and never populates, derives, or inspects any key — the key set is
+  the host's contract with the app. The accessor exposes the stdlib
+  `map[string]any` (not the SDK's `_meta` type) so a handler-facing API leaks no
+  raw protocol type, and the map is shallow-copied per call so a handler mutating
+  a top-level key cannot reach in-flight protocol state (nested values stay
+  shared — the seam is documented read-only). Mirrors the existing `RawArguments`
+  seam. Additive and backwards-compatible ([D-189](docs/decisions.md)).
+
 ## [1.7.3] - 2026-06-02
 
 ### Fixed

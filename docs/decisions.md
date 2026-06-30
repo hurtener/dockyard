@@ -6497,3 +6497,50 @@ child, which then holds the Go build-cache lock and stalls the next run — true
 of the sequential gate too, but more reachable now that more codegen runs
 concurrently. The cure is environmental, not a gate change:
 `pkill -f '\.dockyard-gen-'` before re-running.
+
+---
+
+## D-189 — Inbound request `_meta` is surfaced to tool handlers as an opaque, read-only `map[string]any`
+
+**Date:** 2026-06-30
+**Status:** Settled (v1.8.0).
+**Where it lives:** `runtime/server/tool.go` (`RequestMeta` / `WithRequestMeta`).
+
+**Why.** A typed tool handler — `func(ctx, in In) (Result[Out], error)` — decodes
+only `params.arguments` into `In`. The sibling `params._meta` is on the request
+object the runtime already holds (`CallToolParamsRaw.Meta`) but was never
+surfaced, so a handler had no path to host-injected, per-call context (a user
+identity, a session handle, an agent id) that a host attaches *outside* the
+model-filled arguments. The data exists; it just wasn't threaded.
+
+**The decision.** Thread `req.Params.Meta` onto the handler context in both
+registration wrappers (`AddTool`, `AddToolWithSchemas`) and expose a public
+read-only accessor pair — `RequestMeta(ctx) map[string]any` and
+`WithRequestMeta(ctx, map[string]any)` — mirroring the existing
+`RawArguments` / `WithRawArguments` seam. Properties that make it correct:
+
+- **Opaque, never inspected.** Dockyard is a pure consumer here: it surfaces the
+  host's map verbatim and never populates, derives, or inspects any key. The key
+  set (`user`, `session`, `agent_id`, …) is the host's contract with the app, not
+  Dockyard's — the runtime bakes in zero `_meta` key knowledge.
+- **Stdlib type, not the SDK type (P3).** The accessor exposes `map[string]any`,
+  not the SDK's `mcpsdk.Meta`, consistent with the other public `_meta` surfaces
+  (`ToolDef.Meta`, `ToolOutput.Meta`). A handler-facing API exposes no raw
+  protocol type (P3, §13). `mcpsdk.Meta` is `map[string]any` underneath, so the
+  threading is a zero-cost assignment; the stash is copied to a literal
+  `map[string]any` so `RequestMeta`'s type assertion matches exactly.
+- **Defensive copy.** `WithRequestMeta` shallow-copies its input. The inbound
+  `_meta` is the SDK's live request map, shared with the protocol machinery and
+  carrying protocol-reserved keys (e.g. `progressToken`); a per-call shallow copy
+  means a handler mutating a *top-level* key cannot reach in-flight protocol
+  state. The copy is shallow — a nested map/slice value stays shared — so the
+  seam is documented read-only rather than relied on as a deep clone. This is
+  still strictly stronger than `RawArguments`, which copies nothing.
+- **Read-only consumer — no outbound surface.** We emit nothing, so no
+  `protocolcodec` outbound-encoding rule (D-046/D-048) is touched. Reading
+  `params._meta` is spec-compliant.
+
+**Scope.** Tool handlers only. Resource/prompt request `_meta` is a possible
+follow-up if a need appears; it is deliberately not in this change. No typed
+wrapper over `_meta` keys is offered — that would bake host key shapes into the
+runtime and break P3; apps read raw keys.
