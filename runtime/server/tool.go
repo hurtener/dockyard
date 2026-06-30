@@ -89,6 +89,47 @@ func WithRawArguments(ctx context.Context, raw json.RawMessage) context.Context 
 	return context.WithValue(ctx, rawArgsKey{}, raw)
 }
 
+// requestMetaKey is the unexported context key under which the tool wrappers
+// stash the inbound request `_meta` (params._meta) for the duration of a
+// handler invocation.
+type requestMetaKey struct{}
+
+// RequestMeta returns the inbound request `_meta` (params._meta) of the
+// in-flight tool call, or nil if none was sent (or ctx is not a tool-handler
+// context).
+//
+// It is the read-only seam an app author uses to read host-injected, per-call
+// context — a user identity, a session handle, an agent id — that a host
+// attaches *outside* the model-filled `arguments`. Dockyard is a pure consumer
+// here: it surfaces the host's map verbatim and never populates, derives, or
+// inspects any key. The key set is the host's contract with the app, opaque to
+// the runtime (P3 — handler-facing APIs expose no raw protocol type; the
+// returned type is the stdlib map[string]any, not the SDK's `_meta` type).
+//
+// The map MAY carry protocol-reserved keys (e.g. progressToken). The returned
+// value is a per-call copy, so mutating it cannot reach the in-flight protocol
+// state — but treat it as read-only and do not retain it past the call.
+func RequestMeta(ctx context.Context) map[string]any {
+	v, _ := ctx.Value(requestMetaKey{}).(map[string]any)
+	return v
+}
+
+// WithRequestMeta returns a copy of ctx carrying the inbound request `_meta`
+// retrievable via RequestMeta. The tool wrappers call it on every handler
+// invocation; it is also exported so an in-process invoker — the inspector, a
+// contract test — can drive a handler with a chosen `_meta`. Passing a nil or
+// empty map leaves ctx unchanged.
+//
+// The map is shallow-copied so the value RequestMeta later returns is insulated
+// from a mutation of the caller's source map (the inbound `_meta` is the SDK's
+// live request map, shared with the protocol machinery).
+func WithRequestMeta(ctx context.Context, m map[string]any) context.Context {
+	if len(m) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, requestMetaKey{}, cloneMetaMap(m))
+}
+
 // AddTool registers a typed tool on the server. It must be called before Run.
 // In and Out must each be a struct (or map) so the inferred input schema has
 // JSON type "object", as the MCP spec requires.
@@ -120,6 +161,12 @@ func AddTool[In, Out any](s *Server, def ToolDef, fn ToolFunc[In, Out]) error {
 	// never a process crash — the "no panic across the MCP boundary" rule made
 	// a toolchain guarantee (AGENTS.md §5, §13; D-053).
 	handler := func(ctx context.Context, req *mcpsdk.CallToolRequest, in In) (*mcpsdk.CallToolResult, Out, error) {
+		// Surface the inbound request `_meta` (params._meta) so the handler can
+		// read host-injected, per-call context via RequestMeta — opaque to the
+		// runtime, never inspected (P3).
+		if req != nil && req.Params != nil {
+			ctx = WithRequestMeta(ctx, req.Params.Meta)
+		}
 		// Thread the in-flight MCP ServerSession onto the handler context so the
 		// MCP logging → obs/v1 bridge (Phase 16, RFC §11.3) can reach it without
 		// the typed handler signature exposing a raw SDK session (P3).
@@ -213,6 +260,10 @@ func AddToolWithSchemas[In, Out any](
 		// edge (RawArguments; Phase 08).
 		if req != nil && req.Params != nil {
 			ctx = WithRawArguments(ctx, req.Params.Arguments)
+			// Surface the inbound request `_meta` (params._meta) so the handler
+			// can read host-injected, per-call context via RequestMeta — opaque
+			// to the runtime, never inspected (P3).
+			ctx = WithRequestMeta(ctx, req.Params.Meta)
 		}
 		// Thread the in-flight MCP ServerSession onto the handler context so the
 		// MCP logging → obs/v1 bridge (Phase 16, RFC §11.3) can reach it without
@@ -290,6 +341,23 @@ func cloneMeta(m map[string]any) mcpsdk.Meta {
 		return nil
 	}
 	out := make(mcpsdk.Meta, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// cloneMetaMap returns a shallow copy of m typed as the stdlib map[string]any,
+// or nil if m is nil/empty. WithRequestMeta uses it so the value stashed on the
+// context has dynamic type map[string]any exactly — the type RequestMeta
+// asserts on — and so a later mutation of the caller's source map cannot reach
+// the stashed copy. It is the stdlib-typed sibling of [cloneMeta] (which yields
+// the SDK's mcpsdk.Meta for the outbound registration path).
+func cloneMetaMap(m map[string]any) map[string]any {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(m))
 	for k, v := range m {
 		out[k] = v
 	}

@@ -751,6 +751,18 @@ the pinned inference engine cannot emit `$ref`/`$defs` for cycles, so
 `SchemaForType` rejects a recursive contract with `ErrRecursiveContract` rather
 than fail vaguely. RFC §6.1. D-052.
 
+**Request `_meta`** — the inbound `params._meta` of a `tools/call`, surfaced to a
+typed tool handler read-only via `runtime/server.RequestMeta(ctx) map[string]any`
+(threaded by both registration wrappers; the in-process `WithRequestMeta` is its
+setter). It carries host-injected, per-call context — a user identity, a session
+handle, an agent id — that a host attaches *outside* the model-filled
+`arguments`. Dockyard surfaces the map verbatim and never populates, derives, or
+inspects any key: the key set is the host's contract with the app, opaque to the
+runtime. Exposed as the stdlib `map[string]any`, not the SDK's `mcpsdk.Meta`, so a
+handler-facing API leaks no raw protocol type (P3); shallow-copied per call so a
+handler cannot reach in-flight protocol state (it may carry reserved keys such as
+`progressToken`). The read-only sibling of **`RawArguments`**. RFC §5, §6.3. D-189.
+
 **Ring-buffer emitter** — the in-memory, bounded obs/v1 emitter driver
 (`obs.RingBuffer`, registered as `"ringbuffer"`) Phase 15 ships — the source the
 inspector pulls recent event history from. It is non-blocking by construction: a

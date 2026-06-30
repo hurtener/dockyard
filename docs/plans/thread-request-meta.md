@@ -49,11 +49,13 @@ Mirror the existing `WithRawArguments` / `RawArguments` seam (`tool.go`) exactly
      copy is warranted. Reuses the existing `cloneMeta` shape.
 
 2. **Thread it in both wrappers** (`AddTool` and `AddToolWithSchemas`):
+
    ```go
    if req != nil && req.Params != nil {
        ctx = WithRequestMeta(ctx, req.Params.Meta) // beside WithRawArguments
    }
    ```
+
    `AddTool` currently threads no request params at all (only the session); it
    gains the guarded block. `AddToolWithSchemas` already has the guarded block
    around `WithRawArguments` — the meta line joins it.
