@@ -84,6 +84,14 @@ type HTTPOptions struct {
 The exact names are provisional until Phase 31 confirms the SDK multiplexing
 surface; the API must express explicit version selection, not a host matrix.
 
+## Design gate
+
+- Start from Phase 31's approved SDK compatibility note; document the selected
+  one-endpoint dispatcher, GET/DELETE behavior, and server-to-client-request
+  restrictions before changing `HTTPOptions`.
+- The design owner approves the proposed public API and `obs/v1` session-null
+  behavior before implementation.
+
 ## Test plan
 
 - **Unit:** version dispatch, routing-header validation, request context, log-level
@@ -125,6 +133,8 @@ surface; the API must express explicit version selection, not a host matrix.
 - [ ] `make drift-audit` passes
 - [ ] `make check-mirror` passes
 - [ ] `make preflight` passes
+- [ ] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
+- [ ] `make docs` passes
 - [ ] `go test -race ./...` and `golangci-lint run` clean
 - [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
 - [ ] Coverage on touched packages ≥ stated target

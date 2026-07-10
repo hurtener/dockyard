@@ -78,6 +78,25 @@ RFC §19, not numbered here.
 and then stateless OAuth resource-server support. The final specification and stable
 SDK pin gate the wave's completion (RFC §19.1).
 
+### Wave 11 execution protocol
+
+The wave's done-state before 2026-07-28 is **RC-conformant with a finalization
+checklist ready**, not a claim of final-spec conformance. Phase 31 owns the final
+SDK/spec re-pin and normative-diff follow-up; a delta returns to the owning phase.
+
+Before implementation in every phase, its worker writes a short design note from
+the pinned specification and current SDK artifact. The design owner approves that
+note before code changes begin. Each phase then follows: approved design →
+implementation → adversarial review → live local verification. A green CI run is
+necessary but not sufficient to merge.
+
+Phase PRs are held for phase-boundary approval by default. Phase 31 precedes 32;
+after 32, phases 33 and 34 may run in isolated worktrees only when the design owner
+accepts the shared `runtime/server` / `internal/protocolcodec` merge plan. Phases
+35 and 36 wait for their declared dependencies. Every phase touching `docs/site/`
+or `skills/` runs both `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` and
+`make docs` in addition to the normal gate.
+
 ## Wave structure
 
 | Wave | Phases | Theme |
@@ -498,9 +517,12 @@ the V1 cut is tagged.
 #### 31 — MCP 2026-07-28 SDK foundation (RFC §16, §19.1)
 
 **Goal.** Pin the Go SDK prerelease, vendor the RC core/authorization specs, prove
-the SDK's lifecycle separation, and record final-release re-pin/diff work.
-**Acceptance.** Exact RC pins and vendored snapshots are tested; no implementation
-claim is made before the final release diff. **Briefs.** 07, 03, 06. **Deps.** 02, 07, 27.
+the SDK's lifecycle separation, vendor the revised Tasks schema, audit the Apps
+extension revision, and record final-release re-pin/diff work.
+**Acceptance.** Exact RC pins and vendored core, authorization, and Tasks
+snapshots are tested; the Apps revision is explicitly re-pinned or recorded
+unchanged; no implementation claim is made before the final release diff.
+**Briefs.** 07, 03, 06. **Deps.** 02, 07, 27.
 
 #### 32 — Dual-lifecycle HTTP and observability (RFC §5.2, §11.2, §19.1)
 
