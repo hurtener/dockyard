@@ -949,6 +949,44 @@ plans, not here.
 - **Additional persistence drivers** — a Postgres `Store` driver for distributed /
   at-scale HTTP deployments (§13).
 
+### 19.1 V2 target — MCP 2026-07-28 migration
+
+V2 adopts the MCP `2026-07-28` protocol revision as a deliberate compatibility
+wave, rather than treating an SDK bump as sufficient. Dockyard supports the
+stateless `server/discover` lifecycle and retains `2025-11-25` compatibility on
+the same HTTP endpoint while the older revision remains supported upstream. The
+HTTP dispatcher selects a lifecycle from the declared protocol version; it never
+silently downgrades a request or inspects a JSON-RPC body to choose a protocol.
+
+The wave includes the protocol's stateless HTTP core, routing headers,
+request-scoped metadata, Apps and Tasks extension migration, multi-round-trip
+requests, server response semantics, inspector/CLI compatibility, and the
+contract/schema changes needed for the revision. `obs/v1` stays a stable public
+contract: a stateless request does not receive a fabricated session ID.
+
+The release candidate is pinned by exact SDK version and vendored specification
+SHA. When the final specification and stable SDK release, Dockyard re-pins,
+diffs every normative change, and closes resulting implementation gaps before
+claiming `2026-07-28` conformance. The version transition is protocol-version
+compatibility, not a per-host compatibility matrix.
+
+### 19.2 V2 target — stateless OAuth resource-server support
+
+After the stateless transport wave, Dockyard may act as an OAuth 2.1 protected
+resource over HTTP. It publishes RFC 9728 Protected Resource Metadata and
+validates an access token on every request. Dockyard is not an OAuth client or
+authorization server: Harbor owns authorization-server discovery, browser/PKCE
+flow, client registration, credential storage, token refresh, issuer-callback
+validation, and scope accumulation.
+
+The initial Dockyard driver validates signed JWT access tokens using metadata and
+JWKS fetched only from an explicitly configured, trusted authorization-server
+issuer. It validates signature, algorithm, issuer, audience/resource, time
+claims, and required scopes; it never stores, logs, or forwards a bearer or
+refresh token. A verified request principal, not a raw header or MCP session,
+binds Tasks and reaches handler contexts. `offline_access` is not a protected
+resource scope and is never advertised by Dockyard.
+
 ---
 
 ## Appendix A — subsystem ↔ brief cross-reference
@@ -967,6 +1005,8 @@ plans, not here.
 | §15 | Security | 01, 02, 03, 05 |
 | §16 | Forward-compatibility | 01, 02, 03 |
 | §17 | Stack decisions | 06, 03 |
+| §19.1 | MCP 2026-07-28 migration | 07, 03, 01, 02, 05, 06 |
+| §19.2 | OAuth resource-server support | 08, 07, 03, 02 |
 
 ## Appendix B — glossary seed
 

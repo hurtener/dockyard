@@ -104,9 +104,20 @@ dropped); appended on a tag push only. The hand-authored prose stays the
 canonical narrative (D-154); the supplement is the "what landed in detail"
 companion. D-167.
 
-**Capability negotiation** — the MCP `initialize` handshake in which a host
-advertises the extensions and capabilities it supports. Dockyard reads this at run
-time and adapts; it never hardcodes a per-host capability matrix. RFC §7.5. D-011.
+**Capability negotiation** — the MCP exchange through which a host advertises
+extensions and capabilities it supports: `initialize` for legacy `2025-11-25`
+peers and request metadata plus `server/discover` for `2026-07-28`. Dockyard
+reads it at run time and adapts; it never hardcodes a per-host capability matrix.
+RFC §7.5, §19.1. D-011, D-190.
+
+**Cache policy** — typed server guidance attached to a list or resource response:
+how long a client may reuse it and whether it may share it across principals. The
+server derives it from its resource semantics; raw wire fields remain versioned
+codec details. RFC §19.1.
+
+**Cache scope** — the sharing boundary of a cache policy, such as requestor-only
+or safely shared. An authorization-aware response must not be marked shareable
+unless its contents are independent of the verified principal. RFC §19.1.
 
 **`ChartFrame`** — the template-local Svelte wrapper around Apache ECharts in
 `templates/analytics-widgets/web/src/widgets/`. Owns ECharts setup, responsive
@@ -537,6 +548,11 @@ never touches a raw SDK session (P3). RFC §11.3. D-077.
 
 ## M
 
+**Multi Round-Trip Request (MRTR)** — the MCP `2026-07-28` interaction pattern
+where a server returns input requests plus request state and the client retries the
+original operation with responses. It replaces a server-held session or a
+long-lived input channel. RFC §19.1.
+
 **Manifest** — `dockyard.app.yaml`, an app's control plane: it declares tools,
 `ui://` apps, transports, and quality requirements, and drives `validate`,
 `generate`, `dev`, `test`, `build`, and `install`. Loaded and structurally
@@ -881,6 +897,12 @@ stdio. `runtime/server.Server.HTTPHandler` returns an `http.Handler` serving it,
 with explicit HTTP security options and the `getServer` per-request seam. RFC §5.2.
 brief 03 §2.3.
 
+**Stateless MCP lifecycle** — the MCP `2026-07-28` HTTP lifecycle in which every
+request carries its own protocol version, client metadata, and capability context;
+there is no `initialize` handshake or `Mcp-Session-Id`. It does not make an
+application stateless: durable application data remains explicit in tool
+arguments and the Store seam. RFC §19.1. D-190.
+
 **Stale generated output** — a generated artifact (a JSON Schema or
 `contracts.ts`) whose on-disk content no longer matches a fresh regeneration
 from its Go contract source — i.e. the source changed without `dockyard
@@ -1034,6 +1056,11 @@ readable form. RFC §7.3, §10. D-182.
 `docs/specifications/`, pinned by upstream commit SHA + date, so Dockyard's
 build is reproducible and the source of truth is searchable in-repo. A spec bump
 is a deliberate, reviewed update of the vendored file. RFC §16. AGENTS.md §10.
+
+**Verified principal** — the immutable identity derived after an OAuth resource
+server validates an inbound bearer token. It carries trusted issuer, subject,
+audience/resource, expiry, and scope information into a request; it is never a
+raw bearer token or an MCP session identity. RFC §19.2.
 
 **Versioned codec** — the forward-compatibility mechanism of `protocolcodec`:
 codecs are keyed on the negotiated MCP `protocolVersion`, so a spec revision

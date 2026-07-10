@@ -16,6 +16,8 @@ one informing brief is a drift signal.**
 | 04 | mcp-use DX teardown | 2026-05-20 | `mcp-use/mcp-use` + docs |
 | 05 | Observability & competitive landscape | 2026-05-20 | OTel MCP semconv, mcp-mesh, inspectors |
 | 06 | Go-2026 no-CGo stack & toolchain | 2026-05-20 | Go 1.26, codegen + build toolchain |
+| 07 | MCP 2026-07-28 migration | 2026-07-10 | MCP RC, Go SDK prerelease, conformance notes |
+| 08 | OAuth resource-server profile | 2026-07-10 | MCP authorization draft, RFC 8414/8707/9728 |
 
 ## Subsystem → briefs reverse index
 
@@ -34,6 +36,8 @@ When authoring an RFC section or phase plan whose subsystem matches the left col
 | Build, packaging, embedding, no-CGo toolchain | **06**, 04 |
 | Host compatibility checks | **01**, 05 |
 | Quality gates (`validate` / `test`) | **04**, 06, 01 |
+| MCP 2026-07-28 migration | **07**, 03, 01, 02, 05, 06 |
+| OAuth resource-server support | **08**, 07, 03, 02 |
 
 Bold = primary brief. Non-bold = relevant context.
 

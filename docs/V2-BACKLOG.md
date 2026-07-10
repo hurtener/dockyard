@@ -40,7 +40,7 @@ recorded order in the decisions log. Each item carries:
 
 ## Framework surface
 
-### Enterprise auth / OAuth-shaped flows
+### Enterprise auth / OAuth-client flows
 
 - **Origin.** RFC §19 Non-goal N4; the master-plan post-V1 follow-ups
   paragraph; this is also the work D-088 (the `dockyard install` boot
@@ -50,10 +50,14 @@ recorded order in the decisions log. Each item carries:
   (enterprise-managed authorization, OAuth client-credentials) are V2.
   V1 ships the manifest hooks an HTTP-transport server needs to declare
   a requestor-identity source (`Options.TasksAuthContext`), but the
-  authorization-flow plumbing — token negotiation, identity-provider
-  trust, key rotation — is a substantial cross-cutting workstream that
-  needs its own design (per-host profiles, registration shapes, refresh
-  semantics) and is not on the V1 critical path.
+  authorization-flow plumbing — token negotiation, client registration,
+  credential storage, refresh, and enterprise identity-provider policy — is a
+  substantial cross-cutting workstream that is not on the V1 critical path.
+- **Boundary with Phase 36.** Phase 36 implements Dockyard as a stateless OAuth
+  *resource server*: RFC 9728 metadata plus per-request JWT/JWKS validation. It
+  does not implement OAuth-client behavior. Harbor owns issuer-callback
+  validation, registration binding, refresh tokens, and scope accumulation; the
+  enterprise extensions remain deferred by this backlog item.
 - **Definition of done.** A new RFC section (or RFC bump) covers the
   enterprise-auth model end to end; `runtime/server` exposes a typed
   auth-context shape every transport honours; the conformance suite
