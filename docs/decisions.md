@@ -6544,3 +6544,26 @@ read-only accessor pair — `RequestMeta(ctx) map[string]any` and
 follow-up if a need appears; it is deliberately not in this change. No typed
 wrapper over `_meta` keys is offered — that would bake host key shapes into the
 runtime and break P3; apps read raw keys.
+
+---
+
+## D-190 — V2 adopts MCP 2026-07-28 through a dual-lifecycle migration wave
+
+**Date:** 2026-07-10
+**Status:** Settled (V2 planning).
+**Where it lives:** RFC §19.1, §19.2; master plan phases 31–36.
+
+**Why.** MCP `2026-07-28` replaces the initialize/session lifecycle with a
+stateless request model, restructures Tasks, and hardens authorization. Updating
+the Go SDK alone would leave Dockyard's HTTP transport, Tasks mount, inspector,
+observability assumptions, contract surface, and documentation on incompatible
+semantics.
+
+**The decision.** Dockyard migrates as one V2 wave. One HTTP endpoint supports
+both `2025-11-25` and `2026-07-28` while the former remains supported; protocol
+selection is explicit and never inferred from a JSON-RPC body. The new lifecycle
+is stateless at the protocol layer, but application state remains an explicit
+tool/Store concern. OAuth resource-server support follows the transport wave and
+validates a bearer token per request; Harbor remains the OAuth client. A pinned
+release candidate is re-audited against the final specification before Dockyard
+claims conformance.

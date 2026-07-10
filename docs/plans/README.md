@@ -2,14 +2,15 @@
 
 ## How to read this file
 
-This is the canonical execution index for Dockyard's V1 build. Every individual
-phase plan (`docs/plans/phase-NN-<slug>.md`) lives under it and inherits its
-done-definition, dependency declarations, and coverage discipline.
+This is the canonical execution index for Dockyard's V1 build and approved V2
+waves. Every individual phase plan (`docs/plans/phase-NN-<slug>.md`) lives under
+it and inherits its done-definition, dependency declarations, and coverage
+discipline.
 
 - **Source of truth:** `RFC-001-Dockyard.md` (referenced as RFC §X.X). Every phase
   below traces to one or more RFC sections; if a phase plan and the RFC drift, the
   RFC wins (`AGENTS.md` §2).
-- **Research substrate:** the six briefs in `docs/research/01..06` (index:
+- **Research substrate:** the briefs in `docs/research/` (index:
   `docs/research/INDEX.md`). Every phase cites the briefs informing it.
 - **Numbering:** `phase-NN-<slug>.md`, two-digit zero-padded. Lettered suffixes
   (`09a`, …) insert work into a band without renumbering.
@@ -60,12 +61,22 @@ done-definition, dependency declarations, and coverage discipline.
 | 28 | Examples, godoc, docs hygiene                 | docs / examples        | §2, §6, §11      | 04        | 01–27         | n/a  | Done    |
 | 29 | Agent skills & published tech-docs site       | skills / docs          | §1, §2           | 04        | 21, 25        | n/a  | Pending |
 | 30 | V1 release engineering + cut                  | release                | §1, §14          | —         | 27, 28, 29    | n/a  | Shipped |
+| 31 | MCP 2026-07-28 SDK foundation                 | protocol / server      | §16, §19.1       | 07,03,06  | 02, 07, 27    | 85%  | Planned |
+| 32 | Dual-lifecycle HTTP + observability           | runtime/server, obs    | §5.2, §19.1      | 07,03,05  | 31, 15, 16    | 85%  | Planned |
+| 33 | Apps, Tasks + multi-round-trip requests       | runtime/apps, tasks    | §7, §8, §19.1    | 07,01,02,03| 32, 09, 11, 14 | 85% | Planned |
+| 34 | Contracts + server response semantics          | codegen, server        | §5, §6, §19.1    | 07,06,03  | 31, 32, 04, 05, 08 | 85% | Planned |
+| 35 | Inspector, CLI + quality-gate compatibility    | inspector / CLI        | §9, §12, §19.1   | 07,04,05,03 | 31–34, 19–23 | 80% | Planned |
+| 36 | Stateless OAuth resource server                | runtime/authz          | §15, §19.2       | 08,07,03,02 | 31–33, 35 | 85% | Planned |
 
 **V1 critical path:** phases 01–30 plus 10a and 21.5 (32 phases beyond the skeleton),
 grouped into ten waves. Lettered/dotted phases (`10a`, `21.5`) insert work into a band
 without renumbering. Post-V1 follow-ups (the ChatGPT Apps SDK, the multi-server console, the
 remaining six templates including the deferred `inspector` template, enterprise auth, `dockyard publish`) are tracked in
 RFC §19, not numbered here.
+
+**Approved V2 Wave 11:** phases 31–36 adopt the MCP `2026-07-28` release candidate
+and then stateless OAuth resource-server support. The final specification and stable
+SDK pin gate the wave's completion (RFC §19.1).
 
 ## Wave structure
 
@@ -82,6 +93,7 @@ RFC §19, not numbered here.
 | 8 | 22, 23 | The local inspector |
 | 9 | 24, 25 | Templates (Phase 26 deferred — D-136) |
 | 10 | 27, 28, 29, 30 | Hardening, conformance, docs & skills, and the V1 cut |
+| 11 | 31, 32, 33, 34, 35, 36 | MCP 2026-07-28 migration and stateless OAuth resource-server support |
 
 Each wave's final phase bundles a `test/integration/waveN_test.go` exercising the
 wave's surface end-to-end with real drivers; a checkpoint audit (`AGENTS.md` §17)
@@ -480,3 +492,52 @@ the V1 tag.
 **Acceptance.** A reproducible release build for every target triple; checksums;
 the V1 cut is tagged.
 **Deps.** 27, 28, 29.
+
+### Wave 11 — MCP 2026-07-28 migration
+
+#### 31 — MCP 2026-07-28 SDK foundation (RFC §16, §19.1)
+
+**Goal.** Pin the Go SDK prerelease, vendor the RC core/authorization specs, prove
+the SDK's lifecycle separation, and record final-release re-pin/diff work.
+**Acceptance.** Exact RC pins and vendored snapshots are tested; no implementation
+claim is made before the final release diff. **Briefs.** 07, 03, 06. **Deps.** 02, 07, 27.
+
+#### 32 — Dual-lifecycle HTTP and observability (RFC §5.2, §11.2, §19.1)
+
+**Goal.** Serve legacy and stateless MCP from one HTTP endpoint with explicit
+version dispatch, request-scoped metadata, and session-free observability.
+**Acceptance.** Real SDK clients complete both lifecycles; HTTP security remains
+explicit and stateless events gain no fabricated session ID. **Briefs.** 07, 03, 05.
+**Deps.** 31, 15, 16.
+
+#### 33 — Apps, Tasks, and multi-round-trip requests (RFC §7, §8, §19.1)
+
+**Goal.** Move extension capability output, Tasks, and interactive input onto the
+stateless protocol while retaining versioned legacy codecs.
+**Acceptance.** Modern Apps/Tasks/MRTR and legacy Tasks both pass real-transport
+integration tests; cross-request task binding holds. **Briefs.** 07, 01, 02, 03.
+**Deps.** 32, 09, 11, 14.
+
+#### 34 — Contracts and server response semantics (RFC §5, §6, §19.1)
+
+**Goal.** Conform codegen and server responses to JSON Schema 2020-12, expanded
+structured output, cache metadata, and standard error semantics.
+**Acceptance.** Schema/codegen goldens and real modern tool/resource calls pass;
+the recursive-contract decision is deliberately superseded or retained with an
+explicit compliance consequence. **Briefs.** 07, 06, 03. **Deps.** 31, 32, 04, 05, 08.
+
+#### 35 — Inspector, CLI, and quality-gate compatibility (RFC §9, §12, §19.1)
+
+**Goal.** Update the test-only inspector, boot checks, scaffolds, examples, docs,
+skills, and offline conformance gate for both protocol versions.
+**Acceptance.** Generated projects, install, dev loop, inspector, and test gate
+exercise modern discovery and legacy fallback. **Briefs.** 07, 04, 05, 03.
+**Deps.** 31–34, 19–23.
+
+#### 36 — Stateless OAuth resource server (RFC §15, §19.2)
+
+**Goal.** Advertise RFC 9728 protected-resource metadata and validate JWT/JWKS
+bearer tokens per request, propagating a verified principal into handlers/Tasks.
+**Acceptance.** A real TLS fixture proves discovery, token validation, scope
+challenges, and cross-request task identity without Dockyard retaining tokens.
+**Briefs.** 08, 07, 03, 02. **Deps.** 31–33, 35.
