@@ -84,6 +84,13 @@ type CachePolicy struct {
 Any cache policy is a typed Dockyard surface; raw response wire objects remain
 inside the versioned codec.
 
+## Design gate
+
+- Compare the pinned JSON Schema 2020-12 requirements against the current schema
+  engine and D-052 before choosing a generator extension or replacement.
+- The design owner approves any recursive-contract decision, output-shape change,
+  and cache-policy API before implementation.
+
 ## Test plan
 
 - **Unit:** schema dialect/output mapping, cache validation, error mapping.
@@ -125,6 +132,8 @@ inside the versioned codec.
 - [ ] `make drift-audit` passes
 - [ ] `make check-mirror` passes
 - [ ] `make preflight` passes
+- [ ] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
+- [ ] `make docs` passes
 - [ ] `go test -race ./...` and `golangci-lint run` clean
 - [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
 - [ ] Coverage on touched packages ≥ stated target

@@ -78,6 +78,13 @@ None.
 - `dockyard test` adds a documented protocol-conformance report category only if
   its result model can express both revisions without breaking existing callers.
 
+## Design gate
+
+- Map every inspector, boot-check, and generated-project client call onto either
+  modern discovery or an explicit legacy fallback before implementation.
+- The design owner approves the browser/live-verification script and confirms the
+  inspector remains test-only, localhost-bound, and credential-free.
+
 ## Test plan
 
 - **Unit:** inspector/boot-check protocol-mode selection, CLI report rendering,
@@ -121,6 +128,8 @@ None.
 - [ ] `make drift-audit` passes
 - [ ] `make check-mirror` passes
 - [ ] `make preflight` passes
+- [ ] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
+- [ ] `make docs` passes
 - [ ] `go test -race ./...` and `golangci-lint run` clean
 - [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
 - [ ] Coverage on touched packages ≥ stated target

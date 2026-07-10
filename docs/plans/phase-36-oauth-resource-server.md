@@ -101,6 +101,15 @@ type Validator interface {
 the repository's interface + factory + init-registration rule; handler-facing APIs
 never expose JWT/JWKS wire types or a raw bearer string.
 
+## Design gate
+
+- Design from the pinned RFC 8414/8707/9728 requirements and the Phase 31
+  stateless HTTP contract; document canonical-resource configuration, trusted
+  issuer/JWKS retrieval, cache bounds, challenge construction, and derived Tasks
+  identity.
+- The design owner approves the public authorization API and local-TLS fixture
+  before implementation. Harbor-owned OAuth-client behavior remains out of scope.
+
 ## Test plan
 
 - **Unit:** metadata URL construction, RFC 8414 issuer validation, JWKS cache/key
@@ -147,6 +156,8 @@ never expose JWT/JWKS wire types or a raw bearer string.
 - [ ] `make drift-audit` passes
 - [ ] `make check-mirror` passes
 - [ ] `make preflight` passes
+- [ ] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
+- [ ] `make docs` passes
 - [ ] `go test -race ./...` and `golangci-lint run` clean
 - [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
 - [ ] Coverage on touched packages ≥ stated target

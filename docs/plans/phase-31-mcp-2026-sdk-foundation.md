@@ -3,8 +3,9 @@
 ## Summary
 
 Establish Dockyard's pinned, vendored, and tested foundation for the MCP
-`2026-07-28` release candidate. This phase proves the SDK surface and records the
-dual-lifecycle contract; it does not expose the stateless HTTP runtime yet.
+`2026-07-28` release candidate. This phase proves the SDK surface, vendors the
+revised Tasks schema, records the Apps-spec audit, and establishes the dual-
+lifecycle contract; it does not expose the stateless HTTP runtime yet.
 
 ## RFC anchor
 
@@ -49,6 +50,9 @@ None.
       prerelease and the CGo-free build still passes.
 - [ ] The core draft specification and authorization draft are vendored with
       upstream SHA/date, indexed, and covered by a presence test.
+- [ ] The authoritative revised Tasks extension schema is vendored with upstream
+      SHA/date and a golden-test entrypoint; the Apps extension is re-pinned to a
+      revised snapshot or its unchanged revision is recorded with evidence.
 - [ ] A compatibility test proves the SDK's legacy and stateless handler modes
       are distinguishable without inspecting a JSON-RPC body.
 - [ ] A documented finalization checklist re-pins the stable SDK, vendors the
@@ -61,6 +65,8 @@ None.
 - `go.mod`, `go.sum`
 - `docs/specifications/mcp-core-2026-07-28.mdx`
 - `docs/specifications/mcp-authorization-2026-07-28.mdx`
+- `docs/specifications/mcp-tasks-2026-07-28.*`
+- `docs/specifications/mcp-apps-2026-07-28-audit.md`
 - `docs/specifications/README.md`
 - `docs/research/07-mcp-2026-07-28-migration.md`
 - `internal/protocolcodec/version.go`, version tests and goldens
@@ -73,17 +79,26 @@ None.
 - No new app-facing API. The phase records supported protocol versions internally
   for Phase 32's public HTTP options.
 
+## Design gate
+
+- Inspect the exact pinned SDK artifact and vendored core, Apps, and Tasks sources;
+  write a compatibility note covering one-endpoint lifecycle multiplexing,
+  stateless-method restrictions, and extension discovery.
+- Obtain design-owner approval before changing the module pin or recording a
+  public HTTP surface for Phase 32.
+
 ## Test plan
 
 - **Unit:** SDK version/capability probes; vendored-spec presence and pin tests.
 - **Integration:** real SDK legacy and stateless transports exercise the same
   minimal Dockyard server without body-based version selection.
-- **Concurrency / golden:** protocol-version codec golden; no concurrent artifact
-  changes.
+- **Concurrency / golden:** protocol-version codec golden plus Tasks schema
+  presence/pin test; no concurrent artifact changes.
 
 ## Smoke script additions
 
 - Assert the plan, smoke script, both vendored core specs, and RC SDK pin exist.
+- Assert the revised Tasks snapshot and Apps audit record exist.
 - Skip implementation-only checks until Phase 32 lands.
 
 ## Coverage target
@@ -99,8 +114,8 @@ None.
 
 ## Risks / open questions
 
-- The SDK prerelease API can change before final; the exact finalization checklist
-  is mandatory, not optional release hygiene.
+- The SDK prerelease API can change before final; Phase 31 ends RC-conformant with
+  a finalization checklist, not a final-conformance claim.
 - Whether the SDK can multiplex both lifecycles under one handler is proven in
   this phase before Phase 32 commits a public API.
 
