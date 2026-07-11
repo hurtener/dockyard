@@ -145,6 +145,9 @@ func AddPrompt(s *Server, def PromptDef, fn PromptHandler) error {
 	}
 
 	handler := func(ctx context.Context, req *mcpsdk.GetPromptRequest) (*mcpsdk.GetPromptResult, error) {
+		if req != nil && req.Params != nil {
+			ctx = WithRequestMeta(ctx, req.Params.Meta)
+		}
 		// Stamp the in-flight MCP session id so obs/v1 events emitted
 		// from the prompt handler carry SessionID. There is no
 		// prompt-side logging bridge yet, so the ServerSession itself is

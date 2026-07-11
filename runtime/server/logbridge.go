@@ -82,6 +82,9 @@ func withRequestSession(ctx context.Context, req *mcpsdk.CallToolRequest) contex
 		return ctx
 	}
 	ctx = context.WithValue(ctx, sessionKey{}, req.Session)
+	if isStatelessRequest(ctx) {
+		return ctx
+	}
 	return obs.WithSession(ctx, req.Session.ID())
 }
 
@@ -95,6 +98,9 @@ func withPromptRequestSession(ctx context.Context, req *mcpsdk.GetPromptRequest)
 	if req == nil || req.Session == nil {
 		return ctx
 	}
+	if isStatelessRequest(ctx) {
+		return ctx
+	}
 	return obs.WithSession(ctx, req.Session.ID())
 }
 
@@ -106,6 +112,9 @@ func withPromptRequestSession(ctx context.Context, req *mcpsdk.GetPromptRequest)
 // session id needed by the obs emit sites.
 func withResourceRequestSession(ctx context.Context, req *mcpsdk.ReadResourceRequest) context.Context {
 	if req == nil || req.Session == nil {
+		return ctx
+	}
+	if isStatelessRequest(ctx) {
 		return ctx
 	}
 	return obs.WithSession(ctx, req.Session.ID())
