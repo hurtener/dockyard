@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"mime"
@@ -15,6 +16,23 @@ import (
 // transport). contentTypeMiddleware rejects a POST whose body declares any
 // other media type.
 const jsonMediaType = "application/json"
+
+const (
+	protocolVersionHeader    = "Mcp-Protocol-Version"
+	statelessProtocolVersion = "2026-07-28"
+)
+
+// ProtocolMode selects the MCP HTTP lifecycle accepted by HTTPHandler.
+type ProtocolMode uint8
+
+const (
+	// Legacy serves the session-based 2025-11-25 lifecycle.
+	Legacy ProtocolMode = iota
+	// Stateless20260728 serves only the stateless 2026-07-28 lifecycle.
+	Stateless20260728
+	// Dual selects a lifecycle per request from Mcp-Protocol-Version.
+	Dual
+)
 
 // HTTPSecurity is the explicit security posture for the streamable-HTTP
 // transport (RFC §5.2, AGENTS.md §7). Every field is set deliberately by
@@ -84,8 +102,13 @@ type HTTPOptions struct {
 	// select the Server that handles it, enabling per-session or multi-tenant
 	// wiring. When nil, every request is served by the receiver Server.
 	ServerForRequest func(*http.Request) *Server
+	// ProtocolMode selects the accepted MCP HTTP lifecycle. The zero value,
+	// Legacy, preserves the pre-2026 behavior. Dual dispatches by the declared
+	// Mcp-Protocol-Version header before the JSON-RPC body is decoded.
+	ProtocolMode ProtocolMode
 	// Stateless serves each request with a fresh, default-initialized session
-	// and no Mcp-Session-Id validation. Off by default.
+	// and no Mcp-Session-Id validation. Deprecated: use ProtocolMode:
+	// Stateless20260728 or Dual. It remains for source compatibility.
 	Stateless bool
 }
 
@@ -130,17 +153,66 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 		}
 	}
 
-	stateless := opts != nil && opts.Stateless
-
 	// DNS-rebinding (localhost) protection is on-by-default in the SDK and
 	// disabled via DisableLocalhostProtection. Dockyard maps its positive-sense
 	// flag onto that negative knob explicitly, so a future SDK default flip
 	// cannot silently change behaviour (D-040).
-	handler := mcpsdk.NewStreamableHTTPHandler(getServer, &mcpsdk.StreamableHTTPOptions{
-		Stateless:                  stateless,
-		Logger:                     s.log,
-		DisableLocalhostProtection: !sec.DNSRebindingProtection,
-	})
+	mode, err := opts.protocolMode()
+	if err != nil {
+		return nil, err
+	}
+	// Stateless predates ProtocolMode and accepted legacy frames without a
+	// protocol header. Preserve that deprecated behavior; only the explicit
+	// modern mode requires its version header before decoding.
+	legacyStateless := opts != nil && opts.Stateless && opts.ProtocolMode == Legacy
+	newSDKHandler := func(stateless bool) http.Handler {
+		h := http.Handler(mcpsdk.NewStreamableHTTPHandler(getServer, &mcpsdk.StreamableHTTPOptions{
+			Stateless:                  stateless,
+			Logger:                     s.log,
+			DisableLocalhostProtection: !sec.DNSRebindingProtection,
+		}))
+		if stateless {
+			// The SDK creates a temporary ServerSession for a modern request so
+			// its normal handler APIs still work. Mark the request before it
+			// reaches the SDK so handler edges do not publish that temporary ID.
+			return statelessRequestMiddleware(h)
+		}
+		if s.tasksMount != nil {
+			// Tasks stays on the legacy lifecycle until Phase 33 migrates its
+			// wire layer, so it cannot interpret a modern stateless frame.
+			return s.tasksMount.HTTPMiddleware(h)
+		}
+		return h
+	}
+
+	var handler http.Handler
+	switch mode {
+	case Legacy:
+		handler = newSDKHandler(false)
+	case Stateless20260728:
+		handler = newSDKHandler(true)
+		if !legacyStateless {
+			handler = protocolVersionMiddleware(handler)
+		}
+	case Dual:
+		legacy := newSDKHandler(false)
+		modern := newSDKHandler(true)
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			version := r.Header.Get(protocolVersionHeader)
+			switch version {
+			case "":
+				legacy.ServeHTTP(w, r)
+			case statelessProtocolVersion:
+				modern.ServeHTTP(w, r)
+			default:
+				if version > statelessProtocolVersion {
+					http.Error(w, "unsupported MCP protocol version "+version+"; supported versions: 2025-11-25, 2026-07-28", http.StatusBadRequest)
+					return
+				}
+				legacy.ServeHTTP(w, r)
+			}
+		})
+	}
 
 	// The middleware chain is layered inner-to-outer so the OUTERMOST check
 	// runs first: cross-origin (CSRF) protection is the outer layer, then
@@ -148,18 +220,7 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 	// the SDK handler. A cross-site request is therefore rejected as
 	// cross-origin regardless of method or body shape — the CSRF verdict does
 	// not depend on a body-shape check or routing downstream of it.
-	var h http.Handler = handler
-	if s.tasksMount != nil {
-		// When a Tasks engine is attached (D-108/109/110), wrap the SDK handler
-		// with the Tasks transport mount so tasks/* JSON-RPC frames are
-		// intercepted ahead of the SDK server and the capabilities.tasks block
-		// is injected into the initialize handshake (RFC §8.2). The mount sits
-		// INSIDE the security middleware applied below — DNS-rebinding,
-		// Content-Type, and cross-origin protection all wrap the mount, so a
-		// tasks/* frame is still subject to the explicit HTTPSecurity posture
-		// and the mount cannot weaken it (CLAUDE.md §7).
-		h = s.tasksMount.HTTPMiddleware(h)
-	}
+	h := handler
 	if sec.ContentTypeVerification {
 		// Content-Type verification as Dockyard middleware — set explicitly,
 		// never inherited from an SDK default (AGENTS.md §7, D-112). A
@@ -202,6 +263,50 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 	h = traceparentMiddleware(h)
 
 	return h, nil
+}
+
+func (o *HTTPOptions) protocolMode() (ProtocolMode, error) {
+	if o == nil {
+		return Legacy, nil
+	}
+	if o.ProtocolMode > Dual {
+		return 0, fmt.Errorf("dockyard/runtime/server: unsupported protocol mode %d", o.ProtocolMode)
+	}
+	if o.Stateless {
+		if o.ProtocolMode == Legacy {
+			return Stateless20260728, nil
+		}
+		if o.ProtocolMode != Stateless20260728 {
+			return 0, errors.New("dockyard/runtime/server: Stateless cannot be combined with ProtocolMode Dual")
+		}
+	}
+	return o.ProtocolMode, nil
+}
+
+// protocolVersionMiddleware rejects missing or unsupported versions before the
+// stateless SDK handler decodes JSON-RPC.
+func protocolVersionMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.Header.Get(protocolVersionHeader) != statelessProtocolVersion {
+			http.Error(w, "Mcp-Protocol-Version must be 2026-07-28 for the stateless lifecycle", http.StatusBadRequest)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type statelessRequestKey struct{}
+
+func statelessRequestMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), statelessRequestKey{}, true)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func isStatelessRequest(ctx context.Context) bool {
+	v, _ := ctx.Value(statelessRequestKey{}).(bool)
+	return v
 }
 
 // contentTypeMiddleware rejects a POST whose request-body Content-Type is not

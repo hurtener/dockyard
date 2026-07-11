@@ -46,17 +46,17 @@ None.
 
 ## Acceptance criteria
 
-- [ ] One root-mounted handler accepts an SDK `2026-07-28` request using
+- [x] One root-mounted handler accepts an SDK `2026-07-28` request using
       `server/discover` without `Mcp-Session-Id`.
-- [ ] The same endpoint completes a real `2025-11-25` initialize flow while that
+- [x] The same endpoint completes a real `2025-11-25` initialize flow while that
       protocol remains supported.
-- [ ] A protocol-version header selects a handler before JSON-RPC decoding; an
+- [x] A protocol-version header selects a handler before JSON-RPC decoding; an
       unsupported/missing modern version fails clearly and never downgrades.
-- [ ] Modern requests validate routing headers against the request body and retain
+- [x] Modern requests validate routing headers against the request body and retain
       the explicit HTTP security posture.
-- [ ] Handler context receives request-scoped client metadata and capabilities;
+- [x] Handler context receives request-scoped client metadata and capabilities;
       stateless `obs/v1` events carry no fabricated session ID.
-- [ ] Legacy logging behavior remains compatible; modern request-scoped log-level
+- [x] Legacy logging behavior remains compatible; modern request-scoped log-level
       metadata is bridged to `obs/v1`.
 
 ## Files added or changed
@@ -86,11 +86,16 @@ surface; the API must express explicit version selection, not a host matrix.
 
 ## Design gate
 
-- Start from Phase 31's approved SDK compatibility note; document the selected
-  one-endpoint dispatcher, GET/DELETE behavior, and server-to-client-request
-  restrictions before changing `HTTPOptions`.
-- The design owner approves the proposed public API and `obs/v1` session-null
-  behavior before implementation.
+- **Selected dispatcher (D-191):** `ProtocolMode.Dual` mounts one root handler
+  and dispatches from `Mcp-Protocol-Version` before JSON-RPC decoding. An absent
+  header stays on the legacy lifecycle; `2026-07-28` selects stateless HTTP;
+  an unknown newer version is rejected and never downgraded.
+- **Transport behavior:** legacy retains GET/DELETE and server-to-client requests.
+  Stateless HTTP permits POST only; the SDK rejects server-to-client requests.
+  Phase 33 owns Apps/Tasks/MRTR migration, so the Tasks mount remains legacy-only.
+- **Observability:** the SDK's ephemeral modern `ServerSession` remains available
+  to the MCP logging bridge, but handler edges do not stamp its temporary ID on
+  `obs/v1`; `session_id` is omitted without changing the event schema.
 
 ## Test plan
 
@@ -130,16 +135,16 @@ surface; the API must express explicit version selection, not a host matrix.
 
 ## Pre-merge checklist
 
-- [ ] `make drift-audit` passes
-- [ ] `make check-mirror` passes
-- [ ] `make preflight` passes
-- [ ] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
-- [ ] `make docs` passes
-- [ ] `go test -race ./...` and `golangci-lint run` clean
-- [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
-- [ ] Coverage on touched packages ≥ stated target
-- [ ] New CLI command / manifest field / public API has a smoke check in this PR
-- [ ] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
-- [ ] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
-- [ ] New vocabulary added to `docs/glossary.md`
-- [ ] New / changed architectural decision filed in `docs/decisions.md`
+- [x] `make drift-audit` passes
+- [x] `make check-mirror` passes
+- [x] `make preflight` passes
+- [x] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
+- [x] `make docs` passes
+- [x] `go test -race ./...` and `golangci-lint run` clean
+- [x] All cross-references (`RFC §X.Y`, `brief NN`) resolve
+- [x] Coverage on touched packages ≥ stated target
+- [x] New CLI command / manifest field / public API has a smoke check in this PR
+- [x] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
+- [x] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
+- [x] No new vocabulary required (`Stateless MCP lifecycle` is in the glossary)
+- [x] New / changed architectural decision filed in `docs/decisions.md`

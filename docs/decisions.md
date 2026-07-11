@@ -6567,3 +6567,26 @@ tool/Store concern. OAuth resource-server support follows the transport wave and
 validates a bearer token per request; Harbor remains the OAuth client. A pinned
 release candidate is re-audited against the final specification before Dockyard
 claims conformance.
+
+---
+
+## D-191 — Dual HTTP dispatch is header-only and modern temporary sessions are not observable identities
+
+**Date:** 2026-07-11
+**Status:** Settled
+**Where it lives:** `runtime/server.HTTPHandler`; RFC §5.2, §11.2, §19.1.
+
+**Why.** The Go SDK implements legacy and stateless HTTP as distinct handlers.
+Choosing a handler from JSON-RPC content would violate the modern transport
+requirements and could silently downgrade an unsupported peer. The SDK creates a
+temporary `ServerSession` to execute a stateless request, but that implementation
+detail is not an MCP session identity.
+
+**The decision.** `HTTPOptions.ProtocolMode` exposes `Legacy`,
+`Stateless20260728`, and `Dual`. `Dual` selects the handler only from
+`Mcp-Protocol-Version`: no header uses legacy, `2026-07-28` uses stateless, and
+an unknown newer version receives a clear rejection. Existing DNS-rebinding,
+Origin, Content-Type, and trace middleware remains outside this dispatcher. The
+temporary session remains available for request-bound standard MCP logging, while
+`obs/v1` omits `session_id` for stateless requests. This preserves the existing
+event schema and prevents fabricated correlation identities.

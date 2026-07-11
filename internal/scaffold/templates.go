@@ -258,7 +258,7 @@ func serve(ctx context.Context, srv *server.Server, logger *slog.Logger) error {
 // on (runtime/server.DefaultHTTPSecurity). The listen address is httpAddr,
 // overridable with DOCKYARD_HTTP_ADDR.
 func serveHTTP(ctx context.Context, srv *server.Server, logger *slog.Logger) error {
-	handler, err := srv.HTTPHandler(nil)
+	handler, err := srv.HTTPHandler(&server.HTTPOptions{ProtocolMode: server.Dual})
 	if err != nil {
 		return err
 	}
@@ -443,7 +443,7 @@ func serve(ctx context.Context, srv *server.Server, logger *slog.Logger) error {
 // on (runtime/server.DefaultHTTPSecurity). The listen address is httpAddr,
 // overridable with DOCKYARD_HTTP_ADDR.
 func serveHTTP(ctx context.Context, srv *server.Server, logger *slog.Logger) error {
-	handler, err := srv.HTTPHandler(nil)
+	handler, err := srv.HTTPHandler(&server.HTTPOptions{ProtocolMode: server.Dual})
 	if err != nil {
 		return err
 	}

@@ -77,6 +77,10 @@ running `dockyard dev` — the values you set win.
 With `--no-inspector` the dev loop sets nothing, preserving the
 scaffolded server's stdio default exactly.
 
+The scaffolded HTTP entrypoint accepts both current stateless MCP requests and
+legacy session-based requests on this one URL. No separate port or host-specific
+configuration is needed while clients migrate.
+
 ## What triggers what
 
 | Change                          | Effect                                              |

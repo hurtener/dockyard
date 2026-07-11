@@ -62,6 +62,11 @@ dockyard run --transport http --addr 0.0.0.0:9000   # custom address
 the produced server on the selected transport. Ctrl-C tears down the
 child cleanly — no orphan process.
 
+An HTTP build exposes one endpoint for both legacy session-based MCP clients and
+current stateless MCP clients. Keep the endpoint behind your normal TLS and
+reverse-proxy boundary; protocol selection comes from the request's declared MCP
+version, not the request body.
+
 The project's `main.go` owns its transport wiring (the scaffold templates
 respect `DOCKYARD_TRANSPORT` + `DOCKYARD_HTTP_ADDR`); `dockyard run`
 sets them and drives the binary. The CLI never reimplements a transport.

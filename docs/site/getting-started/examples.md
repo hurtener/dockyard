@@ -77,6 +77,14 @@ dockyard inspect --url http://127.0.0.1:8080
 See each example's `README.md` for the full lifecycle + the
 swap-to-a-real-backend notes.
 
+## HTTP protocol support
+
+Scaffolded HTTP servers accept both the session-based `2025-11-25` lifecycle and
+the stateless `2026-07-28` lifecycle on the same endpoint. Modern clients send
+`Mcp-Protocol-Version: 2026-07-28` and use `server/discover`; legacy clients
+continue to initialize normally. The stateless lifecycle is POST-only and does
+not issue a session ID.
+
 ## Examples vs templates
 
 | | Templates | Examples |
