@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/hurtener/dockyard/internal/protocolcodec"
@@ -408,6 +409,7 @@ func TestConformance_VersionedCodecSelection(t *testing.T) {
 
 	known := []protocolcodec.ProtocolVersion{
 		protocolcodec.VersionMCP20251125,
+		protocolcodec.VersionMCP20260728,
 		protocolcodec.VersionApps20260126,
 	}
 
@@ -477,5 +479,40 @@ func TestConformance_DefaultVersionIsCurrentStable(t *testing.T) {
 	t.Parallel()
 	if got, want := protocolcodec.DefaultVersion, protocolcodec.VersionMCP20251125; got != want {
 		t.Fatalf("DefaultVersion = %q, want %q — RFC §16 item 6", got, want)
+	}
+}
+
+// TestConformance_20260728VendoredSources pins the exact RC source artifacts
+// that Phase 33 will turn into versioned Tasks goldens. This is deliberately a
+// source-presence test: changing a pin is a reviewed protocol migration, not a
+// silent dependency update.
+func TestConformance_20260728VendoredSources(t *testing.T) {
+	t.Parallel()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	base := filepath.Join(wd, "..", "..", "docs", "specifications")
+	cases := []struct {
+		name string
+		file string
+		want string
+	}{
+		{"core", "mcp-core-2026-07-28.mdx", "2058728385da440bf9424952bb7287a8b9f08194"},
+		{"authorization", "mcp-authorization-2026-07-28.mdx", "2058728385da440bf9424952bb7287a8b9f08194"},
+		{"tasks", "mcp-tasks-2026-07-28.schema.ts", "29f83d5c8b34966d7795fb10046245f47c8d02c0"},
+		{"apps audit", "mcp-apps-2026-07-28-audit.md", "298e884ec3f02daba085acdb02042d73bd00b355"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			//nolint:gosec // tc.file is a fixed source-pin table declared above.
+			raw, err := os.ReadFile(filepath.Join(base, tc.file))
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.file, err)
+			}
+			if !strings.Contains(string(raw), tc.want) {
+				t.Fatalf("%s does not carry required upstream pin %s", tc.file, tc.want)
+			}
+		})
 	}
 }

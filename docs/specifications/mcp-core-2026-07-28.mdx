@@ -1,0 +1,36 @@
+<!--
+VENDORED SPEC EXTRACT — DO NOT EDIT BY HAND.
+MCP core draft, release-candidate protocol version 2026-07-28.
+Upstream: https://github.com/modelcontextprotocol/modelcontextprotocol/tree/2058728385da440bf9424952bb7287a8b9f08194/docs/specification/draft
+Pinned commit: 2058728385da440bf9424952bb7287a8b9f08194
+Commit date: 2026-07-10
+Vendored: 2026-07-11 (Dockyard Phase 31)
+Canonical source entrypoint: docs/specification/draft/index.mdx.
+Consumed core requirements are in basic/versioning.mdx, basic/transports/streamable-http.mdx,
+server/discover.mdx, and schema/draft/schema.ts at the same commit.
+-->
+
+---
+title: MCP core draft 2026-07-28
+---
+
+# MCP core draft 2026-07-28
+
+This pinned draft defines the modern MCP lifecycle Dockyard targets in the V2
+migration wave. It is a release-candidate snapshot, not a final-conformance
+claim.
+
+## Consumed requirements
+
+- Every modern request carries protocol version, client identity, and client
+  capabilities in request `_meta`; HTTP mirrors the version in
+  `MCP-Protocol-Version`.
+- The modern HTTP lifecycle is POST-only and stateless: no protocol session,
+  no `Mcp-Session-Id`, and no standalone GET SSE stream.
+- `server/discover` reports supported versions, capabilities, and server
+  identity before other calls.
+- A dual-era server chooses the lifecycle from declared protocol version. It
+  never silently downgrades or uses a JSON-RPC body heuristic.
+
+The complete upstream snapshot is identified by the header pin. Phase 32 owns
+the runtime implementation; Phase 34 owns routing-header and schema semantics.
