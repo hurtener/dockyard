@@ -127,6 +127,9 @@ func (s *Server) AddResource(def ResourceDef, fn ResourceFunc) error {
 		if req != nil && req.Params != nil && req.Params.URI != "" {
 			uri = req.Params.URI
 		}
+		if req != nil && req.Params != nil {
+			ctx = WithRequestMeta(ctx, req.Params.Meta)
+		}
 		// Stamp the in-flight MCP session id onto ctx so every obs/v1 event
 		// emitted inside the read — the resource.read lifecycle here, and any
 		// app.load minted by a runtime/apps read handler — carries SessionID
