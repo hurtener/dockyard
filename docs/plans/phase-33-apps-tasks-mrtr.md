@@ -85,6 +85,14 @@ func (h *TaskHandle) RequestInput(ctx context.Context, req InputRequest) error
 The exact public task API is designed from the vendored final extension schema;
 handlers never receive raw extension wire envelopes.
 
+## Design gate
+
+- Derive the modern Tasks and MRTR API from the Phase 31-vendored schema and
+  golden fixtures, including the explicit legacy codec boundary.
+- The design owner approves the migration note, handler API, and App-bridge
+  interaction before implementation; no raw-frame workaround is retained by
+  default merely because it served the legacy protocol.
+
 ## Test plan
 
 - **Unit:** per-version codec decode/encode, state transitions, request-state
@@ -128,6 +136,8 @@ handlers never receive raw extension wire envelopes.
 - [ ] `make drift-audit` passes
 - [ ] `make check-mirror` passes
 - [ ] `make preflight` passes
+- [ ] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
+- [ ] `make docs` passes
 - [ ] `go test -race ./...` and `golangci-lint run` clean
 - [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
 - [ ] Coverage on touched packages ≥ stated target

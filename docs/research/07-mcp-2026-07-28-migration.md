@@ -40,7 +40,9 @@ state.
 **Implication:** Dockyard's raw `tasks/*` mount, initialize-response rewrite, and
 `dockyard/tasks/supplyInput` extension require a versioned migration behind
 `internal/protocolcodec`. Existing Tasks must remain available only to legacy
-peers while supported.
+peers while supported. Phase 31 must vendor the authoritative revised Tasks
+extension schema before Phase 33 fixes its public API, and must record whether the
+Apps extension snapshot changed for this core revision.
 
 ### 1.4 Server response semantics broaden
 
