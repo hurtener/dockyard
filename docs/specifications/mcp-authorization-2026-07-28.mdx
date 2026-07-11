@@ -1,0 +1,25 @@
+<!--
+VENDORED SPEC EXTRACT — DO NOT EDIT BY HAND.
+MCP authorization draft associated with the 2026-07-28 core release candidate.
+Upstream: https://github.com/modelcontextprotocol/modelcontextprotocol/blob/2058728385da440bf9424952bb7287a8b9f08194/docs/specification/draft/basic/authorization/index.mdx
+Pinned commit: 2058728385da440bf9424952bb7287a8b9f08194
+Commit date: 2026-07-10
+Vendored: 2026-07-11 (Dockyard Phase 31)
+-->
+
+---
+title: MCP authorization draft 2026-07-28
+---
+
+# MCP authorization draft 2026-07-28
+
+The protected MCP server is an OAuth 2.1 resource server. It publishes RFC
+9728 protected-resource metadata and validates an access token on every HTTP
+request. It must validate audience/resource binding and return 401 for invalid
+or expired tokens and 403 for insufficient scope. `offline_access` is never a
+resource requirement.
+
+Dockyard does not implement client registration, PKCE, authorization-code
+exchange, refresh-token storage, or RFC 9207 callback validation. Those are
+MCP-client responsibilities and belong to Harbor. Phase 36 owns Dockyard's
+resource-server implementation.

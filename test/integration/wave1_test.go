@@ -556,8 +556,11 @@ func stableGoroutineCount() int {
 // transport goroutines unwind asynchronously after Close/cancel; a small slack
 // absorbs test-runtime background goroutines.
 func assertNoGoroutineLeak(t *testing.T, baseline int) {
+	assertNoGoroutineLeakWithSlack(t, baseline, 2)
+}
+
+func assertNoGoroutineLeakWithSlack(t *testing.T, baseline, slack int) {
 	t.Helper()
-	const slack = 2
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		got := runtime.NumGoroutine()

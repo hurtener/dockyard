@@ -192,6 +192,7 @@ func (b *LogBridge) LogTo(ctx context.Context, sess *mcpsdk.ServerSession, rec L
 	if data == nil {
 		data = rec.Message
 	}
+	//nolint:staticcheck // Legacy peers retain MCP logging through the deprecation window.
 	return sess.Log(ctx, &mcpsdk.LoggingMessageParams{
 		Level:  mcpsdk.LoggingLevel(level),
 		Logger: rec.Logger,

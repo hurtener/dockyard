@@ -133,7 +133,9 @@ func (r *metaRecorder) get() map[string]any {
 // TestRequestMetaReachesHandler is the end-to-end proof (acceptance criterion 4):
 // a tools/call carrying `_meta` reaches the typed handler, which reads the
 // host-injected keys via RequestMeta — across BOTH registration wrappers
-// (AddTool and AddToolWithSchemas). A call with no `_meta` yields nil.
+// (AddTool and AddToolWithSchemas). The 2026 SDK supplies its required modern
+// metadata even when the caller omits application metadata, so the second call
+// proves only caller-supplied keys are absent.
 func TestRequestMetaReachesHandler(t *testing.T) {
 	t.Parallel()
 
@@ -190,15 +192,22 @@ func TestRequestMetaReachesHandler(t *testing.T) {
 				t.Fatalf("handler saw _meta %v, want the host-injected agent_id/user", seen)
 			}
 
-			// Without `_meta`: the handler sees nil.
+			// Without caller-supplied `_meta`: the SDK still attaches required
+			// modern lifecycle metadata, but must not retain keys from the prior
+			// request.
 			if _, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
 				Name:      tc.tool,
 				Arguments: echoIn{Message: "hi"},
 			}); err != nil {
 				t.Fatalf("CallTool without _meta: %v", err)
 			}
-			if seen := tc.rec.get(); seen != nil {
-				t.Fatalf("handler saw _meta %v on a call that sent none, want nil", seen)
+			if seen := tc.rec.get(); seen["agent_id"] != nil || seen["user"] != nil {
+				t.Fatalf("handler retained caller _meta on a later call: %v", seen)
+			}
+			if seen[mcpsdk.MetaKeyProtocolVersion] == nil ||
+				seen[mcpsdk.MetaKeyClientInfo] == nil ||
+				seen[mcpsdk.MetaKeyClientCapabilities] == nil {
+				t.Fatalf("handler missing SDK-required modern metadata: %v", seen)
 			}
 		})
 	}

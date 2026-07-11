@@ -552,7 +552,10 @@ func TestWave3_ConcurrencyStress(t *testing.T) {
 
 	// Shared HTTP-served server.
 	httpSrv, httpTools := buildWave3Server(t)
-	httpHandler, err := httpSrv.HTTPHandler(&server.HTTPOptions{Security: server.DefaultHTTPSecurity()})
+	httpHandler, err := httpSrv.HTTPHandler(&server.HTTPOptions{
+		Security:  server.DefaultHTTPSecurity(),
+		Stateless: true,
+	})
 	if err != nil {
 		t.Fatalf("HTTPHandler: %v", err)
 	}
@@ -589,6 +592,7 @@ func TestWave3_ConcurrencyStress(t *testing.T) {
 				session, connErr = client.Connect(ctx, &mcpsdk.StreamableClientTransport{
 					Endpoint:             ts.URL,
 					DisableStandaloneSSE: true,
+					MaxRetries:           -1,
 				}, nil)
 				tools = httpTools
 			} else {
@@ -687,8 +691,10 @@ func TestWave3_ConcurrencyStress(t *testing.T) {
 		}
 	}
 
-	// Teardown: close the HTTP listener and cancel the in-memory server so all
-	// transport goroutines unwind before the leak assertion.
+	// Teardown: close HTTP client connections before the listener and cancel the
+	// in-memory server so the SDK's modern per-request connections unwind before
+	// the leak assertion.
+	ts.CloseClientConnections()
 	ts.Close()
 	inmemCancel()
 	assertNoGoroutineLeak(t, baseline)

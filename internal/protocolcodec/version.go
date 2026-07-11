@@ -10,13 +10,17 @@ import (
 // [Codec] (RFC §16 item 3).
 type ProtocolVersion string
 
-// Known MCP protocol versions Dockyard recognises. The list is deliberately
-// small: V1 targets the spec version the pinned go-sdk supports (RFC §16
-// item 6), and the Apps spec revision adds one more.
+// Known MCP protocol versions Dockyard recognises. The legacy and modern core
+// versions are intentionally distinct lifecycle contracts: legacy peers
+// initialize a session, while modern peers supply metadata on every request.
 const (
 	// VersionMCP20251125 is the current stable MCP spec version and the one
 	// the pinned go-sdk targets (RFC §16 item 6).
 	VersionMCP20251125 ProtocolVersion = "2025-11-25"
+	// VersionMCP20260728 is the MCP 2026-07-28 release candidate. Its HTTP
+	// lifecycle is stateless and selected by declared protocol version, never a
+	// JSON-RPC body heuristic (RFC §19.1, D-190).
+	VersionMCP20260728 ProtocolVersion = "2026-07-28"
 	// VersionApps20260126 is the MCP Apps spec revision (SEP-1865); the Apps
 	// extension negotiates against it independently of the core spec version.
 	VersionApps20260126 ProtocolVersion = "2026-01-26"
@@ -41,6 +45,7 @@ var ErrUnknownVersion = errors.New("protocolcodec: no codec registered for proto
 // codec — the forward-compatibility mechanism, made concrete.
 var codecRegistry = map[ProtocolVersion]Codec{
 	VersionMCP20251125:  v1Codec{version: VersionMCP20251125},
+	VersionMCP20260728:  v1Codec{version: VersionMCP20260728},
 	VersionApps20260126: v1Codec{version: VersionApps20260126},
 }
 

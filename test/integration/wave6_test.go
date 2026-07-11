@@ -95,6 +95,7 @@ type wave6Env struct {
 	sink    *obs.SSESink
 	spanRec *tracetest.SpanRecorder
 	fanout  *obs.FanOut
+	//nolint:staticcheck // Exercises legacy logging compatibility during its deprecation window.
 	logs    chan *mcpsdk.LoggingMessageParams
 	srvPipe *wave6Tee
 }
@@ -220,6 +221,7 @@ func newWave6Env(t *testing.T, ringCap int) *wave6Env {
 
 	// A client that negotiates the logging capability and records every
 	// notifications/message it receives.
+	//nolint:staticcheck // Exercises legacy logging compatibility during its deprecation window.
 	logs := make(chan *mcpsdk.LoggingMessageParams, 16)
 	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "wave6-client", Version: "0.0.0"},
 		&mcpsdk.ClientOptions{
@@ -555,13 +557,13 @@ func TestWave6_LogBridgeFansToMCPAndObs(t *testing.T) {
 	env := newWave6Env(t, 256)
 	ctx := context.Background()
 
-	// The client raises its MCP log level so notifications/message are delivered.
-	if err := env.session.SetLoggingLevel(ctx, &mcpsdk.SetLoggingLevelParams{Level: "debug"}); err != nil {
-		t.Fatalf("SetLoggingLevel: %v", err)
-	}
-
 	if res, err := env.session.CallTool(ctx, &mcpsdk.CallToolParams{
-		Name: "logging_report", Arguments: wave6Input{Region: "emea"},
+		Name:      "logging_report",
+		Arguments: wave6Input{Region: "emea"},
+		// Logging is request-scoped in the 2026-07-28 lifecycle; the old
+		// logging/setLevel RPC remains only for legacy peers.
+		//nolint:staticcheck // Modern requests carry the deprecated SDK log-level key until Phase 32 migrates the bridge.
+		Meta: mcpsdk.Meta{mcpsdk.MetaKeyLogLevel: "debug"},
 	}); err != nil {
 		t.Fatalf("CallTool: %v", err)
 	} else if res.IsError {

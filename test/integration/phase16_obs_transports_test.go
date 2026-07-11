@@ -84,7 +84,8 @@ type phase16Env struct {
 	ring     *obs.RingBuffer
 	spanRec  *tracetest.SpanRecorder
 	srvWrite *teeWriteCloser
-	logs     chan *mcpsdk.LoggingMessageParams
+	//nolint:staticcheck // Exercises legacy logging compatibility during its deprecation window.
+	logs chan *mcpsdk.LoggingMessageParams
 }
 
 func newPhase16Env(t *testing.T) *phase16Env {
@@ -142,6 +143,7 @@ func newPhase16Env(t *testing.T) *phase16Env {
 
 	// A client that negotiates the logging capability and records every
 	// notifications/message it receives.
+	//nolint:staticcheck // Exercises legacy logging compatibility during its deprecation window.
 	logs := make(chan *mcpsdk.LoggingMessageParams, 16)
 	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "phase16-client", Version: "0.0.0"},
 		&mcpsdk.ClientOptions{
@@ -359,6 +361,7 @@ func TestPhase16_LogBridge_RoundTrip(t *testing.T) {
 	srvErr := make(chan error, 1)
 	go func() { srvErr <- srv.Run(ctx, serverT) }()
 
+	//nolint:staticcheck // Exercises legacy logging compatibility during its deprecation window.
 	logs := make(chan *mcpsdk.LoggingMessageParams, 8)
 	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "log-client", Version: "0.0.0"},
 		&mcpsdk.ClientOptions{
@@ -381,13 +384,13 @@ func TestPhase16_LogBridge_RoundTrip(t *testing.T) {
 		}
 	})
 
-	if err := session.SetLoggingLevel(ctx, &mcpsdk.SetLoggingLevelParams{Level: "debug"}); err != nil {
-		t.Fatalf("SetLoggingLevel: %v", err)
-	}
-
 	out, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name:      "logging-tool",
 		Arguments: map[string]any{"region": "us"},
+		// Logging is request-scoped in the 2026-07-28 lifecycle; the old
+		// logging/setLevel RPC remains only for legacy peers.
+		//nolint:staticcheck // Modern requests carry the deprecated SDK log-level key until Phase 32 migrates the bridge.
+		Meta: mcpsdk.Meta{mcpsdk.MetaKeyLogLevel: "debug"},
 	})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)

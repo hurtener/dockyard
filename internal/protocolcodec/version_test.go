@@ -75,16 +75,26 @@ func TestCodecForStrict(t *testing.T) {
 }
 
 func TestKnownVersionsIncludesBothSpecs(t *testing.T) {
-	var hasCore, hasApps bool
+	var hasLegacy, hasModern, hasApps bool
 	for _, v := range KnownVersions() {
 		switch v {
 		case VersionMCP20251125:
-			hasCore = true
+			hasLegacy = true
+		case VersionMCP20260728:
+			hasModern = true
 		case VersionApps20260126:
 			hasApps = true
 		}
 	}
-	if !hasCore || !hasApps {
-		t.Errorf("KnownVersions missing a spec: core=%v apps=%v", hasCore, hasApps)
+	if !hasLegacy || !hasModern || !hasApps {
+		t.Errorf("KnownVersions missing a spec: legacy=%v modern=%v apps=%v", hasLegacy, hasModern, hasApps)
+	}
+}
+
+func TestCodecFor_DualLifecycleVersionsRemainDistinct(t *testing.T) {
+	legacy := CodecFor(VersionMCP20251125)
+	modern := CodecFor(VersionMCP20260728)
+	if legacy.Version() == modern.Version() {
+		t.Fatalf("legacy and modern codecs report the same version %q", legacy.Version())
 	}
 }

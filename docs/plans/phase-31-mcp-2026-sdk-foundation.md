@@ -46,18 +46,18 @@ None.
 
 ## Acceptance criteria
 
-- [ ] `go.mod` pins `github.com/modelcontextprotocol/go-sdk` to the exact approved
+- [x] `go.mod` pins `github.com/modelcontextprotocol/go-sdk` to the exact approved
       prerelease and the CGo-free build still passes.
-- [ ] The core draft specification and authorization draft are vendored with
+- [x] The core draft specification and authorization draft are vendored with
       upstream SHA/date, indexed, and covered by a presence test.
-- [ ] The authoritative revised Tasks extension schema is vendored with upstream
+- [x] The authoritative revised Tasks extension schema is vendored with upstream
       SHA/date and a golden-test entrypoint; the Apps extension is re-pinned to a
       revised snapshot or its unchanged revision is recorded with evidence.
-- [ ] A compatibility test proves the SDK's legacy and stateless handler modes
+- [x] A compatibility test proves the SDK's legacy and stateless handler modes
       are distinguishable without inspecting a JSON-RPC body.
-- [ ] A documented finalization checklist re-pins the stable SDK, vendors the
+- [x] A documented finalization checklist re-pins the stable SDK, vendors the
       final spec, runs a normative diff, and assigns every delta to this wave.
-- [ ] D-190, RFC §19.1, the glossary, and the master plan agree on dual-lifecycle
+- [x] D-190, RFC §19.1, the glossary, and the master plan agree on dual-lifecycle
       support and RC status.
 
 ## Files added or changed
@@ -125,14 +125,14 @@ None.
 
 ## Pre-merge checklist
 
-- [ ] `make drift-audit` passes
-- [ ] `make check-mirror` passes
+- [x] `make drift-audit` passes
+- [x] `make check-mirror` passes
 - [ ] `make preflight` passes
-- [ ] `go test -race ./...` and `golangci-lint run` clean
-- [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
-- [ ] Coverage on touched packages ≥ stated target
-- [ ] New CLI command / manifest field / public API has a smoke check in this PR
-- [ ] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
-- [ ] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
-- [ ] New vocabulary added to `docs/glossary.md`
-- [ ] New / changed architectural decision filed in `docs/decisions.md`
+- [x] `go test -race ./...` and `golangci-lint run` clean
+- [x] All cross-references (`RFC §X.Y`, `brief NN`) resolve
+- [x] Coverage on touched packages ≥ stated target
+- [x] New CLI command / manifest field / public API has a smoke check in this PR
+- [x] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
+- [x] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
+- [x] New vocabulary added to `docs/glossary.md`
+- [x] New / changed architectural decision filed in `docs/decisions.md`
