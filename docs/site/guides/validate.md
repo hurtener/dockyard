@@ -53,8 +53,20 @@ Categories:
 | `go-test`          | `go test ./...` in the project                                 |
 | `contract`         | generated artifacts match the Go contracts                    |
 | `golden`           | fixtures / goldens are coherent                                |
-| `spec-compliance`  | conformance against the vendored MCP specs                     |
+| `spec-compliance`  | offline legacy + modern core conformance against vendored fixtures |
 | `capability`       | the project degrades gracefully across host capability sets   |
+
+The spec-compliance result reports both supported base MCP revisions:
+
+```text
+core 2025-11-25 [PASS]: initialize fixture conforms
+core 2026-07-28 [PASS]: server/discover fixture conforms
+```
+
+These fixtures are embedded and run offline; `dockyard test` never contacts a
+live host. MCP Apps `2026-01-26` uses the separate iframe `ui/initialize`
+dialect. That handshake is not base MCP `server/discover` and is not presented
+as a third core revision.
 
 ## Reading the report
 

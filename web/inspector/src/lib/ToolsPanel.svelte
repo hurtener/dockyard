@@ -94,6 +94,7 @@
   let invoking = $state(false);
   let invokeError = $state<string>('');
   let lastResult = $state<ToolInvokeResult | undefined>(undefined);
+  let mrtrResponses = $state<Record<string, string>>({});
 
   // onRowClick is the row-pick handler the DataTable invokes. Selecting a
   // tool resets the form synchronously — we do NOT use a $effect for this
@@ -113,13 +114,14 @@
     errors = {};
     invokeError = '';
     lastResult = undefined;
+    mrtrResponses = {};
     // The App preview's "tool already pushed" tag — onInvokeResult was a
     // result-feed callback, not a state. Clearing the inspector-side cached
     // result is a parent concern; the parent's applyInvokeResult is keyed on
     // the contract, so a tool switch is reflected when the next invoke runs.
   }
 
-  async function onInvoke(): Promise<void> {
+  async function onInvoke(retry = false): Promise<void> {
     if (!selectedContract) return;
     const parsed = parseFormValues(fields, values);
     if (Object.keys(parsed.errors).length > 0) {
@@ -130,12 +132,32 @@
     invokeError = '';
     invoking = true;
     try {
+      let inputResponses: Record<string, unknown> | undefined;
+      if (retry && lastResult?.inputRequests) {
+        inputResponses = {};
+        try {
+          for (const key of Object.keys(lastResult.inputRequests)) {
+            inputResponses[key] = JSON.parse(mrtrResponses[key] ?? 'null');
+          }
+        } catch {
+          invokeError = 'Each MRTR response must be valid JSON.';
+          return;
+        }
+      }
       const result = await invokeTool(
-        { tool: selectedContract.name, arguments: parsed.arguments },
+        {
+          tool: selectedContract.name,
+          arguments: parsed.arguments,
+          inputResponses,
+          requestState: retry ? lastResult?.requestState : undefined,
+        },
         base,
         fetchImpl,
       );
       lastResult = result;
+      mrtrResponses = Object.fromEntries(
+        Object.keys(result.inputRequests ?? {}).map((key) => [key, 'null']),
+      );
       // Feed the App-frame preview the same way the Fixtures switcher does
       // (D-129). The parent threads `structuredContent` through to the
       // AppFrame's `pushToolResult` prop.
@@ -274,11 +296,36 @@
                 : 'The App preview was re-rendered with the operator parameters.'}
             </span>
           </div>
-          {#if lastResult.structuredContent}
+          {#if lastResult.structuredContent !== undefined}
             <JsonInspector
               value={lastResult.structuredContent}
               name="structuredContent"
             />
+          {/if}
+          {#if lastResult.inputRequests && lastResult.requestState}
+            <section class="mrtr" data-testid="mrtr-ready">
+              <StatusChip label="input required" tone="info" dot />
+              <p>Provide a JSON response for each request, then retry the original tool call.</p>
+              {#each Object.entries(lastResult.inputRequests) as [key, request] (key)}
+                <label class="field">
+                  <span class="field-label">{key}</span>
+                  <JsonInspector value={request} name="request" />
+                  <textarea
+                    rows="3"
+                    value={mrtrResponses[key]}
+                    data-testid={`mrtr-response-${key}`}
+                    oninput={(e) => (mrtrResponses[key] = (e.target as HTMLTextAreaElement).value)}
+                  ></textarea>
+                </label>
+              {/each}
+              <button
+                type="button"
+                class="invoke-btn"
+                disabled={invoking}
+                data-testid="mrtr-retry"
+                onclick={() => void onInvoke(true)}
+              >{invoking ? 'Retrying…' : 'Submit input and retry'}</button>
+            </section>
           {/if}
         </div>
       {/if}
@@ -333,6 +380,11 @@
     display: flex;
     flex-direction: column;
     gap: var(--dy-space-3);
+  }
+  .mrtr {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dy-space-2);
   }
   .field {
     display: flex;

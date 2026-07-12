@@ -22,7 +22,7 @@ func TestDev_HelpDescribesLoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dev --help: %v", err)
 	}
-	for _, want := range []string{"dev loop", "fsnotify", "Vite", "Ctrl-C"} {
+	for _, want := range []string{"dev loop", "fsnotify", "Vite", "Ctrl-C", "server/discover", "legacy initialize fallback"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dev --help missing %q:\n%s", want, out)
 		}

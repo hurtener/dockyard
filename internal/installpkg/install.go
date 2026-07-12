@@ -19,8 +19,8 @@ import (
 var ErrInstall = errors.New("dockyard/internal/installpkg: install failed")
 
 // ErrBootCheck is the sentinel wrapping a boot-check failure: the host config
-// was written, but the spawned server did not complete the MCP initialize
-// handshake. It is distinct from ErrInstall so a caller can tell "config not
+// was written, but the spawned server did not complete modern MCP discovery or
+// a recognized legacy fallback. It is distinct from ErrInstall so a caller can tell "config not
 // written" from "config written but server unhealthy".
 var ErrBootCheck = errors.New("dockyard/internal/installpkg: server boot check failed")
 
@@ -89,7 +89,7 @@ type serverEntry struct {
 // writes the host's MCP config non-destructively — backing up the prior file,
 // merging this server's entry into the existing mcpServers map without
 // touching any unrelated entry — then verifies the server boots with a real
-// MCP initialize handshake.
+// modern server/discover negotiation, with explicit legacy fallback.
 //
 // A failure to write the config wraps ErrInstall; a config that was written
 // but whose server failed to boot wraps ErrBootCheck. On the latter the

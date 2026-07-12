@@ -77,7 +77,7 @@ func TestRun_HelpDescribesTransports(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run --help: %v", err)
 	}
-	for _, want := range []string{"stdio", "http", "transport"} {
+	for _, want := range []string{"stdio", "http", "transport", "server/discover", "legacy initialize fallback"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("run --help missing %q:\n%s", want, out)
 		}
@@ -123,7 +123,7 @@ func TestInstall_HelpDescribesHosts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install --help: %v", err)
 	}
-	for _, want := range []string{"claude", "cursor", "non-destructive", "initialize"} {
+	for _, want := range []string{"claude", "cursor", "non-destructive", "server/discover", "legacy initialize"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("install --help missing %q:\n%s", want, out)
 		}

@@ -87,6 +87,11 @@ content height — so a handshake or rendering problem surfaces here, not only i
 a real host. If an App renders blank, see the
 [blank-App troubleshooting](/guides/ui-resources#troubleshooting-a-blank-app-in-the-host).
 
+`ui/initialize` belongs only to the MCP Apps iframe dialect. It is not base MCP
+discovery. The inspector's short-lived base MCP clients negotiate modern
+`2026-07-28` servers with `server/discover` and use an explicit legacy
+`2025-11-25` `initialize` fallback for compatible peers.
+
 ## The Prompts panel
 
 MCP separates two model-facing primitives. **Tools** are things the
@@ -98,8 +103,8 @@ panel lists every prompt the attached server registered via
 `runtime/server.AddPrompt`. Pick one, fill its string arguments
 (MCP prompt arguments are flat strings — see
 [D-152](/reference/decisions); no JSON Schema form), press
-**Invoke prompts/get**. The inspector opens a short-lived MCP
-client session, calls `prompts/get`, closes the session, and renders
+**Invoke prompts/get**. The inspector opens a short-lived, modern-first MCP
+connection, calls `prompts/get`, closes it, and renders
 the resulting message list.
 
 The panel's invocation surface uses the same operator-initiated P4

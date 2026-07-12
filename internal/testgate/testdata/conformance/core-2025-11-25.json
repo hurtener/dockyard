@@ -1,0 +1,28 @@
+{
+  "_cite": "MCP core 2025-11-25 lifecycle: initialize request and result",
+  "version": "2025-11-25",
+  "lifecycle": "initialize",
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2025-11-25",
+      "capabilities": {},
+      "clientInfo": {"name": "offline-conformance", "version": "1.0.0"}
+    }
+  },
+  "response": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "protocolVersion": "2025-11-25",
+      "capabilities": {"tools": {}},
+      "serverInfo": {"name": "fixture-server", "version": "1.0.0"}
+    }
+  },
+  "expect": {
+    "result.protocolVersion": "2025-11-25",
+    "result.serverInfo.name": "fixture-server"
+  }
+}

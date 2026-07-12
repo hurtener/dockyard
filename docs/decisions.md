@@ -6668,3 +6668,30 @@ surface as one coherent design:
    maps missing resources to JSON-RPC `-32602` for `2026-07-28` and preserves
    legacy `-32002` for `2025-11-25`; unrelated handler errors retain their own
    code and message. Raw response wire shapes remain isolated behind the codec.
+
+---
+
+## D-194 — Client-shaped tooling negotiates modern-first and permits only explicit legacy fallback
+
+**Date:** 2026-07-12
+**Status:** Settled (Phase 35 design-owner approval).
+**Where it lives:** `internal/installpkg`, `internal/inspector`,
+`internal/testgate`, and generated-project compatibility tests; RFC §9, §12,
+§19.1.
+
+**Why.** Dockyard's local inspector and install boot check are narrow,
+test-only client-shaped surfaces. The pinned SDK attempts modern discovery but
+may otherwise treat unrelated discovery failures as fallback candidates. A
+silent downgrade would hide malformed modern requests and weaken the
+header-only dispatch policy in D-191.
+
+**The decision.** Client-shaped tooling sends a complete modern `2026-07-28`
+`server/discover` request first. It starts a fresh legacy `2025-11-25`
+`initialize` lifecycle only for an explicit compatibility signal: method not
+found, unsupported protocol version, or a discovery result that advertises only
+older supported versions. Transport, authorization, malformed-response,
+unknown-future-version, and unrelated server errors fail without downgrade.
+SDK-backed ordinary calls retain request-scoped metadata and version headers;
+raw modern Tasks calls also carry their method and task routing headers. This
+introduces no production client API, credential storage, or remote inspector
+bind. Apps `2026-01-26` `ui/initialize` remains a separate iframe dialect.

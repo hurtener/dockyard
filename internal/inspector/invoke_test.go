@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hurtener/dockyard/runtime/server"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // invokeIn / invokeOut are the typed contract of the test tool the operator
@@ -32,12 +33,19 @@ type invokeOut struct {
 // Every seam is real: the test exercises the same client/server path a
 // production server uses.
 func newInvokeTestServer(t *testing.T) string {
+	return newInvokeTestServerMode(t, server.Dual, nil)
+}
+
+func newInvokeTestServerMode(t *testing.T, mode server.ProtocolMode, seen chan<- map[string]any) string {
 	t.Helper()
 	srv, err := server.New(server.Info{Name: "invoke-test", Version: "0.1.0"}, nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	handler := func(_ context.Context, in invokeIn) (invokeOut, error) {
+	handler := func(ctx context.Context, in invokeIn) (invokeOut, error) {
+		if seen != nil {
+			seen <- server.RequestMeta(ctx)
+		}
 		if in.Greeting == "boom" {
 			return invokeOut{}, errors.New("greeting boom rejected")
 		}
@@ -49,7 +57,7 @@ func newInvokeTestServer(t *testing.T) string {
 	}, handler); err != nil {
 		t.Fatalf("AddTool: %v", err)
 	}
-	httpHandler, err := srv.HTTPHandler(&server.HTTPOptions{Security: server.DefaultHTTPSecurity()})
+	httpHandler, err := srv.HTTPHandler(&server.HTTPOptions{ProtocolMode: mode, Security: server.DefaultHTTPSecurity()})
 	if err != nil {
 		t.Fatalf("HTTPHandler: %v", err)
 	}
@@ -94,6 +102,72 @@ func TestToolsFromServer(t *testing.T) {
 		}
 		if structured.Greeted != "hello, world" {
 			t.Errorf("Greeted = %q, want %q", structured.Greeted, "hello, world")
+		}
+	})
+
+	t.Run("uses modern discovery and carries modern request metadata", func(t *testing.T) {
+		seen := make(chan map[string]any, 1)
+		resp, err := ToolsFromServer(newInvokeTestServerMode(t, server.Dual, seen))(context.Background(), InvokeRequest{
+			Tool: "greet", Arguments: json.RawMessage(`{"greeting":"modern"}`),
+		})
+		if err != nil || resp == nil {
+			t.Fatalf("modern invoke = %+v, %v", resp, err)
+		}
+		meta := <-seen
+		if meta[mcpsdk.MetaKeyProtocolVersion] != "2026-07-28" || meta[mcpsdk.MetaKeyClientInfo] == nil {
+			t.Fatalf("modern metadata = %#v", meta)
+		}
+	})
+
+	t.Run("deliberately falls back to the legacy lifecycle", func(t *testing.T) {
+		resp, err := ToolsFromServer(newInvokeTestServerMode(t, server.Legacy, nil))(context.Background(), InvokeRequest{
+			Tool: "greet", Arguments: json.RawMessage(`{"greeting":"legacy"}`),
+		})
+		if err != nil || resp == nil {
+			t.Fatalf("legacy fallback invoke = %+v, %v", resp, err)
+		}
+	})
+
+	t.Run("retries a real modern MRTR tool", func(t *testing.T) {
+		srv, err := server.New(server.Info{Name: "mrtr-test", Version: "0.1.0"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = server.AddToolWithSchemasMRTR(srv, server.ToolDef{Name: "approve"}, nil, nil,
+			func(_ context.Context, call server.ToolCall[invokeIn]) (server.ToolOutput[invokeOut], error) {
+				if call.RequestState == "" {
+					return server.ToolOutput[invokeOut]{
+						InputRequests: map[string]server.InputRequest{"approval": server.ElicitationRequest{Message: "Approve?"}},
+						RequestState:  "opaque-retry",
+					}, nil
+				}
+				if call.RequestState != "opaque-retry" || len(call.InputResponses) != 1 {
+					return server.ToolOutput[invokeOut]{}, errors.New("missing continuation")
+				}
+				return server.ToolOutput[invokeOut]{Structured: invokeOut{Greeted: "approved"}, StructuredPresent: true}, nil
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := srv.HTTPHandler(&server.HTTPOptions{ProtocolMode: server.Dual, Security: server.DefaultHTTPSecurity()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		httpSrv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
+		go func() { _ = httpSrv.Serve(ln) }()
+		t.Cleanup(func() { _ = httpSrv.Close() })
+		invoker := ToolsFromServer("http://" + ln.Addr().String())
+		first, err := invoker(context.Background(), InvokeRequest{Tool: "approve", Arguments: json.RawMessage(`{"greeting":"x"}`)})
+		if err != nil || len(first.InputRequests) != 1 || first.RequestState != "opaque-retry" {
+			t.Fatalf("first MRTR result = %+v, %v", first, err)
+		}
+		second, err := invoker(context.Background(), InvokeRequest{Tool: "approve", Arguments: json.RawMessage(`{"greeting":"x"}`), RequestState: first.RequestState, InputResponses: mcpsdk.InputResponseMap{"approval": &mcpsdk.ElicitResult{Action: "accept", Content: map[string]any{"approved": true}}}})
+		if err != nil || string(second.StructuredContent) != `{"greeted":"approved"}` {
+			t.Fatalf("retry MRTR result = %+v, %v", second, err)
 		}
 	})
 

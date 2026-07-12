@@ -19,8 +19,9 @@ single static binary running inside an MCP host:
 - **`dockyard run`** — build + run on the chosen transport. The
   "I want to see it running now" verb.
 - **`dockyard install <host>`** — write the host's MCP config so the
-  host launches your built server, then verify it boots with a real MCP
-  `initialize` handshake. V1 hosts: `claude`, `cursor`.
+  host launches your built server, then verify it boots with modern MCP
+  `server/discover` and a recognized legacy `initialize` fallback. V1 hosts:
+  `claude`, `cursor`.
 
 ## `dockyard build`
 
@@ -86,7 +87,9 @@ What it does:
   server as a local stdio subprocess. The prior config is backed up to
   a timestamped sidecar — unrelated MCP-server entries are preserved.
 - **Verifies the server boots** by spawning it and driving a real MCP
-  `initialize` handshake. A boot failure still leaves the config
+  modern-first negotiation. It attempts `server/discover` and falls back to
+  legacy `initialize` only for a recognized compatibility response. A boot
+  failure still leaves the config
   written; the CLI prints both the install result and the failure so
   you can triage.
 

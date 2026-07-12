@@ -4,7 +4,8 @@
 // `dockyard install claude|cursor` writes the host's MCP config file so the
 // host launches this Dockyard server as a local stdio subprocess
 // ({"command": "<binary path>"}), then verifies the server boots by spawning
-// it and driving one real MCP `initialize` handshake.
+// it and driving modern `server/discover` negotiation, with `initialize` only
+// as a recognized legacy fallback.
 //
 // Two security-relevant properties hold:
 //

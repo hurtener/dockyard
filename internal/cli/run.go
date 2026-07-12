@@ -32,7 +32,8 @@ same pipeline 'dockyard build' runs — and then runs the produced server on the
 transport selected by --transport:
 
   - stdio  the local single-user subprocess transport (the default);
-  - http   the streamable-HTTP transport, listening on --addr.
+  - http   the streamable-HTTP transport, listening on --addr; it accepts the
+           modern server/discover lifecycle and legacy initialize fallback.
 
 The project's server owns its transport wiring; 'dockyard run' drives it and
 never reimplements a transport. Press Ctrl-C to stop: the server child is torn

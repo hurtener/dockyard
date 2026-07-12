@@ -224,7 +224,7 @@ func serve(ctx context.Context, srv *server.Server, obsSink *obs.SSESink, logger
 // stream on `/obs/v1/stream` of the SAME listener so the inspector can
 // subscribe with just `--url <server>` (D-132).
 func serveHTTP(ctx context.Context, srv *server.Server, obsSink *obs.SSESink, logger *slog.Logger) error {
-	handler, err := srv.HTTPHandler(nil)
+	handler, err := srv.HTTPHandler(&server.HTTPOptions{ProtocolMode: server.Dual})
 	if err != nil {
 		return err
 	}

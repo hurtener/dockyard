@@ -176,9 +176,20 @@ export interface ToolInvokeResult {
   /** Optional model-facing content[] from the tools/call response. */
   content?: unknown;
   /** The tool's typed structured payload, when emitted. */
-  structuredContent?: Record<string, unknown>;
+  structuredContent?: unknown;
   /** True when the tool reported a typed error to the host. */
   isError?: boolean;
+  /** Keyed requests that require operator input before retrying the call. */
+  inputRequests?: Record<string, unknown>;
+  /** Opaque continuation state echoed on an MRTR retry. */
+  requestState?: string;
+}
+
+export interface ToolInvokeRequest {
+  tool: string;
+  arguments: Record<string, unknown>;
+  inputResponses?: Record<string, unknown>;
+  requestState?: string;
 }
 
 /**
@@ -192,7 +203,7 @@ export interface ToolInvokeResult {
  * result with `isError: true`.
  */
 export async function invokeTool(
-  request: { tool: string; arguments: Record<string, unknown> },
+  request: ToolInvokeRequest,
   base = '',
   fetchImpl: typeof fetch = fetch,
 ): Promise<ToolInvokeResult> {
@@ -225,27 +236,29 @@ export async function invokeTool(
     content?: unknown;
     structuredContent?: unknown;
     isError?: unknown;
+    inputRequests?: unknown;
+    requestState?: unknown;
   };
   const result: ToolInvokeResult = {};
   if (d.content !== undefined) result.content = d.content;
-  if (typeof d.structuredContent === 'object' && d.structuredContent !== null) {
-    result.structuredContent = d.structuredContent as Record<string, unknown>;
-  }
+  if (d.structuredContent !== undefined) result.structuredContent = d.structuredContent;
   if (typeof d.isError === 'boolean') result.isError = d.isError;
+  if (typeof d.inputRequests === 'object' && d.inputRequests !== null && !Array.isArray(d.inputRequests)) {
+    result.inputRequests = d.inputRequests as Record<string, unknown>;
+  }
+  if (typeof d.requestState === 'string') result.requestState = d.requestState;
   return result;
 }
 
 /**
- * The shape the bridge posts as an elicitation-response notification —
- * mirrors `dockyard-bridge`'s `ElicitationResponseParams`. The inspector
- * frontend forwards this verbatim to its backend; the backend translates
- * it into a raw `tasks/result` JSON-RPC frame against the attached
- * server.
+ * The versioned task-input shape accepted by the inspector backend. Modern
+ * callers preserve server-assigned input keys for `tasks/update`; the legacy
+ * bridge notification is adapted to one keyed response before posting.
  */
 export interface ElicitationRequest {
   taskId: string;
-  data?: unknown;
-  declined?: boolean;
+  protocol: string;
+  inputResponses: Record<string, unknown>;
 }
 
 /**
@@ -263,9 +276,9 @@ export interface ElicitationResponse {
 }
 
 /**
- * Posts an App's elicitation-response to the inspector backend, which
- * forwards it to the attached server's `tasks/result` endpoint
- * (Phase 25 / D-134). The operator is the one driving the write — the
+ * Posts an operator's task-input response to the inspector backend, which
+ * uses modern `tasks/update` or the versioned legacy input extension. The
+ * operator is the one driving the write — the
  * App's "Approve" / "Reject" click. A 503 (the inspector is detached)
  * surfaces as a thrown error so the App preview's error state shows an
  * honest message rather than a silent drop.

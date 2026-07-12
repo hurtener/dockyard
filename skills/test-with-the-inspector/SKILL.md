@@ -111,6 +111,10 @@ message, role chip + the text body. A server-side error renders in
 the result region (the 200-with-error pattern); a transport-level
 failure renders in the panel's `ErrorState` with a working retry.
 
+The short-lived base MCP connection attempts modern `2026-07-28`
+`server/discover` first and falls back to legacy `2025-11-25` `initialize` only
+for a compatible peer.
+
 Use the Prompts panel to:
 
 - Verify a `server.AddPrompt` registration is reachable end-to-end.
@@ -165,6 +169,10 @@ deny-by-default CSP the manifest declares. The bridge handshake
 completes on render; once the App is up, fire its tool from the Tools
 tab and the App receives the structured result through the bridge
 exactly as a real host would deliver it.
+
+The bridge handshake is Apps `2026-01-26` `ui/initialize`. Do not confuse it
+with base MCP `server/discover`; they have separate version spaces and run on
+different boundaries.
 
 ## Capability emulation
 

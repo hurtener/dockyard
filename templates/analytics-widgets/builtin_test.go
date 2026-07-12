@@ -22,6 +22,13 @@ func TestBuiltin_TemplateShape(t *testing.T) {
 	if !strings.Contains(tmpl.Summary(), "Inline analytics") {
 		t.Errorf("Summary = %q, want analytics-widgets summary text", tmpl.Summary())
 	}
+	files, err := tmpl.Materialise(scaffold.Options{Name: "dual-test"})
+	if err != nil {
+		t.Fatalf("Materialise: %v", err)
+	}
+	if !strings.Contains(string(files["main.go"]), "HTTPOptions{ProtocolMode: server.Dual}") {
+		t.Fatal("main.go.tmpl does not explicitly enable dual HTTP lifecycle support")
+	}
 
 	// TextExts covers the textual file types the template ships.
 	wantExts := []string{".tmpl", ".yaml", ".md", ".go", ".ts", ".svelte", ".json", ".html", ".css"}

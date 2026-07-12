@@ -31,6 +31,10 @@ This project was created with
    DOCKYARD_TRANSPORT=http go run .
    ```
 
+   The HTTP endpoint supports modern MCP `2026-07-28` stateless
+   `server/discover` and the legacy `2025-11-25` `initialize` lifecycle.
+   Apps inside a host use a separate `ui/initialize` iframe handshake.
+
 3. **See the App render** — the live inspector watches files, rebuilds, and shows
    the App in a sandboxed iframe with every fixture state:
 
