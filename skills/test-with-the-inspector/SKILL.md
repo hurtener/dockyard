@@ -187,11 +187,21 @@ created → working → input_required → working → completed
 
 You can:
 
-- Watch the `input_required` round-trip happen in real time as you
-  interact with the App.
+- Watch task `input_required` state from `tasks/get`, respond through
+  `tasks/update`, and see polling resume.
 - Cancel a running task — the handler's `ctx.Done()` /
   `TaskHandle.Cancelled()` should fire, and the task moves to
   `cancelled` with the App rendering its "withdrawn" empty state.
+
+Core MRTR is a separate flow. For an input-required `tools/call`,
+`prompts/get`, or `resources/read`, the inspector collects the operator's
+response and retries the original method with a new JSON-RPC ID,
+`inputResponses`, and the opaque `requestState` returned by the server. It does
+not create or update a task. Conversely, task input has no core `requestState`
+and never retries the original method.
+
+The inspector uses `dockyard/tasks/supplyInput` only for a peer that negotiated
+the legacy protocol. Modern task input always uses `tasks/update`.
 
 ## Why this matters
 

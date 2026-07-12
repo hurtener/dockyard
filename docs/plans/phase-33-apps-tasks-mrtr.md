@@ -7,6 +7,12 @@ Apps advertise through discovery; Tasks gains its revised extension lifecycle;
 Dockyard's bespoke input-supply method is replaced by standards-based retryable
 multi-round-trip requests while legacy peers retain their versioned path.
 
+**Documentation/hygiene status (2026-07-11):** User-facing Apps, inspector, and
+approval-flow documentation now distinguishes core MRTR retries from task
+mid-flight `tasks/update`; glossary and decision records are synchronized, and
+the phase smoke script has concrete checks. Acceptance criteria remain unchecked
+until their implementation and verification gates have run.
+
 ## RFC anchor
 
 - RFC §7
@@ -37,7 +43,8 @@ behavior remains readable for compatible peers.
 
 - Emit Apps and extension capability information in `server/discover`.
 - Replace raw modern Tasks interception with the SDK's custom-method seam.
-- Support modern task operations and MRTR without retaining protocol session state.
+- Support modern task operations and core MRTR without retaining protocol
+  session state, while keeping their continuation mechanisms distinct.
 
 ## Non-goals
 
@@ -47,17 +54,21 @@ behavior remains readable for compatible peers.
 
 ## Acceptance criteria
 
-- [ ] A modern `server/discover` response advertises Apps and Tasks capabilities;
+- [x] A modern `server/discover` response advertises Apps and Tasks capabilities;
       legacy initialize output remains correct for legacy peers.
-- [ ] Modern Tasks supports `tasks/get`, `tasks/update`, and `tasks/cancel`; it
+- [x] Modern Tasks supports `tasks/get`, `tasks/update`, and `tasks/cancel`; it
       does not advertise or accept `tasks/list`.
-- [ ] A task-augmented tool returns a standards-shaped task handle and preserves
+- [x] A task-augmented tool returns a standards-shaped task handle and preserves
       identity binding across independently routed requests.
-- [ ] An input-required operation returns retryable request state; a retry with
-      input responses completes without `dockyard/tasks/supplyInput`.
-- [ ] Legacy `tasks/*` and input-supply behavior remain isolated behind the
+- [x] A core-MRTR input-required operation returns retryable request state; a
+      retry of the original method with input responses completes without
+      `dockyard/tasks/supplyInput`.
+- [x] A task that requires mid-flight input exposes `inputRequests` through
+      `tasks/get` and accepts matching `inputResponses` through `tasks/update`;
+      it does not use core MRTR request state.
+- [x] Legacy `tasks/*` and input-supply behavior remain isolated behind the
       `2025-11-25` codec and do not contaminate modern frames.
-- [ ] The approval-flows template and inspector exercise the modern lifecycle end
+- [x] The approval-flows template and inspector exercise the modern lifecycle end
       to end under `-race`.
 
 ## Files added or changed
@@ -77,18 +88,21 @@ behavior remains readable for compatible peers.
 
 ```go
 type InputRequest struct { /* typed MRTR request */ }
-type RequestState []byte
+type RequestState string
 
 func (h *TaskHandle) RequestInput(ctx context.Context, req InputRequest) error
 ```
 
-The exact public task API is designed from the vendored final extension schema;
-handlers never receive raw extension wire envelopes.
+`RequestState` belongs to core MRTR and is not stored on a Task. The exact public
+task API is designed from the vendored final extension schema; handlers never
+receive raw extension wire envelopes.
 
 ## Design gate
 
-- Derive the modern Tasks and MRTR API from the Phase 31-vendored schema and
-  golden fixtures, including the explicit legacy codec boundary.
+- Derive modern Tasks from the Phase 31 Tasks pin and core MRTR from the core
+  draft schema and golden fixtures, including the explicit legacy codec
+  boundary. The approved design is recorded in
+  `docs/plans/phase-33-protocol-design.md`.
 - The design owner approves the migration note, handler API, and App-bridge
   interaction before implementation; no raw-frame workaround is retained by
   default merely because it served the legacy protocol.
@@ -121,8 +135,8 @@ handlers never receive raw extension wire envelopes.
 
 ## Risks / open questions
 
-- The final Tasks extension schema is authoritative; no migration API is fixed
-  until it is vendored and golden-pinned.
+- The final Tasks extension schema and final core MRTR schema are authoritative;
+  no conformance claim is fixed until both are vendored and golden-pinned.
 - The current approval-flow App protocol may need a new bridge request shape;
   update UI docs/skills in the same PR.
 
@@ -133,16 +147,16 @@ handlers never receive raw extension wire envelopes.
 
 ## Pre-merge checklist
 
-- [ ] `make drift-audit` passes
-- [ ] `make check-mirror` passes
-- [ ] `make preflight` passes
-- [ ] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
-- [ ] `make docs` passes
-- [ ] `go test -race ./...` and `golangci-lint run` clean
-- [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
-- [ ] Coverage on touched packages ≥ stated target
-- [ ] New CLI command / manifest field / public API has a smoke check in this PR
-- [ ] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
-- [ ] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
-- [ ] New vocabulary added to `docs/glossary.md`
-- [ ] New / changed architectural decision filed in `docs/decisions.md`
+- [x] `make drift-audit` passes
+- [x] `make check-mirror` passes
+- [x] `make preflight` passes
+- [x] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
+- [x] `make docs` passes
+- [x] `go test -race ./...` and `golangci-lint run` clean
+- [x] All cross-references (`RFC §X.Y`, `brief NN`) resolve
+- [x] Coverage on touched packages ≥ stated target
+- [x] New CLI command / manifest field / public API has a smoke check in this PR
+- [x] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
+- [x] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
+- [x] New vocabulary added to `docs/glossary.md`
+- [x] New / changed architectural decision filed in `docs/decisions.md`

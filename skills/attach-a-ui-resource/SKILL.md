@@ -292,14 +292,15 @@ simply never fires the subscriber, so subscribe unconditionally and render
 whatever arrives. It is demoable through `dockyard inspect` — the inspector
 forwards the attached server's task progress to the App preview.
 
-> **Tasks×Apps is Dockyard-host-only.** `onTaskProgress` and the
-> elicitation-response flow are **Dockyard extensions** outside the MCP Apps
-> schema (`task-progress` / `elicitation-response`). They work **only against a
-> Dockyard-aware host** — the inspector, or Harbor as the MCP client. A stock
-> host (e.g. Claude Desktop) ignores them: progress never arrives and an
-> elicitation reply is dropped. Build the App so its core value does not depend
-> on them; treat live progress and inline elicitation as enhancements that light
-> up on a Dockyard host.
+> **Tasks×Apps is Dockyard-host-only.** `onTaskProgress` and the inline
+> elicitation-response bridge flow are **Dockyard extensions** outside the MCP
+> Apps schema (`task-progress` / `elicitation-response`). A Dockyard-aware host
+> translates an elicitation response into the applicable standard operation:
+> retry the original method with core MRTR `inputResponses` plus opaque
+> `requestState`, or submit task `inputResponses` through `tasks/update`. Do not
+> combine them: task input never uses core request state, and core MRTR never
+> updates a task. A stock host ignores these bridge messages. Build the App so
+> its core value does not depend on them.
 
 ### Host theme propagation
 
@@ -367,5 +368,6 @@ synthetic data from the fixture switcher (D-130).
   `run-the-dev-loop` skill.
 - Add task-augmented tools (e.g. approvals) ⇒ start from the
   `approval-flows` template; the bridge ships the
-  `ui/elicitation-response` notification (D-134).
+  `ui/elicitation-response` notification, which a Dockyard-aware host maps to
+  core MRTR retry or `tasks/update` as appropriate (D-134, D-192).
 - Ship the binary ⇒ `package` skill.

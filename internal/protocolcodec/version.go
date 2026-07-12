@@ -45,7 +45,7 @@ var ErrUnknownVersion = errors.New("protocolcodec: no codec registered for proto
 // codec — the forward-compatibility mechanism, made concrete.
 var codecRegistry = map[ProtocolVersion]Codec{
 	VersionMCP20251125:  v1Codec{version: VersionMCP20251125},
-	VersionMCP20260728:  v1Codec{version: VersionMCP20260728},
+	VersionMCP20260728:  modernCodec{},
 	VersionApps20260126: v1Codec{version: VersionApps20260126},
 }
 

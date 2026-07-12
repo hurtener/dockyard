@@ -42,6 +42,7 @@ export const ViewMethod = {
   requestDisplayMode: 'ui/request-display-mode',
   updateModelContext: 'ui/update-model-context',
   callTool: 'tools/call',
+  updateTask: 'tasks/update',
 } as const;
 
 /**
@@ -290,6 +291,27 @@ export interface CallToolParams<I = unknown> {
   arguments?: I;
   /** `_meta` — carries `viewUUID` for view-state correlation (brief 01 §2.6). */
   _meta?: Record<string, unknown>;
+  /** Core MRTR responses, keyed by the server-provided input request key. */
+  inputResponses?: Record<string, unknown>;
+  /** Opaque core MRTR continuation echoed on a new tools/call request. */
+  requestState?: string;
+}
+
+/** Core MRTR response from tools/call. This is not a task update. */
+export interface InputRequiredResult {
+  resultType: 'input_required';
+  inputRequests?: Record<string, unknown>;
+  requestState?: string;
+}
+
+/** Modern Tasks input response submission. */
+export interface UpdateTaskParams {
+  taskId: string;
+  inputResponses: Record<string, unknown>;
+}
+
+export interface CompleteResult {
+  resultType: 'complete';
 }
 
 /* --- content / tool-result shape ------------------------------------- */

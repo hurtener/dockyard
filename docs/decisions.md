@@ -6590,3 +6590,30 @@ Origin, Content-Type, and trace middleware remains outside this dispatcher. The
 temporary session remains available for request-bound standard MCP logging, while
 `obs/v1` omits `session_id` for stateless requests. This preserves the existing
 event schema and prevents fabricated correlation identities.
+
+---
+
+## D-192 — Core MRTR continuation and task mid-flight input remain separate protocol lifecycles
+
+**Date:** 2026-07-11
+**Status:** Settled (Phase 33 design).
+**Where it lives:** `docs/plans/phase-33-protocol-design.md`, Phase 33 Apps,
+Tasks, inspector, and approval-flow documentation.
+
+**Why.** MCP `2026-07-28` defines two superficially similar ways to satisfy an
+input request. Treating both as one "input-required round-trip" would send task
+responses through core continuation state, retry original methods for durable
+tasks, or retain Dockyard's legacy custom input method on modern frames.
+
+**The decision.** Core MRTR applies to `tools/call`, `prompts/get`, and
+`resources/read`: the server returns `inputRequests` and optional opaque
+`requestState`; the client retries the original method with a new JSON-RPC ID,
+`inputResponses`, and the echoed state. Task mid-flight input starts only after
+`CreateTaskResult`: `tasks/get` exposes outstanding `inputRequests`,
+`tasks/update` accepts matching `inputResponses`, and polling resumes. A task
+never stores core `requestState`, and core MRTR never updates a task. The legacy
+`dockyard/tasks/supplyInput` method remains confined to the legacy codec.
+
+An App bridge may carry an operator's response to a Dockyard-aware host, but the
+host must translate it into the correct standard lifecycle rather than making
+the bridge message itself a protocol continuation mechanism.

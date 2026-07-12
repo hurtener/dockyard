@@ -47,7 +47,7 @@ func (e *ArgumentError) Unwrap() error { return ErrInvalidArguments }
 // construction and flag accumulation is mutex-guarded.
 type handlerRuntime[In, Out any] struct {
 	toolName    string
-	handler     Handler[In, Out]
+	handler     ContinuationHandler[In, Out]
 	inValidator *jsonschema.Resolved // resolved generated input schema; may be nil
 	sizeBudget  int
 
@@ -63,6 +63,17 @@ type handlerRuntime[In, Out any] struct {
 func newHandlerRuntime[In, Out any](
 	toolName string,
 	handler Handler[In, Out],
+	inSchema *jsonschema.Schema,
+	sizeBudget int,
+) (*handlerRuntime[In, Out], error) {
+	return newContinuationHandlerRuntime(toolName, func(ctx context.Context, call Call[In]) (Result[Out], error) {
+		return handler(ctx, call.Input)
+	}, inSchema, sizeBudget)
+}
+
+func newContinuationHandlerRuntime[In, Out any](
+	toolName string,
+	handler ContinuationHandler[In, Out],
 	inSchema *jsonschema.Schema,
 	sizeBudget int,
 ) (*handlerRuntime[In, Out], error) {
@@ -94,12 +105,12 @@ func newHandlerRuntime[In, Out any](
 // AddToolWithSchemas: Text -> content[], Structured -> structuredContent, with
 // no empty TextContent block when Text is empty (D-043). serve just supplies
 // the typed ToolOutput.
-func (rt *handlerRuntime[In, Out]) serve(ctx context.Context, in In) (server.ToolOutput[Out], error) {
-	if err := rt.validateArgs(ctx, in); err != nil {
+func (rt *handlerRuntime[In, Out]) serve(ctx context.Context, call server.ToolCall[In]) (server.ToolOutput[Out], error) {
+	if err := rt.validateArgs(ctx, call.Input); err != nil {
 		return server.ToolOutput[Out]{}, err
 	}
 
-	res, err := rt.handler(ctx, in)
+	res, err := rt.handler(ctx, Call[In]{Input: call.Input, InputResponses: call.InputResponses, RequestState: call.RequestState})
 	if err != nil {
 		return server.ToolOutput[Out]{}, err
 	}
@@ -107,9 +118,12 @@ func (rt *handlerRuntime[In, Out]) serve(ctx context.Context, in In) (server.Too
 	rt.flagResult(res.Text, res.Structured)
 
 	return server.ToolOutput[Out]{
-		Text:       res.Text,
-		Structured: res.Structured,
-		Meta:       res.Meta,
+		Text:          res.Text,
+		Structured:    res.Structured,
+		Meta:          res.Meta,
+		InputRequests: res.InputRequests,
+		RequestState:  res.RequestState,
+		CreatedTask:   res.CreatedTask,
 	}, nil
 }
 

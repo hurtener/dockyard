@@ -7,6 +7,24 @@ import (
 	"log/slog"
 )
 
+type authContextKey struct{}
+
+// WithRequestAuthContext binds the authenticated requestor identity to ctx.
+// Transport adapters call it before invoking app code.
+func WithRequestAuthContext(ctx context.Context, authContext string) context.Context {
+	if authContext == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, authContextKey{}, authContext)
+}
+
+// RequestAuthContext returns the authenticated requestor identity bound by the
+// server transport, or empty for an unauthenticated request.
+func RequestAuthContext(ctx context.Context) string {
+	v, _ := ctx.Value(authContextKey{}).(string)
+	return v
+}
+
 // This file holds the task security model (RFC §8.5, §15; brief 02 §4.5):
 // auth-context binding of tasks/get|result|cancel and the auth-scoped
 // tasks/list. Crypto-strong task IDs live in id.go (CryptoID, 128-bit

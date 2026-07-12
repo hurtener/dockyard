@@ -549,9 +549,11 @@ never touches a raw SDK session (P3). RFC §11.3. D-077.
 ## M
 
 **Multi Round-Trip Request (MRTR)** — the MCP `2026-07-28` interaction pattern
-where a server returns input requests plus request state and the client retries the
-original operation with responses. It replaces a server-held session or a
-long-lived input channel. RFC §19.1.
+where `tools/call`, `prompts/get`, or `resources/read` returns input requests and
+optional opaque request state, and the client retries that original method with
+a new JSON-RPC ID and the collected responses. Core MRTR is not task mid-flight
+input: it does not call `tasks/update`, and its request state is never stored on
+a task. RFC §19.1. D-192.
 
 **Manifest** — `dockyard.app.yaml`, an app's control plane: it declares tools,
 `ui://` apps, transports, and quality requirements, and drives `validate`,

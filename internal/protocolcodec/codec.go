@@ -13,6 +13,10 @@ import (
 // catch extension-metadata bugs before a host does (brief 03 R7).
 var ErrMalformedMeta = errors.New("protocolcodec: malformed extension metadata")
 
+// ErrUnsupportedOperation identifies a wire operation that does not exist in
+// the selected protocol version.
+var ErrUnsupportedOperation = errors.New("protocolcodec: operation unsupported by protocol version")
+
 // Codec encodes Dockyard domain types into MCP extension wire formats and
 // decodes wire formats back, for one negotiated protocol version. It is the
 // only surface through which the rest of Dockyard touches extension wire
@@ -130,6 +134,20 @@ type Codec interface {
 
 	// DecodeGetTaskResult parses a `GetTaskResult` / `CancelTaskResult`.
 	DecodeGetTaskResult(raw json.RawMessage) (Task, error)
+
+	// EncodeDetailedTaskResult and DecodeDetailedTaskResult handle the modern
+	// flat `tasks/get` result, including status-specific data.
+	EncodeDetailedTaskResult(t DetailedTask) (json.RawMessage, error)
+	DecodeDetailedTaskResult(raw json.RawMessage) (DetailedTask, error)
+
+	// EncodeUpdateTaskParams and DecodeUpdateTaskParams handle modern
+	// `tasks/update` input responses.
+	EncodeUpdateTaskParams(p UpdateTaskParams) (json.RawMessage, error)
+	DecodeUpdateTaskParams(raw json.RawMessage) (UpdateTaskParams, error)
+
+	// EncodeTaskAck and DecodeTaskAck handle modern empty update/cancel results.
+	EncodeTaskAck() (json.RawMessage, error)
+	DecodeTaskAck(raw json.RawMessage) error
 
 	// EncodeListTasksParams returns the JSON of the `tasks/list` request params.
 	EncodeListTasksParams(p ListTasksParams) (json.RawMessage, error)
@@ -556,6 +574,30 @@ func (v1Codec) DecodeGetTaskResult(raw json.RawMessage) (Task, error) {
 		return Task{}, fmt.Errorf("%w: GetTaskResult: %w", ErrMalformedMeta, err)
 	}
 	return taskFromWire(w)
+}
+
+func (v1Codec) EncodeDetailedTaskResult(DetailedTask) (json.RawMessage, error) {
+	return nil, fmt.Errorf("%w: detailed task result", ErrUnsupportedOperation)
+}
+
+func (v1Codec) DecodeDetailedTaskResult(json.RawMessage) (DetailedTask, error) {
+	return DetailedTask{}, fmt.Errorf("%w: detailed task result", ErrUnsupportedOperation)
+}
+
+func (v1Codec) EncodeUpdateTaskParams(UpdateTaskParams) (json.RawMessage, error) {
+	return nil, fmt.Errorf("%w: tasks/update", ErrUnsupportedOperation)
+}
+
+func (v1Codec) DecodeUpdateTaskParams(json.RawMessage) (UpdateTaskParams, error) {
+	return UpdateTaskParams{}, fmt.Errorf("%w: tasks/update", ErrUnsupportedOperation)
+}
+
+func (v1Codec) EncodeTaskAck() (json.RawMessage, error) {
+	return nil, fmt.Errorf("%w: task acknowledgement", ErrUnsupportedOperation)
+}
+
+func (v1Codec) DecodeTaskAck(json.RawMessage) error {
+	return fmt.Errorf("%w: task acknowledgement", ErrUnsupportedOperation)
 }
 
 func (v1Codec) EncodeListTasksParams(p ListTasksParams) (json.RawMessage, error) {

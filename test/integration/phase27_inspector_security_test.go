@@ -54,6 +54,11 @@ func TestPhase27_InspectorSecurity_NewClientAudit(t *testing.T) {
 			funcName: "invokeToolViaSDK",
 			decision: "D-131 (operator-initiated tools/call from the inspector)",
 		},
+		"internal/inspector/elicitation.go": {
+			path:     "internal/inspector/elicitation.go",
+			funcName: "sendModernTaskUpdate",
+			decision: "D-192 (operator-initiated modern tasks/update for inspected task input)",
+		},
 		"internal/inspector/prompts.go": {
 			path:     "internal/inspector/prompts.go",
 			funcName: "dialAttachedPrompt",

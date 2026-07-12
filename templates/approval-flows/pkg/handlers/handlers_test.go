@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/hurtener/dockyard/runtime/tasks"
+	"github.com/hurtener/dockyard/runtime/tool"
 
 	"github.com/hurtener/dockyard/templates/approval-flows/pkg/contracts"
 )
@@ -54,16 +55,46 @@ func TestRequestApproval_EmptyPrompt(t *testing.T) {
 func TestProposeWithEdits_NoFields(t *testing.T) {
 	t.Parallel()
 	h := CreateProposeWithEdits{Engine: nil}
-	res, err := h.Handler(context.Background(), contracts.ProposeWithEditsInput{
+	res, err := h.Handler(context.Background(), tool.Call[contracts.ProposeWithEditsInput]{Input: contracts.ProposeWithEditsInput{
 		Title:       "Send email",
 		Description: "Body update",
 		Fields:      []contracts.Field{},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("Handler: %v", err)
 	}
 	if res.Structured.State != "empty" {
 		t.Errorf("State = %q, want empty", res.Structured.State)
+	}
+}
+
+func TestProposeWithEdits_CoreMRTRThenCreatesTask(t *testing.T) {
+	engine, err := tasks.NewEngine(tasks.NewInMemoryStore(), &tasks.Options{
+		GenerateID: func() (string, error) { return "proposal-task", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := CreateProposeWithEdits{Engine: engine}
+	input := contracts.ProposeWithEditsInput{Title: "Review email", Fields: []contracts.Field{{Key: "subject", Proposed: "Hello"}}}
+	first, err := h.Handler(context.Background(), tool.Call[contracts.ProposeWithEditsInput]{Input: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.CreatedTask != nil || first.InputRequests[approvalInputKey] == nil {
+		t.Fatalf("first result = %+v, want core MRTR input request before task creation", first)
+	}
+	second, err := h.Handler(context.Background(), tool.Call[contracts.ProposeWithEditsInput]{
+		Input: input,
+		InputResponses: map[string]tool.InputResponse{approvalInputKey: tool.ElicitationResponse{
+			Action: "accept", Content: map[string]any{"approved": true, "subject": "Hi"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.CreatedTask == nil || second.CreatedTask.ID != "proposal-task" || !second.CreatedTask.Required {
+		t.Fatalf("retry result CreatedTask = %+v", second.CreatedTask)
 	}
 }
 

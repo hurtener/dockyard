@@ -203,6 +203,20 @@ func newMux(opts Options, log *slog.Logger) http.Handler {
 			})
 			return
 		}
+		if req.Protocol != modernProtocol && req.Protocol != legacyProtocol {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "tasks/elicitation: `protocol` must be 2026-07-28 or 2025-11-25",
+			})
+			return
+		}
+		if req.InputResponses == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "tasks/elicitation: `inputResponses` is required",
+			})
+			return
+		}
 
 		resp, err := opts.Elicitor(r.Context(), req)
 		if err != nil {

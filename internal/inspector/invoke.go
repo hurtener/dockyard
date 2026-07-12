@@ -28,6 +28,9 @@ type InvokeRequest struct {
 	// struct (P3 — no raw protocol struct leaks; the runtime/server schema
 	// validates the payload at the catalog edge before the handler runs).
 	Arguments json.RawMessage `json:"arguments"`
+	// InputResponses and RequestState retry a modern core MRTR tools/call.
+	InputResponses mcpsdk.InputResponseMap `json:"inputResponses,omitempty"`
+	RequestState   string                  `json:"requestState,omitempty"`
 }
 
 // InvokeResponse is the JSON the inspector returns from a successful
@@ -53,6 +56,10 @@ type InvokeResponse struct {
 	// IsError is the MCP CallToolResult.isError flag: a tool-level error
 	// reported to the host rather than a protocol-level error.
 	IsError bool `json:"isError,omitempty"`
+	// InputRequests and RequestState are returned when modern core MRTR needs
+	// operator input. The caller retries with keyed InputResponses.
+	InputRequests mcpsdk.InputRequestMap `json:"inputRequests,omitempty"`
+	RequestState  string                 `json:"requestState,omitempty"`
 }
 
 // ToolInvoker performs one operator-initiated tools/call against the attached
@@ -123,7 +130,11 @@ func invokeAttachedTool(
 
 	client := mcpsdk.NewClient(
 		&mcpsdk.Implementation{Name: "dockyard-inspector", Version: "0.1.0"},
-		nil,
+		&mcpsdk.ClientOptions{
+			// Inspector responses are operator-driven and arrive in a later HTTP
+			// request. Do not let the SDK synchronously fabricate responses.
+			MultiRoundTrip: &mcpsdk.MultiRoundTripOptions{Disabled: true},
+		},
 	)
 	session, err := client.Connect(ctx,
 		&mcpsdk.StreamableClientTransport{Endpoint: baseURL}, nil)
@@ -134,8 +145,10 @@ func invokeAttachedTool(
 	defer func() { _ = session.Close() }()
 
 	result, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
-		Name:      req.Tool,
-		Arguments: args,
+		Name:           req.Tool,
+		Arguments:      args,
+		InputResponses: req.InputResponses,
+		RequestState:   req.RequestState,
 	})
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -146,7 +159,9 @@ func invokeAttachedTool(
 			"dockyard/internal/inspector: tools/call %q returned no result", req.Tool)
 	}
 
-	resp := &InvokeResponse{IsError: result.IsError}
+	resp := &InvokeResponse{
+		IsError: result.IsError, InputRequests: result.InputRequests, RequestState: result.RequestState,
+	}
 	if len(result.Content) > 0 {
 		contentJSON, mErr := json.Marshal(result.Content)
 		if mErr != nil {

@@ -112,11 +112,12 @@ type Engine struct {
 	identifiabl bool
 	life        Lifecycle
 
-	mu      sync.Mutex
-	cancels map[string]context.CancelFunc // taskID → cancel of its run goroutine
-	waiters map[string][]chan struct{}    // taskID → terminal-status signal channels
-	elicits map[string]*elicitation       // taskID → outstanding input_required prompt
-	spans   map[string]obs.SpanContext    // taskID → obs/v1 trace span correlating its events
+	mu           sync.Mutex
+	cancels      map[string]context.CancelFunc                  // taskID → cancel of its run goroutine
+	waiters      map[string][]chan struct{}                     // taskID → terminal-status signal channels
+	elicits      map[string]*elicitation                        // taskID → outstanding input_required prompt
+	inputWaiters map[string]map[string][]chan TaskInputResponse // taskID → request key → waiters
+	spans        map[string]obs.SpanContext                     // taskID → obs/v1 trace span correlating its events
 
 	sweep *purgeSweep // background TTL purge sweep; nil when no interval set
 }
@@ -165,19 +166,20 @@ func NewEngine(store TaskStore, opts *Options) (*Engine, error) {
 	// identify requestors — a receiver that cannot identify requestors must not
 	// advertise tasks/list (RFC §8.5; brief 02 §4.5).
 	e := &Engine{
-		store:       store,
-		codec:       protocolcodec.CodecFor(protocolcodec.DefaultVersion),
-		log:         log,
-		rec:         obs.NewRecorder(emitter, serverID),
-		genID:       genID,
-		pollMS:      pollMS,
-		listOn:      listOn && identifiable,
-		identifiabl: identifiable,
-		life:        life,
-		cancels:     make(map[string]context.CancelFunc),
-		waiters:     make(map[string][]chan struct{}),
-		elicits:     make(map[string]*elicitation),
-		spans:       make(map[string]obs.SpanContext),
+		store:        store,
+		codec:        protocolcodec.CodecFor(protocolcodec.DefaultVersion),
+		log:          log,
+		rec:          obs.NewRecorder(emitter, serverID),
+		genID:        genID,
+		pollMS:       pollMS,
+		listOn:       listOn && identifiable,
+		identifiabl:  identifiable,
+		life:         life,
+		cancels:      make(map[string]context.CancelFunc),
+		waiters:      make(map[string][]chan struct{}),
+		elicits:      make(map[string]*elicitation),
+		inputWaiters: make(map[string]map[string][]chan TaskInputResponse),
+		spans:        make(map[string]obs.SpanContext),
 	}
 	e.sweep = newPurgeSweep(store, life.PurgeInterval, log)
 	return e, nil
@@ -220,6 +222,36 @@ type CreateToolCallParams struct {
 	Handle HandleFunc
 }
 
+// CreatedTask is the protocol-neutral result of accepting work as a task.
+// App-facing packages carry this value; only the server edge selects and
+// encodes a versioned CreateTaskResult wire shape.
+type CreatedTask struct {
+	ID            string
+	Status        string
+	StatusMessage string
+	CreatedAt     time.Time
+	LastUpdatedAt time.Time
+	TTL           *int64
+	PollInterval  *int64
+	Required      bool
+}
+
+// CreateToolTask is the domain-returning task creation API used by tool
+// handlers. Required means a modern caller that did not advertise the Tasks
+// extension must receive the standard missing-required-capability error rather
+// than the handler's ordinary fallback result.
+func (e *Engine) CreateToolTask(ctx context.Context, p CreateToolCallParams, required bool) (CreatedTask, error) {
+	created, err := e.createForToolCall(ctx, p)
+	if err != nil {
+		return CreatedTask{}, err
+	}
+	return CreatedTask{
+		ID: created.ID, Status: string(created.Status), StatusMessage: created.StatusMessage,
+		CreatedAt: created.CreatedAt, LastUpdatedAt: created.LastUpdatedAt,
+		TTL: created.TTL, PollInterval: created.PollInterval, Required: required,
+	}, nil
+}
+
 // CreateForToolCall accepts a task-augmented tools/call: it generates a task
 // ID, durably records the task in the working status, starts the underlying
 // work on a background goroutine, and returns the CreateTaskResult JSON the
@@ -230,19 +262,27 @@ type CreateToolCallParams struct {
 // internal/protocolcodec. The actual tool result is fetched later through
 // tasks/result once the task reaches a terminal status.
 func (e *Engine) CreateForToolCall(ctx context.Context, p CreateToolCallParams) (json.RawMessage, error) {
+	created, err := e.createForToolCall(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	return e.codec.EncodeCreateTaskResult(protocolcodec.CreateTaskResult{Task: created})
+}
+
+func (e *Engine) createForToolCall(ctx context.Context, p CreateToolCallParams) (protocolcodec.Task, error) {
 	if (p.Run == nil) == (p.Handle == nil) {
-		return nil, fmt.Errorf("%w: CreateForToolCall requires exactly one of Run or Handle", ErrInvalidParams)
+		return protocolcodec.Task{}, fmt.Errorf("%w: CreateForToolCall requires exactly one of Run or Handle", ErrInvalidParams)
 	}
 
 	// Enforce the per-requestor concurrent-task cap before anything durable is
 	// written — the brief 02 §4.6 resource-exhaustion guard (RFC §8.5).
 	if err := e.checkConcurrencyCap(ctx, p.AuthContext); err != nil {
-		return nil, err
+		return protocolcodec.Task{}, err
 	}
 
 	id, err := e.genID()
 	if err != nil {
-		return nil, err
+		return protocolcodec.Task{}, err
 	}
 	now := time.Now().UTC()
 	poll := e.pollMS
@@ -265,7 +305,7 @@ func (e *Engine) CreateForToolCall(ctx context.Context, p CreateToolCallParams) 
 		rec.ExpiresAt = now.Add(time.Duration(*ttl) * time.Millisecond)
 	}
 	if err := e.store.Create(ctx, rec); err != nil {
-		return nil, fmt.Errorf("dockyard/runtime/tasks: create task: %w", err)
+		return protocolcodec.Task{}, fmt.Errorf("dockyard/runtime/tasks: create task: %w", err)
 	}
 
 	// Resolve the handler shape: a HandleFunc is adapted into a RunFunc bound to
@@ -304,7 +344,7 @@ func (e *Engine) CreateForToolCall(ctx context.Context, p CreateToolCallParams) 
 	e.log.InfoContext(ctx, "task created",
 		slog.String("taskId", id), slog.String("tool", p.ToolName))
 
-	return e.codec.EncodeCreateTaskResult(protocolcodec.CreateTaskResult{Task: rec.Task()})
+	return rec.Task(), nil
 }
 
 // runTask executes a task's RunFunc and records the terminal outcome. It is the

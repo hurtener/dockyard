@@ -50,6 +50,28 @@ type TaskHandle interface {
 	// pauses mid-task for input (RFC §8.4). RequireInput returns an error if the
 	// task is cancelled while waiting.
 	RequireInput(ctx context.Context, prompt InputPrompt) (InputResponse, error)
+
+	// RequestInput performs the modern Tasks mid-flight lifecycle. The request
+	// is persisted before the task blocks and the matching tasks/update response
+	// is persisted before this method resumes.
+	RequestInput(ctx context.Context, req InputRequest) error
+
+	// ModernInputResponse returns a durably accepted response by request key.
+	ModernInputResponse(ctx context.Context, key string) (TaskInputResponse, bool, error)
+}
+
+func (h *taskHandle) RequestInput(ctx context.Context, req InputRequest) error {
+	_, err := h.engine.RequestInput(ctx, h.id, req)
+	return err
+}
+
+func (h *taskHandle) ModernInputResponse(ctx context.Context, key string) (TaskInputResponse, bool, error) {
+	rec, err := h.engine.store.Get(ctx, h.id)
+	if err != nil {
+		return TaskInputResponse{}, false, err
+	}
+	resp, ok := rec.InputResponses[key]
+	return resp, ok, nil
 }
 
 // InputPrompt is a request for input mid-task — a clean Dockyard type, never a

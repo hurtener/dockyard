@@ -1,14 +1,8 @@
 // Package handlers implements the two approval-flows tool handlers.
 //
-// Each handler is a thin pure function over a typed contract: it builds a
-// prompt from the model's input, creates a task that pauses at
-// input_required carrying that prompt, and returns the task identity to the
-// host. When the user supplies a reply through the bridge's
-// `sendElicitationResponse` notification (Phase 25 / D-134), the host
-// forwards it to the attached server's `tasks/result` endpoint; the
-// handler decodes it against the `ApprovalReply` contract and returns the
-// terminal CallToolResult (the structuredContent the App's terminal
-// renderer consumes).
+// request_approval demonstrates modern task mid-flight input through
+// TaskHandle.RequestInput and tasks/update. propose_with_edits demonstrates
+// core MRTR before creating durable task work.
 //
 // Swap to a real approval store by replacing the body of each handler
 // with a call into your own queue (Slack, a webhook, a database table)
@@ -46,9 +40,10 @@ import (
 // tool: it builds a prompt, creates a task that pauses at input_required
 // carrying that prompt, and returns the prompt body verbatim so the
 // host (or the inspector's Fixtures switcher) can immediately render
-// the `awaiting` state. The task's terminal CallToolResult — what
-// flows through `tasks/result` — carries the user's decision.
+// the `awaiting` state. The completed task carries the user's decision.
 type CreateRequestApproval struct{ Engine *tasks.Engine }
+
+const approvalInputKey = "approval-decision"
 
 // Handler is the contract-first tool handler for create_request_approval.
 // It is wired into the runtime/tool builder.
@@ -84,40 +79,30 @@ func (c CreateRequestApproval) Handler(ctx context.Context, in contracts.Request
 		}, nil
 	}
 
-	// Create the task. The handle runs on a background goroutine and
-	// blocks at RequireInput until the user replies through the bridge.
-	promptJSON, err := json.Marshal(prompt)
-	if err != nil {
-		return tool.Result[contracts.RequestApprovalOutput]{}, fmt.Errorf(
-			"marshal approval prompt: %w", err)
-	}
+	// Create durable work before requesting modern task input.
 	// `runPrompt` is the snapshot the background goroutine sees; we copy
 	// it to avoid a data race with the post-Create mutation that stamps
 	// the task id into the synchronous return value.
 	runPrompt := prompt
-	raw, err := c.Engine.CreateForToolCall(ctx, tasks.CreateToolCallParams{
-		ToolName: "request_approval",
+	created, err := c.Engine.CreateToolTask(ctx, tasks.CreateToolCallParams{
+		ToolName:    "request_approval",
+		AuthContext: tasks.RequestAuthContext(ctx),
 		Handle: func(rc context.Context, h tasks.TaskHandle) (json.RawMessage, error) {
-			return runRequestApproval(rc, h, runPrompt, promptJSON)
+			return runRequestApproval(rc, h, runPrompt)
 		},
-	})
+	}, true)
 	if err != nil {
 		return tool.Result[contracts.RequestApprovalOutput]{}, fmt.Errorf(
 			"create approval task: %w", err)
 	}
-	// Extract the created task's id so the App can post the
-	// elicitation-response against the right task. The runtime's
-	// CreateTaskResult is `{task: {taskId, status, ...}}` —
-	// shallow-decode it. The goroutine has its own snapshot
-	// (`runPrompt`) so writing to `prompt.TaskID` here is race-free.
-	prompt.TaskID = decodeCreatedTaskID(raw)
 	// Return the prompt verbatim. The runtime substitutes a
 	// CreateTaskResult on the wire for a Tasks-capable host; the App
 	// receives the prompt as the first `tool-result` push and renders
 	// the `awaiting` state.
 	return tool.Result[contracts.RequestApprovalOutput]{
-		Text:       fmt.Sprintf("request_approval: %s — awaiting decision", in.Title),
-		Structured: prompt,
+		Text:        fmt.Sprintf("request_approval: %s — awaiting decision", in.Title),
+		Structured:  prompt,
+		CreatedTask: &created,
 	}, nil
 }
 
@@ -129,7 +114,7 @@ func (c CreateRequestApproval) Handler(ctx context.Context, in contracts.Request
 // consumes).
 func runRequestApproval(
 	ctx context.Context, h tasks.TaskHandle,
-	prompt contracts.RequestApprovalOutput, promptJSON []byte,
+	prompt contracts.RequestApprovalOutput,
 ) (json.RawMessage, error) {
 	// Status message — surfaces in the inspector's Tasks panel and any
 	// obs/v1 consumer.
@@ -137,16 +122,47 @@ func runRequestApproval(
 		// A status write that fails is not fatal — the task continues.
 		_ = err
 	}
-	reply, err := h.RequireInput(ctx, tasks.InputPrompt{
-		Message: "approval-flows.request_approval: " + prompt.Title,
-		Schema:  promptJSON,
+	requestPayload, err := json.Marshal(map[string]any{
+		"method": "elicitation/create",
+		"params": map[string]any{
+			"message": "approval-flows.request_approval: " + prompt.Title,
+			"requestedSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"approved": map[string]any{"type": "boolean"},
+					"reason":   map[string]any{"type": "string"},
+				},
+				"required": []string{"approved"},
+			},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal approval input request: %w", err)
+	}
+	err = h.RequestInput(ctx, tasks.InputRequest{
+		Key: approvalInputKey, Method: tasks.InputMethodElicitation, Payload: requestPayload,
 	})
 	if err != nil {
 		return nil, err
 	}
+	response, ok, err := h.ModernInputResponse(ctx, approvalInputKey)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("approval input response was not persisted")
+	}
 	if h.Cancelled() {
 		return nil, errors.New("approval cancelled before a decision was reached")
 	}
+	var elicitation struct {
+		Action  string          `json:"action"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(response.Payload, &elicitation); err != nil {
+		return nil, fmt.Errorf("decode elicitation response: %w", err)
+	}
+	reply := tasks.InputResponse{Data: elicitation.Content, Declined: elicitation.Action != "accept"}
 	terminal := buildRequestApprovalTerminal(prompt, reply)
 	return marshalCallToolResult(terminal,
 		fmt.Sprintf("request_approval: %s — %s",
@@ -209,12 +225,12 @@ func requestApprovalSummary(reply tasks.InputResponse) string {
 // propose_with_edits — propose a structured change for review.
 // ---------------------------------------------------------------------------
 
-// CreateProposeWithEdits is the synchronous half of the
-// propose_with_edits tool. It mirrors CreateRequestApproval's shape.
+// CreateProposeWithEdits performs core MRTR before creating durable work.
 type CreateProposeWithEdits struct{ Engine *tasks.Engine }
 
 // Handler is the contract-first tool handler for create_propose_with_edits.
-func (c CreateProposeWithEdits) Handler(ctx context.Context, in contracts.ProposeWithEditsInput) (tool.Result[contracts.ProposeWithEditsOutput], error) {
+func (c CreateProposeWithEdits) Handler(ctx context.Context, call tool.Call[contracts.ProposeWithEditsInput]) (tool.Result[contracts.ProposeWithEditsOutput], error) {
+	in := call.Input
 	prompt := contracts.ProposeWithEditsOutput{
 		Kind:        "proposal",
 		Title:       in.Title,
@@ -231,78 +247,84 @@ func (c CreateProposeWithEdits) Handler(ctx context.Context, in contracts.Propos
 			Structured: prompt,
 		}, nil
 	}
-	if c.Engine == nil {
-		prompt.Message = "This host did not negotiate the MCP Tasks extension — interactive edits are unavailable."
+	response, ok := call.InputResponses[approvalInputKey]
+	if !ok {
+		schema, err := proposalReplySchema(in.Fields)
+		if err != nil {
+			return tool.Result[contracts.ProposeWithEditsOutput]{}, err
+		}
 		return tool.Result[contracts.ProposeWithEditsOutput]{
-			Text:       fmt.Sprintf("propose_with_edits: %s", in.Title),
+			Text:       fmt.Sprintf("propose_with_edits: %s — review required", in.Title),
 			Structured: prompt,
+			InputRequests: map[string]tool.InputRequest{approvalInputKey: tool.ElicitationRequest{
+				Mode: "form", Message: "Review and edit: " + in.Title, RequestedSchema: schema,
+			}},
 		}, nil
 	}
-	promptJSON, err := json.Marshal(prompt)
-	if err != nil {
-		return tool.Result[contracts.ProposeWithEditsOutput]{}, fmt.Errorf(
-			"marshal proposal prompt: %w", err)
+	elicited, ok := response.(tool.ElicitationResponse)
+	if !ok {
+		return tool.Result[contracts.ProposeWithEditsOutput]{}, fmt.Errorf("propose_with_edits: response %q is not elicitation data", approvalInputKey)
 	}
-	runPrompt := prompt
-	raw, err := c.Engine.CreateForToolCall(ctx, tasks.CreateToolCallParams{
-		ToolName: "propose_with_edits",
-		Handle: func(rc context.Context, h tasks.TaskHandle) (json.RawMessage, error) {
-			return runProposeWithEdits(rc, h, runPrompt, promptJSON)
-		},
-	})
-	if err != nil {
-		return tool.Result[contracts.ProposeWithEditsOutput]{}, fmt.Errorf(
-			"create proposal task: %w", err)
-	}
-	prompt.TaskID = decodeCreatedTaskID(raw)
-	return tool.Result[contracts.ProposeWithEditsOutput]{
-		Text:       fmt.Sprintf("propose_with_edits: %s — awaiting decision", in.Title),
-		Structured: prompt,
-	}, nil
-}
-
-// decodeCreatedTaskID shallow-decodes a CreateTaskResult to pull out the
-// task id. The CreateTaskResult JSON is `{task: {taskId, ...}}`. Returns
-// "" when the shape is unexpected — the App still renders, the
-// elicitation-response just lacks a useful task id (and the inspector
-// surfaces a "task not found" error which the developer can spot).
-func decodeCreatedTaskID(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var envelope struct {
-		Task struct {
-			TaskID string `json:"taskId"`
-		} `json:"task"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return ""
-	}
-	return envelope.Task.TaskID
-}
-
-// runProposeWithEdits is the task body for propose_with_edits.
-func runProposeWithEdits(
-	ctx context.Context, h tasks.TaskHandle,
-	prompt contracts.ProposeWithEditsOutput, promptJSON []byte,
-) (json.RawMessage, error) {
-	if err := h.Status(ctx, "awaiting proposal review: "+prompt.Title); err != nil {
-		_ = err
-	}
-	reply, err := h.RequireInput(ctx, tasks.InputPrompt{
-		Message: "approval-flows.propose_with_edits: " + prompt.Title,
-		Schema:  promptJSON,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if h.Cancelled() {
-		return nil, errors.New("review cancelled before a decision was reached")
+	reply := tasks.InputResponse{Declined: elicited.Action != "accept"}
+	if !reply.Declined {
+		reply.Data, _ = json.Marshal(proposalReplyContent(elicited.Content, in.Fields))
 	}
 	terminal := buildProposeWithEditsTerminal(prompt, reply)
-	return marshalCallToolResult(terminal,
-		fmt.Sprintf("propose_with_edits: %s — %s",
-			prompt.Title, proposeWithEditsSummary(reply)))
+	if c.Engine == nil {
+		return tool.Result[contracts.ProposeWithEditsOutput]{
+			Text: fmt.Sprintf("propose_with_edits: %s — %s", in.Title, proposeWithEditsSummary(reply)), Structured: terminal,
+		}, nil
+	}
+	created, err := c.Engine.CreateToolTask(ctx, tasks.CreateToolCallParams{
+		ToolName: "propose_with_edits", AuthContext: tasks.RequestAuthContext(ctx),
+		Run: func(context.Context) (json.RawMessage, error) {
+			return marshalCallToolResult(terminal, fmt.Sprintf("propose_with_edits: %s — %s", in.Title, proposeWithEditsSummary(reply)))
+		},
+	}, true)
+	if err != nil {
+		return tool.Result[contracts.ProposeWithEditsOutput]{}, fmt.Errorf("create proposal task: %w", err)
+	}
+	return tool.Result[contracts.ProposeWithEditsOutput]{CreatedTask: &created}, nil
+}
+
+func proposalReplySchema(fields []contracts.Field) (json.RawMessage, error) {
+	properties := map[string]any{
+		"approved": map[string]any{"type": "boolean"},
+		"reason":   map[string]any{"type": "string"},
+	}
+	for _, field := range fields {
+		property := map[string]any{"type": "string"}
+		switch field.Type {
+		case contracts.FieldTypeNumber:
+			property["type"] = "number"
+		case contracts.FieldTypeBoolean:
+			property["type"] = "boolean"
+		case contracts.FieldTypeEnum:
+			values := make([]any, len(field.Options))
+			for i, option := range field.Options {
+				values[i] = option.Value
+			}
+			property["enum"] = values
+		}
+		properties[field.Key] = property
+	}
+	return json.Marshal(map[string]any{
+		"type":       "object",
+		"properties": properties,
+		"required":   []string{"approved"},
+	})
+}
+
+func proposalReplyContent(content map[string]any, fields []contracts.Field) map[string]any {
+	reply := map[string]any{"approved": content["approved"], "reason": content["reason"]}
+	edits := make(map[string]any, len(fields))
+	for _, field := range fields {
+		if value, ok := content[field.Key]; ok {
+			edits[field.Key] = value
+		}
+	}
+	reply["edits"] = edits
+	return reply
 }
 
 // buildProposeWithEditsTerminal builds the terminal structuredContent.
@@ -391,8 +413,8 @@ func decodeApprovalReply(raw []byte) (contracts.ApprovalReply, error) {
 	return reply, nil
 }
 
-// marshalCallToolResult builds the terminal CallToolResult JSON the
-// task's tasks/result returns. It bridges the typed tool.Result shape
+// marshalCallToolResult builds the terminal CallToolResult stored on the task.
+// It bridges the typed tool.Result shape
 // (which is a runtime/tool concept) into the wire shape MCP clients
 // expect (the SDK's CallToolResult: content[] + structuredContent +
 // isError).

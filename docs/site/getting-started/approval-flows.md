@@ -28,7 +28,7 @@ my-approvals/
 ├── main.go                    # boots a real tasks.Engine (D-135)
 ├── internal/
 │   ├── contracts/             # RequestApproval{Input,Output}, ProposeWithEdits…
-│   └── handlers/              # the handlers drive the input_required round-trip
+│   └── handlers/              # handlers drive approval before or during a task
 ├── fixtures/                  # six fixtures per tool
 └── web/
     └── src/
@@ -43,8 +43,8 @@ my-approvals/
 | `request_approval`    | Pause for human approval of a single decision; returns approved/rejected + reason. |
 | `propose_with_edits`  | Propose structured changes (fields with current + proposed values); the user edits and approves. |
 
-Both declare `task_support: required` — the `input_required` round-trip
-is the product, not an optional capability. The scaffolded `main.go`
+Both declare `task_support: required` — durable approval work is the product,
+not an optional capability. The scaffolded `main.go`
 attaches a real `tasks.Engine` (decision
 [D-135](/reference/decisions)) so the tools run as durable tasks against
 the real `runtime/server`.
@@ -86,8 +86,9 @@ dockyard inspect --url http://127.0.0.1:8080 --dir .   # terminal 2
 ```
 
 Fire `request_approval` from the Tools tab. The App renders an approval
-card; click Approve. The Tasks tab walks the lifecycle through the
-`input_required` round-trip:
+card; click Approve. Depending on when approval is needed, the inspector
+shows either a core MRTR retry before task creation or task input during the
+task lifecycle:
 
 ![request approval](/screenshots/phase-25/request-approval.png)
 
@@ -102,27 +103,38 @@ The Tasks panel renders each task's lifecycle as a Timeline:
 
 ## How the round-trip works
 
-1. Host calls `tools/call request_approval` → server returns a
-   `CreateTaskResult` because the tool is task-augmented.
-2. Handler runs as a `TaskHandle`; calls
-   `handle.RequestInput(...)` → task moves to `input_required`.
-3. App renders the approval card, reads the prompt from
-   `hostContext`. User clicks Approve.
-4. App sends a `ui/elicitation-response` bridge notification
-   ([D-134](/reference/decisions)) → inspector relays it to the server
-   via `tasks/result`.
-5. Handler's `RequestInput` returns with the user's payload; the
-   handler completes the task with the final structured output.
+There are two standards-based input lifecycles. Do not combine their state.
+
+### Approval before durable work: core MRTR
+
+1. The host calls `tools/call` and receives `resultType: "input_required"`
+   with `inputRequests` and optional opaque `requestState`.
+2. The host collects the response, then invokes `tools/call` again with a new
+   JSON-RPC ID, the original arguments, `inputResponses`, and the echoed
+   `requestState`.
+3. The retried call completes or creates the durable task. Core MRTR does not
+   update an existing task and never uses `tasks/update`.
+
+### Approval during durable work: task update
+
+1. The original `tools/call` returns a `CreateTaskResult`.
+2. The handler requests input through its `TaskHandle`; `tasks/get` then
+   reports `status: "input_required"` with outstanding `inputRequests`.
+3. The host collects the response and sends matching `inputResponses` through
+   `tasks/update`; it does not retry the original `tools/call` and there is no
+   core `requestState` on the task.
+4. The host resumes polling with `tasks/get` until the task completes.
 
 The Tasks panel renders the whole sequence as a Timeline so you can
 correlate UI events with task state transitions.
 
 ::: warning Dockyard-host-only
-The inline elicitation round-trip and live task progress are **Dockyard
-extensions** — they work against a Dockyard-aware host (the inspector, or Harbor
-as the MCP client), but a stock host (e.g. Claude Desktop) renders the App and
-ignores them. Design the App so its core value does not depend on the
-round-trip. See the
+The App bridge notification that carries an inline response and live task
+progress are **Dockyard extensions**. The inspector translates the explicit
+operator action into the appropriate standard MCP operation: retry the original
+method for core MRTR, or call `tasks/update` for task input. A stock host that
+does not implement those bridge notifications ignores them. Design the App so
+its core value does not depend on this inline convenience. See the
 [Tasks×Apps note in the UI-resources guide](/guides/ui-resources).
 :::
 

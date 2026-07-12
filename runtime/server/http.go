@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/hurtener/dockyard/runtime/tasks"
 )
 
 // jsonMediaType is the media type a streamable-HTTP MCP request body must carry
@@ -175,12 +177,14 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 			// The SDK creates a temporary ServerSession for a modern request so
 			// its normal handler APIs still work. Mark the request before it
 			// reaches the SDK so handler edges do not publish that temporary ID.
-			return statelessRequestMiddleware(h)
-		}
-		if s.tasksMount != nil {
+			h = statelessRequestMiddleware(h)
+		} else if s.tasksMount != nil {
 			// Tasks stays on the legacy lifecycle until Phase 33 migrates its
 			// wire layer, so it cannot interpret a modern stateless frame.
-			return s.tasksMount.HTTPMiddleware(h)
+			h = s.tasksMount.HTTPMiddleware(h)
+		}
+		if s.tasksAuthContext != nil {
+			h = taskAuthMiddleware(h, s.tasksAuthContext)
 		}
 		return h
 	}
@@ -263,6 +267,17 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 	h = traceparentMiddleware(h)
 
 	return h, nil
+}
+
+func taskAuthMiddleware(next http.Handler, auth tasks.AuthContextFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := tasks.WithRequestAuthContext(r.Context(), auth(r))
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func taskAuthContext(ctx context.Context) string {
+	return tasks.RequestAuthContext(ctx)
 }
 
 func (o *HTTPOptions) protocolMode() (ProtocolMode, error) {
