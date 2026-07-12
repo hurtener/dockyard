@@ -1,7 +1,9 @@
 # Phase 33 protocol design note
 
-**Status:** Proposed for design-owner approval  
-**Researched:** 2026-07-11  
+**Status:** Proposed for design-owner approval
+
+**Researched:** 2026-07-11
+
 **Implementation target:** MCP core draft `2026-07-28` plus Tasks extension
 `io.modelcontextprotocol/tasks` at `29f83d5c8b34966d7795fb10046245f47c8d02c0`
 
