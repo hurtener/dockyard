@@ -91,7 +91,7 @@ func CrossCheck(schema *jsonschema.Schema, tsTypeName string, ts []byte) error {
 	if schema == nil {
 		return fmt.Errorf("%w: nil schema for %q", ErrSchemaTSDrift, tsTypeName)
 	}
-	if !schemaIsObject(schema) {
+	if !schemaIsObject(schema, schema, make(map[*jsonschema.Schema]bool)) {
 		return fmt.Errorf("%w: schema for %q is not an object schema", ErrSchemaTSDrift, tsTypeName)
 	}
 
@@ -101,7 +101,7 @@ func CrossCheck(schema *jsonschema.Schema, tsTypeName string, ts []byte) error {
 			ErrSchemaTSDrift, tsTypeName)
 	}
 
-	schemaProps := schemaProperties(schema)
+	schemaProps := schemaProperties(schema, schema, make(map[*jsonschema.Schema]bool))
 	tsByName := make(map[string]tsField, len(tsFields))
 	for _, f := range tsFields {
 		tsByName[f.name] = f
@@ -172,11 +172,26 @@ func CheckStale(onDisk, fresh []byte) error {
 
 // schemaIsObject reports whether s declares JSON Schema type "object", via
 // either the single Type field or the multi-valued Types field.
-func schemaIsObject(s *jsonschema.Schema) bool {
+func schemaIsObject(root, s *jsonschema.Schema, seen map[*jsonschema.Schema]bool) bool {
+	if s == nil || seen[s] {
+		return false
+	}
+	seen[s] = true
 	if s.Type == "object" {
 		return true
 	}
-	return slices.Contains(s.Types, "object")
+	if slices.Contains(s.Types, "object") {
+		return true
+	}
+	if target := localRef(root, s.Ref); target != nil {
+		return schemaIsObject(root, target, seen)
+	}
+	for _, branch := range s.AllOf {
+		if schemaIsObject(root, branch, seen) {
+			return true
+		}
+	}
+	return false
 }
 
 // schemaProp is one top-level property of a contract's JSON Schema, reduced to
@@ -189,17 +204,44 @@ type schemaProp struct {
 // schemaProperties returns the contract's top-level properties keyed by name. A
 // property is required when it appears in the schema's Required list; its kind
 // is the normalised value-type (see schemaKind).
-func schemaProperties(s *jsonschema.Schema) map[string]schemaProp {
+func schemaProperties(root, s *jsonschema.Schema, seen map[*jsonschema.Schema]bool) map[string]schemaProp {
+	if s == nil || seen[s] {
+		return map[string]schemaProp{}
+	}
+	seen[s] = true
+	props := map[string]schemaProp{}
+	if target := localRef(root, s.Ref); target != nil {
+		for name, prop := range schemaProperties(root, target, seen) {
+			props[name] = prop
+		}
+	}
+	for _, branch := range s.AllOf {
+		for name, prop := range schemaProperties(root, branch, seen) {
+			if old, ok := props[name]; ok {
+				prop.required = prop.required || old.required
+			}
+			props[name] = prop
+		}
+	}
 	required := make(map[string]struct{}, len(s.Required))
 	for _, r := range s.Required {
 		required[r] = struct{}{}
 	}
-	props := make(map[string]schemaProp, len(s.Properties))
 	for name, ps := range s.Properties {
 		_, isRequired := required[name]
 		props[name] = schemaProp{required: isRequired, kind: schemaKind(ps)}
 	}
 	return props
+}
+
+func localRef(root *jsonschema.Schema, ref string) *jsonschema.Schema {
+	const prefix = "#/$defs/"
+	if !strings.HasPrefix(ref, prefix) {
+		return nil
+	}
+	key := strings.TrimPrefix(ref, prefix)
+	key = strings.ReplaceAll(strings.ReplaceAll(key, "~1", "/"), "~0", "~")
+	return root.Defs[key]
 }
 
 // schemaKind classifies a property sub-schema into a coarse value-type kind.

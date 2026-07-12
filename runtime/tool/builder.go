@@ -51,10 +51,9 @@ type Builder[In, Out any] struct {
 	runtime *handlerRuntime[In, Out]
 }
 
-// New starts a contract-first tool declaration. In is the tool's input contract
-// type and Out its output contract type — both must be object types (a struct
-// or a string-keyed map), the MCP requirement for tool schemas. name is the
-// tool's wire name and is required.
+// New starts a contract-first tool declaration. In must be an object contract;
+// Out may be any JSON-representable Go type. name is the tool's wire name and
+// is required.
 //
 // The type parameters are bound here, at construction, rather than by fluent
 // .Input[T]()/.Output[T]() methods, because Go does not permit type parameters
@@ -121,7 +120,7 @@ func (b *Builder[In, Out]) Schemas() (in, out *jsonschema.Schema, err error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("dockyard/runtime/tool: tool %q input contract: %w", b.name, err)
 	}
-	out, err = codegen.SchemaFor[Out]()
+	out, err = codegen.OutputSchemaFor[Out]()
 	if err != nil {
 		return nil, nil, fmt.Errorf("dockyard/runtime/tool: tool %q output contract: %w", b.name, err)
 	}

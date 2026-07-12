@@ -110,6 +110,11 @@ type Options struct {
 	// is a wire-compat escape hatch, not a recommended posture. The flat key's
 	// literal lives only in internal/protocolcodec (P3).
 	EmitLegacyToolUIMeta bool
+	// ResourceListCache controls cache metadata on both modern resources/list
+	// and resources/templates/list responses. Legacy responses omit it. Its zero
+	// value is public and immediately stale because declarations contain no
+	// resource body or principal-specific content.
+	ResourceListCache CachePolicy
 }
 
 // ExtensionCapability is one MCP extension-capability advertisement: a
@@ -204,6 +209,11 @@ func New(info Info, opts *Options) (*Server, error) {
 	if err := info.validate(); err != nil {
 		return nil, err
 	}
+	if opts != nil {
+		if err := opts.ResourceListCache.validate(); err != nil {
+			return nil, err
+		}
+	}
 	log := opts.logger()
 	caps, err := opts.serverCapabilities()
 	if err != nil {
@@ -226,6 +236,7 @@ func New(info Info, opts *Options) (*Server, error) {
 		Version: info.Version,
 	}, sdkOpts)
 	mcpSrv.AddReceivingMiddleware(createdTaskResultMiddleware())
+	mcpSrv.AddReceivingMiddleware(responseSemanticsMiddleware(opts))
 	s := &Server{
 		info:                 info,
 		log:                  log,

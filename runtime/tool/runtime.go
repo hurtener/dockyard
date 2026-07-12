@@ -118,12 +118,13 @@ func (rt *handlerRuntime[In, Out]) serve(ctx context.Context, call server.ToolCa
 	rt.flagResult(res.Text, res.Structured)
 
 	return server.ToolOutput[Out]{
-		Text:          res.Text,
-		Structured:    res.Structured,
-		Meta:          res.Meta,
-		InputRequests: res.InputRequests,
-		RequestState:  res.RequestState,
-		CreatedTask:   res.CreatedTask,
+		Text:              res.Text,
+		Structured:        res.Structured,
+		StructuredPresent: res.StructuredPresent,
+		Meta:              res.Meta,
+		InputRequests:     res.InputRequests,
+		RequestState:      res.RequestState,
+		CreatedTask:       res.CreatedTask,
 	}, nil
 }
 

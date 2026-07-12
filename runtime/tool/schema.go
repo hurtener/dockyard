@@ -26,3 +26,25 @@ import (
 func MarshalSchema(s *jsonschema.Schema) ([]byte, error) {
 	return codegen.Marshal(s)
 }
+
+// SchemaOption configures generated contract schemas.
+type SchemaOption = codegen.SchemaOption
+
+// WithEnum preserves a named Go constant set in generated schemas.
+var WithEnum = codegen.WithEnum
+
+// RegisterEnumMetadata is called by generated contract metadata so runtime
+// builder schemas retain the enum sets discovered from Go source.
+func RegisterEnumMetadata(typeName string, values ...any) {
+	codegen.RegisterEnumMetadata(typeName, values...)
+}
+
+// InputSchemaFor generates the object-only input contract schema.
+func InputSchemaFor[T any](opts ...SchemaOption) (*jsonschema.Schema, error) {
+	return codegen.SchemaFor[T](opts...)
+}
+
+// OutputSchemaFor generates an output schema for any JSON-representable type.
+func OutputSchemaFor[T any](opts ...SchemaOption) (*jsonschema.Schema, error) {
+	return codegen.OutputSchemaFor[T](opts...)
+}

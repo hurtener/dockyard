@@ -20,6 +20,11 @@ type Result[Out any] struct {
 	// Structured is the typed, UI-facing output rendered into
 	// structuredContent. Its type is the tool's output contract.
 	Structured Out
+	// StructuredPresent forces structuredContent to be emitted when Structured
+	// is a nil pointer, map, slice, or interface. Such a typed
+	// nil is otherwise absent; forcing it emits explicit JSON null and its MCP
+	// JSON text fallback while preserving the typed Out contract.
+	StructuredPresent bool
 	// Meta is optional extension metadata rendered into _meta.
 	Meta map[string]any
 	// InputRequests asks the client to fulfill typed requests and retry this

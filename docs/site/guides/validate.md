@@ -31,6 +31,12 @@ The checks:
 | stale-codegen      | the generated `*.gen.*` files no longer match the Go source  |
 | CrossCheck         | the generated TS would differ from on-disk if regenerated (D-113) |
 
+The schema check accepts only JSON Schema 2020-12. It rejects external `$ref`
+and `$dynamicRef` targets and bounds schema bytes, depth, node count, and local
+reference work. Input roots must resolve to objects; output roots may resolve to
+any JSON value. The check is against Dockyard's pinned release-candidate
+snapshot and does not claim conformance to an unaudited final specification.
+
 `dockyard build` runs `validate` first; a blocker fails the build.
 
 ## `dockyard test`
@@ -77,3 +83,4 @@ your CI workflow.
 - [`validate` agent skill](/agent-skills/)
 - [Contracts (Design A)](contracts)
 - [Decisions: D-113 — `dockyard validate` runs CrossCheck](/reference/decisions)
+- [Decision D-193 — bounded local schema validation](/reference/decisions)

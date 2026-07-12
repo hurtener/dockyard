@@ -2,7 +2,6 @@ package testgate
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -131,14 +130,10 @@ func runGolden(projectDir string, m *manifest.Manifest) Result {
 					fmt.Sprintf("%s is missing — run `dockyard generate`", rel))
 				continue
 			}
-			var s jsonschema.Schema
-			if err := json.Unmarshal(raw, &s); err != nil {
+			s, err := codegen.ValidateSchema(raw, side == "input")
+			if err != nil {
 				problems = append(problems,
-					fmt.Sprintf("%s is not valid JSON Schema: %v", rel, err))
-				continue
-			}
-			if _, err := s.Resolve(&jsonschema.ResolveOptions{ValidateDefaults: true}); err != nil {
-				problems = append(problems, fmt.Sprintf("%s does not resolve: %v", rel, err))
+					fmt.Sprintf("%s is not conformant JSON Schema: %v", rel, err))
 				continue
 			}
 			checked++
@@ -147,7 +142,10 @@ func runGolden(projectDir string, m *manifest.Manifest) Result {
 			// "<pkg>.<TypeName>" yields the TS interface name.
 			if tsErr == nil {
 				if tsName := contractTypeName(t, side); tsName != "" {
-					if err := codegen.CrossCheck(&s, tsName, tsRaw); err != nil {
+					if side == "output" && !schemaObject(s) {
+						continue
+					}
+					if err := codegen.CrossCheck(s, tsName, tsRaw); err != nil {
 						problems = append(problems,
 							fmt.Sprintf("schema/TypeScript snapshot drift for %s %s: %v",
 								t.Name, side, err))
@@ -166,6 +164,20 @@ func runGolden(projectDir string, m *manifest.Manifest) Result {
 	res.Passed = true
 	res.Detail = fmt.Sprintf("%d schema snapshot(s) present, valid, and coherent with TypeScript", checked)
 	return res
+}
+
+func schemaObject(s *jsonschema.Schema) bool {
+	// CrossCheck is object-specific; arbitrary JSON outputs are still checked
+	// for source freshness and schema conformance.
+	if s.Type == "object" {
+		return true
+	}
+	for _, typ := range s.Types {
+		if typ == "object" {
+			return true
+		}
+	}
+	return false
 }
 
 // runSpecCompliance is the MCP spec-compliance category. It reuses

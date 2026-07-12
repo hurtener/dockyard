@@ -98,6 +98,16 @@ type auditTree struct {
 	Right *auditTree `json:"right,omitempty"`
 }
 
+type recursiveMeta struct {
+	ID string `json:"id"`
+}
+type recursiveSpecial struct {
+	*recursiveMeta
+	When    *time.Time        `json:"when"`
+	Payload *json.RawMessage  `json:"payload"`
+	Next    *recursiveSpecial `json:"next,omitempty"`
+}
+
 func TestSchemaFor_TimeAndRawMessage(t *testing.T) {
 	s, err := codegen.SchemaFor[shapesContract]()
 	if err != nil {
@@ -252,9 +262,7 @@ func TestSchemaFor_Embedded(t *testing.T) {
 	}
 }
 
-func TestSchemaFor_RecursiveRejected(t *testing.T) {
-	// Finding 5: a recursive contract fails with a specific, documented error —
-	// ErrRecursiveContract — not a vague upstream "cycle detected" string.
+func TestSchemaFor_RecursiveReferences(t *testing.T) {
 	cases := []struct {
 		name string
 		fn   func() (*jsonschema.Schema, error)
@@ -268,23 +276,127 @@ func TestSchemaFor_RecursiveRejected(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := c.fn()
-			if err == nil {
-				t.Fatal("expected a recursion error")
+			s, err := c.fn()
+			if err != nil {
+				t.Fatalf("recursive schema: %v", err)
 			}
-			if !errors.Is(err, codegen.ErrRecursiveContract) {
-				t.Errorf("error %v should wrap ErrRecursiveContract", err)
+			raw, err := codegen.Marshal(s)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if !errors.Is(err, codegen.ErrInvalidContract) {
-				t.Errorf("ErrRecursiveContract should also wrap ErrInvalidContract, got %v", err)
+			if !strings.Contains(string(raw), `"$ref": "#/$defs/`) {
+				t.Fatalf("schema has no local recursive ref:\n%s", raw)
 			}
-			if !strings.Contains(err.Error(), "D-052") {
-				t.Errorf("error should cite the D-052 limitation, got %v", err)
-			}
-			if strings.Contains(err.Error(), "cycle detected for type") {
-				t.Errorf("error should not leak the vague upstream string, got %v", err)
+			if _, err := codegen.ValidateSchema(raw, true); err != nil {
+				t.Fatalf("recursive schema is nonconformant: %v", err)
 			}
 		})
+	}
+}
+
+func TestOutputSchemaFor_AllJSONKinds(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		fn   func() (*jsonschema.Schema, error)
+	}{
+		{"string", func() (*jsonschema.Schema, error) { return codegen.OutputSchemaFor[string]() }},
+		{"array", func() (*jsonschema.Schema, error) { return codegen.OutputSchemaFor[[]int]() }},
+		{"boolean", func() (*jsonschema.Schema, error) { return codegen.OutputSchemaFor[bool]() }},
+		{"raw", func() (*jsonschema.Schema, error) { return codegen.OutputSchemaFor[json.RawMessage]() }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, err := test.fn()
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := codegen.Marshal(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := codegen.ValidateSchema(raw, false); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestRecursiveSchemaPreservesSpecialPointersEmbeddingAndInstances(t *testing.T) {
+	s, err := codegen.SchemaFor[recursiveSpecial]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := codegen.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := codegen.ValidateSchema(raw, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	when := parsed.Properties["when"]
+	if !slices.Contains(when.Types, "null") || !slices.Contains(when.Types, "string") || when.Format != "date-time" {
+		t.Fatalf("when schema = %#v", when)
+	}
+	payload := parsed.Properties["payload"]
+	if len(payload.AnyOf) != 2 || payload.AnyOf[1].Type != "" || payload.AnyOf[1].Items != nil {
+		t.Fatalf("payload schema = %#v", payload)
+	}
+	for _, required := range parsed.Required {
+		if required == "id" {
+			t.Fatal("promoted field under nil embedded pointer must be optional")
+		}
+	}
+	resolved, err := parsed.Resolve(&jsonschema.ResolveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := map[string]any{"when": "2026-07-12T12:00:00Z", "payload": map[string]any{"x": true}, "next": nil}
+	if err := resolved.Validate(good); err != nil {
+		t.Fatalf("valid instance: %v", err)
+	}
+	bad := map[string]any{"when": 123, "payload": nil}
+	if err := resolved.Validate(bad); err == nil {
+		t.Fatal("invalid instance passed")
+	}
+}
+
+func TestRecursiveEmbeddedFieldConflictMatchesEncodingJSON(t *testing.T) {
+	type left struct {
+		Value string
+	}
+	type right struct {
+		Value string
+	}
+	type conflict struct {
+		left
+		right
+		Next *conflict `json:"next,omitempty"`
+	}
+	s, err := codegen.SchemaFor[conflict]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Properties["Value"]; ok {
+		t.Fatal("ambiguous equally dominant embedded JSON field must be omitted")
+	}
+}
+
+func TestRecursiveEmbeddedTaggedFieldDominates(t *testing.T) {
+	type tagged struct {
+		Value string `json:"Value"`
+	}
+	type plain struct{ Value string }
+	type contract struct {
+		tagged
+		plain
+		Next *contract `json:"next,omitempty"`
+	}
+	s, err := codegen.SchemaFor[contract]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Properties["Value"]; !ok {
+		t.Fatal("tagged same-depth embedded field should dominate untagged field")
 	}
 }
 

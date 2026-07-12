@@ -49,12 +49,13 @@ type ToolDef struct {
 // reaching past the runtime into the raw SDK result type (P3 — the runtime
 // surface does not expose raw protocol structs).
 type ToolOutput[Out any] struct {
-	Text          string
-	Structured    Out
-	Meta          map[string]any
-	InputRequests map[string]InputRequest
-	RequestState  RequestState
-	CreatedTask   *tasks.CreatedTask
+	Text              string
+	Structured        Out
+	StructuredPresent bool
+	Meta              map[string]any
+	InputRequests     map[string]InputRequest
+	RequestState      RequestState
+	CreatedTask       *tasks.CreatedTask
 }
 
 // ToolOutputFunc is a tool handler that returns the full ToolOutput split.
@@ -328,14 +329,17 @@ func addToolWithSchemasCore[In, Out any](
 		// handler's Text — the SDK only auto-fills Content with the JSON of
 		// the output when Content is left unset (RFC §6.3).
 		//
-		// When the handler returns no model-facing text, emit a *non-nil but
-		// empty* Content slice rather than a TextContent block holding an empty
-		// string. A non-nil empty slice still suppresses the SDK's auto-fill of
-		// the output JSON into content[] (the SDK only auto-fills when Content
-		// is nil), so no UI-shaped payload leaks into the model context — and
-		// no empty TextContent block is emitted either (D-043, the Wave 2 audit
-		// quirk). A non-empty Text yields exactly one TextContent block.
+		// When the handler returns no model-facing text, start with a non-nil
+		// empty Content slice so object output is not duplicated into content[].
+		// The SDK deliberately appends serialized JSON for primitive and array
+		// output, as modern MCP says servers SHOULD provide that fallback. Keep
+		// it: protocol compliance takes precedence over minimizing model context.
 		res := &mcpsdk.CallToolResult{Content: []mcpsdk.Content{}}
+		present, explicitNull := structuredPresence(result.Structured, result.StructuredPresent)
+		setStructuredPresence(ctx, present, explicitNull)
+		if explicitNull {
+			res.StructuredContent = json.RawMessage("null")
+		}
 		if result.Text != "" {
 			res.Content = []mcpsdk.Content{&mcpsdk.TextContent{Text: result.Text}}
 		}

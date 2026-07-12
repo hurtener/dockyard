@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -16,21 +19,13 @@ import (
 // callers can branch with errors.Is.
 var ErrInvalidContract = errors.New("dockyard/internal/codegen: invalid contract type")
 
-// ErrRecursiveContract is returned when a contract type is recursive or
-// self-referential (a type that, directly or transitively, contains itself).
-//
-// Recursion is an explicit, documented V1 limitation of the schema generator
-// (see D-052). JSON Schema can express cycles with `$ref`/`$defs`, but the
-// pinned inference engine — github.com/google/jsonschema-go, the single schema
-// dialect Dockyard standardizes on (RFC §6.2) — does not emit `$defs` for
-// recursive Go types: it hard-fails with an internal "cycle detected" deep in
-// its reflection walk, and exposes no hook to break the cycle or post-process
-// it into a `$ref`. Rather than leak that vague upstream string, SchemaForType
-// detects the cycle up front and returns this specific, actionable error.
-//
-// ErrRecursiveContract also wraps ErrInvalidContract, so existing callers that
-// branch on errors.Is(err, ErrInvalidContract) keep working.
+// ErrRecursiveContract is retained for callers compiled against the former
+// recursion limitation. Recursive contracts now generate local $defs/$ref
+// graphs and no new operation returns this error.
 var ErrRecursiveContract = fmt.Errorf("%w: recursive (self-referential) contract type", ErrInvalidContract)
+
+// Draft202012 is the only JSON Schema dialect emitted and accepted by Dockyard.
+const Draft202012 = "https://json-schema.org/draft/2020-12/schema"
 
 // contractTypeSchemas overrides the inference engine's default translation for
 // standard-library types whose default schema is wrong or lossy for a tool
@@ -60,6 +55,17 @@ type schemaConfig struct {
 	// "Severity"), to the JSON values of its constant set, so the generator can
 	// stamp an `enum` array onto every property of that type.
 	enums map[string][]any
+}
+
+var registeredEnums sync.Map
+
+// RegisterEnumMetadata installs generated source metadata for runtime schema
+// inference. Values are copied and keyed by package-qualified Go type name.
+func RegisterEnumMetadata(typeName string, values ...any) {
+	if typeName == "" || len(values) == 0 {
+		return
+	}
+	registeredEnums.Store(typeName, append([]any(nil), values...))
 }
 
 // SchemaOption configures schema generation.
@@ -121,10 +127,15 @@ func resolveSchemaConfig(opts []SchemaOption) schemaConfig {
 // fields are optional, all others required; a `jsonschema` struct tag becomes a
 // property description. time.Time carries format: date-time and json.RawMessage
 // is an unconstrained schema (D-050). Pass WithEnum to attach an `enum` array
-// for a named-constant type (D-051). A recursive contract returns
-// ErrRecursiveContract (D-052).
+// for a named-constant type (D-051). Recursive contracts use local $defs/$ref.
 func SchemaFor[T any](opts ...SchemaOption) (*jsonschema.Schema, error) {
 	return SchemaForType(reflect.TypeFor[T](), opts...)
+}
+
+// OutputSchemaFor infers an output contract. Unlike tool input, MCP structured
+// output may be any JSON value.
+func OutputSchemaFor[T any](opts ...SchemaOption) (*jsonschema.Schema, error) {
+	return outputSchemaForType(reflect.TypeFor[T](), opts...)
 }
 
 // SchemaForType is SchemaFor for a reflect.Type rather than a type parameter.
@@ -139,13 +150,21 @@ func SchemaForType(t reflect.Type, opts ...SchemaOption) (*jsonschema.Schema, er
 			"%w: %s has JSON type %q, tool contracts must be objects (a struct or string-keyed map)",
 			ErrInvalidContract, t, jsonKind(t))
 	}
-	// Detect a recursive contract up front so the caller gets a specific,
-	// actionable error rather than the engine's vague "cycle detected" string.
-	if cycle := recursivePath(t); cycle != "" {
-		return nil, fmt.Errorf("%w: %s — %s; JSON Schema $ref/$defs for cycles "+
-			"is a documented V1 limitation, see D-052", ErrRecursiveContract, t, cycle)
+	return outputSchemaForType(t, opts...)
+}
+
+func outputSchemaForType(t reflect.Type, opts ...SchemaOption) (*jsonschema.Schema, error) {
+	if t == nil {
+		return nil, fmt.Errorf("%w: nil type", ErrInvalidContract)
 	}
 	cfg := resolveSchemaConfig(opts)
+	if recursivePath(t) != "" {
+		s, err := recursiveSchema(t, cfg.enums)
+		if err != nil {
+			return nil, err
+		}
+		return s, nil
+	}
 	s, err := jsonschema.ForType(t, &jsonschema.ForOptions{TypeSchemas: contractTypeSchemas()})
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("%w: %s", ErrInvalidContract, t), err)
@@ -153,7 +172,257 @@ func SchemaForType(t reflect.Type, opts ...SchemaOption) (*jsonschema.Schema, er
 	if len(cfg.enums) > 0 {
 		applyEnums(t, s, cfg.enums)
 	}
+	s.Schema = Draft202012
 	return s, nil
+}
+
+// recursiveSchema owns the local reference graph that jsonschema-go does not
+// infer. Only back-edges become references; ordinary fields retain the pinned
+// engine's representation.
+func recursiveSchema(root reflect.Type, enums map[string][]any) (*jsonschema.Schema, error) {
+	defs := make(map[string]*jsonschema.Schema)
+	building := make(map[reflect.Type]bool)
+	var build func(reflect.Type) (*jsonschema.Schema, error)
+	build = func(t reflect.Type) (*jsonschema.Schema, error) {
+		if override, ok := contractTypeSchemas()[t]; ok {
+			return override.CloneSchemas(), nil
+		}
+		if t.Kind() == reflect.Pointer {
+			inner, err := build(t.Elem())
+			if err != nil {
+				return nil, err
+			}
+			return nullableSchema(inner), nil
+		}
+		if building[t] && t.Name() != "" {
+			return &jsonschema.Schema{Ref: "#/$defs/" + escapeJSONPointer(definitionKey(t))}, nil
+		}
+		if t.Kind() != reflect.Struct && t.Kind() != reflect.Slice && t.Kind() != reflect.Array && t.Kind() != reflect.Map {
+			s, err := jsonschema.ForType(t, &jsonschema.ForOptions{TypeSchemas: contractTypeSchemas()})
+			if err != nil {
+				return nil, err
+			}
+			if vals := enumValues(enums, t); len(vals) > 0 {
+				s.Enum = append([]any(nil), vals...)
+			}
+			return s, nil
+		}
+		building[t] = true
+		defer delete(building, t)
+		s := &jsonschema.Schema{}
+		switch t.Kind() {
+		case reflect.Struct:
+			s.Type = "object"
+			s.Properties = make(map[string]*jsonschema.Schema)
+			s.AdditionalProperties = &jsonschema.Schema{Not: &jsonschema.Schema{}}
+			for _, field := range jsonFields(t) {
+				fs, err := build(field.field.Type)
+				if err != nil {
+					return nil, err
+				}
+				if d := field.field.Tag.Get("jsonschema"); d != "" {
+					fs.Description = d
+				}
+				s.Properties[field.name] = fs
+				s.PropertyOrder = append(s.PropertyOrder, field.name)
+				if !jsonFieldOptional(field.field) && !field.nilableAncestor {
+					s.Required = append(s.Required, field.name)
+				}
+			}
+		case reflect.Slice, reflect.Array:
+			if t.Kind() == reflect.Slice {
+				s.Types = []string{"null", "array"}
+			} else {
+				s.Type = "array"
+			}
+			item, err := build(t.Elem())
+			if err != nil {
+				return nil, err
+			}
+			s.Items = item
+		case reflect.Map:
+			if t.Key().Kind() != reflect.String {
+				return nil, fmt.Errorf("%w: map key %s is not string", ErrInvalidContract, t.Key())
+			}
+			s.Types = []string{"null", "object"}
+			value, err := build(t.Elem())
+			if err != nil {
+				return nil, err
+			}
+			s.AdditionalProperties = value
+		}
+		if t.Name() != "" && t != dereference(root) {
+			defs[definitionKey(t)] = s.CloneSchemas()
+		}
+		return s, nil
+	}
+	s, err := build(root)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("%w: %s", ErrInvalidContract, root), err)
+	}
+	// A self-reference needs the root definition as its target.
+	rt := dereference(root)
+	if rt.Name() != "" {
+		defs[definitionKey(rt)] = s.CloneSchemas()
+	}
+	s.Defs = defs
+	s.Schema = Draft202012
+	return s, nil
+}
+
+func nullableSchema(inner *jsonschema.Schema) *jsonschema.Schema {
+	if inner == nil {
+		return &jsonschema.Schema{Type: "null"}
+	}
+	if inner.Ref == "" && len(inner.AnyOf) == 0 && inner.Type != "" {
+		out := inner.CloneSchemas()
+		out.Types = []string{"null", out.Type}
+		out.Type = ""
+		return out
+	}
+	return &jsonschema.Schema{AnyOf: []*jsonschema.Schema{{Type: "null"}, inner}}
+}
+
+func definitionKey(t reflect.Type) string {
+	if t.PkgPath() == "" {
+		return t.Name()
+	}
+	return t.PkgPath() + "." + t.Name()
+}
+
+func escapeJSONPointer(s string) string {
+	s = strings.ReplaceAll(s, "~", "~0")
+	return strings.ReplaceAll(s, "/", "~1")
+}
+
+func enumValues(enums map[string][]any, t reflect.Type) []any {
+	if values := enums[definitionKey(t)]; len(values) > 0 {
+		return values
+	}
+	if values := enums[t.Name()]; len(values) > 0 {
+		return values
+	}
+	if values, ok := registeredEnums.Load(definitionKey(t)); ok {
+		return values.([]any)
+	}
+	return nil
+}
+
+type jsonField struct {
+	field           reflect.StructField
+	name            string
+	depth           int
+	tagged          bool
+	nilableAncestor bool
+	order           int
+}
+
+// jsonFields applies encoding/json's embedded-field dominance rules: shallow
+// fields win, a tagged field wins over untagged fields at the same depth, and
+// an unresolved same-priority conflict is omitted.
+func jsonFields(root reflect.Type) []jsonField {
+	var candidates []jsonField
+	order := 0
+	var walk func(reflect.Type, int, bool, map[reflect.Type]bool)
+	walk = func(t reflect.Type, depth int, nilable bool, path map[reflect.Type]bool) {
+		if path[t] {
+			return
+		}
+		nextPath := make(map[reflect.Type]bool, len(path)+1)
+		for typ := range path {
+			nextPath[typ] = true
+		}
+		nextPath[t] = true
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			tag := f.Tag.Get("json")
+			name, tagged := jsonTagName(tag)
+			if name == "-" || (!f.IsExported() && !f.Anonymous) {
+				continue
+			}
+			ft := f.Type
+			pointerEmbedded := f.Anonymous && ft.Kind() == reflect.Pointer
+			if ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+			if f.Anonymous && !tagged && ft.Kind() == reflect.Struct {
+				walk(ft, depth+1, nilable || pointerEmbedded, nextPath)
+				continue
+			}
+			if !f.IsExported() {
+				continue
+			}
+			if !tagged {
+				name = f.Name
+			}
+			candidates = append(candidates, jsonField{field: f, name: name, depth: depth, tagged: tagged, nilableAncestor: nilable, order: order})
+			order++
+		}
+	}
+	walk(root, 0, false, nil)
+	byName := make(map[string][]jsonField)
+	for _, field := range candidates {
+		byName[field.name] = append(byName[field.name], field)
+	}
+	selected := make([]jsonField, 0, len(byName))
+	for _, fields := range byName {
+		minDepth := fields[0].depth
+		for _, field := range fields[1:] {
+			if field.depth < minDepth {
+				minDepth = field.depth
+			}
+		}
+		var dominant []jsonField
+		for _, field := range fields {
+			if field.depth == minDepth {
+				dominant = append(dominant, field)
+			}
+		}
+		hasTagged := false
+		for _, field := range dominant {
+			hasTagged = hasTagged || field.tagged
+		}
+		if hasTagged {
+			filtered := dominant[:0]
+			for _, field := range dominant {
+				if field.tagged {
+					filtered = append(filtered, field)
+				}
+			}
+			dominant = filtered
+		}
+		if len(dominant) == 1 {
+			selected = append(selected, dominant[0])
+		}
+	}
+	sort.Slice(selected, func(i, j int) bool { return selected[i].order < selected[j].order })
+	return selected
+}
+
+func jsonTagName(tag string) (string, bool) {
+	name := strings.Split(tag, ",")[0]
+	return name, name != ""
+}
+
+func dereference(t reflect.Type) reflect.Type {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	return t
+}
+
+func jsonFieldOptional(f reflect.StructField) bool {
+	tag := f.Tag.Get("json")
+	return containsTagOption(tag, "omitempty") || containsTagOption(tag, "omitzero")
+}
+
+func containsTagOption(tag, option string) bool {
+	for _, part := range bytes.Split([]byte(tag), []byte(","))[1:] {
+		if string(part) == option {
+			return true
+		}
+	}
+	return false
 }
 
 // Marshal serializes a schema to indented JSON deterministically: identical
@@ -204,7 +473,7 @@ func walkSchema(t reflect.Type, s *jsonschema.Schema, enums map[string][]any, se
 	}
 	// A registered named type: stamp the enum array. enum is independent of
 	// `type`, so the existing {"type":"string"} stays and gains an `enum`.
-	if vals, ok := enums[t.Name()]; ok && t.Name() != "" && s.Enum == nil {
+	if vals := enumValues(enums, t); len(vals) > 0 && t.Name() != "" && s.Enum == nil {
 		s.Enum = append([]any(nil), vals...)
 	}
 	if t.Name() != "" {

@@ -124,6 +124,21 @@ func TestRun_ContractRegressionFailsTheGate(t *testing.T) {
 	}
 }
 
+func TestRunGolden_RejectsNonconformantSchema(t *testing.T) {
+	t.Parallel()
+	dir := scaffoldRealProject(t, "bad-schema")
+	m := loadProjectManifest(t, dir)
+	path := filepath.Join(dir, filepath.FromSlash(generate.SchemaFileName("greet", "output")))
+	bad := `{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"https://example.com/output"}`
+	if err := os.WriteFile(path, []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := runGolden(dir, m)
+	if result.Passed || !strings.Contains(result.Detail, "external $ref") {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 // TestRun_SpecComplianceViolationFailsTheGate removes a vendored spec from a
 // project that carries a docs/specifications/ tree — validate's CheckSpec then
 // reports the missing spec as a Blocker, which the spec-compliance category
