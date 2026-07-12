@@ -152,9 +152,8 @@ func TestPhase04_CodegenBuilderServerWiring(t *testing.T) {
 	}
 }
 
-// TestPhase04_InvalidContractFailsClosed covers a failure mode on the seam: an
-// invalid contract type is rejected by Register, not by a runtime panic.
-func TestPhase04_InvalidContractFailsClosed(t *testing.T) {
+// TestPhase04_ScalarOutputAccepted pins the modern unrestricted output domain.
+func TestPhase04_ScalarOutputAccepted(t *testing.T) {
 	srv, err := server.New(server.Info{Name: "app", Version: "1.0.0"}, nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
@@ -164,11 +163,11 @@ func TestPhase04_InvalidContractFailsClosed(t *testing.T) {
 			return tool.Result[string]{}, nil
 		}).
 		Register(srv)
-	if err == nil {
-		t.Fatal("a non-object output contract must be rejected by Register")
+	if err != nil {
+		t.Fatalf("scalar output registration: %v", err)
 	}
-	if len(srv.Tools()) != 0 {
-		t.Errorf("a rejected tool must not be registered: %v", srv.Tools())
+	if len(srv.Tools()) != 1 {
+		t.Errorf("registered tools = %v", srv.Tools())
 	}
 }
 

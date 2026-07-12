@@ -177,6 +177,22 @@ func TestCheckSchemas_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestCheckSchemas_RejectsExternalReference(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFile(t, dir, "dockyard.app.yaml", validManifest)
+	writeFile(t, dir, "internal/contracts/contracts.go", "package contracts\n")
+	writeFile(t, dir, "internal/contracts/greet_input.schema.json", `{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"https://example.com/input"}`)
+	writeFile(t, dir, "internal/contracts/greet_output.schema.json", `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"string"}`)
+	report, err := Run(Options{ProjectDir: dir})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !hasDiagnostic(report, CheckSchema, Blocker) {
+		t.Fatalf("external ref must block; got %v", report.Diagnostics)
+	}
+}
+
 // --- tool↔UI mapping check ---------------------------------------------------
 
 const manifestWithApp = `name: demo

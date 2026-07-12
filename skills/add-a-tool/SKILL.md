@@ -65,6 +65,11 @@ second is the decoded input. Return a `tool.Result[Out]` — the runtime
 splits its `Text` (model-facing) from its `Structured` (UI-facing) payload
 per RFC §6.3.
 
+The output type may encode any JSON value, including an array, scalar, or null;
+only tool inputs are required to be objects. For a typed nil that must be present
+as JSON null, set `StructuredPresent: true` on the result. Without that flag, a
+nil pointer, map, slice, or interface omits `structuredContent`.
+
 ```go
 // internal/handlers/handlers.go (template-style) or alongside main.go (blank).
 package handlers

@@ -349,6 +349,25 @@ func TestCheckStale_SchemaArtifact(t *testing.T) {
 	}
 }
 
+func TestCrossCheck_AllOfComposition(t *testing.T) {
+	base, err := codegen.SchemaFor[showRevenueOutput]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	composed := &jsonschema.Schema{
+		Schema: codegen.Draft202012,
+		Defs:   map[string]*jsonschema.Schema{"contract": base},
+		AllOf:  []*jsonschema.Schema{{Ref: "#/$defs/contract"}},
+	}
+	ts, err := codegen.TypeScriptForSource(driftRevenueSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := codegen.CrossCheck(composed, "ShowRevenueOutput", ts); err != nil {
+		t.Fatalf("composed CrossCheck: %v", err)
+	}
+}
+
 // --- helpers ----------------------------------------------------------------
 
 // mustScalarSchema builds a bare scalar (non-object) schema directly, to drive

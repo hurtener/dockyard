@@ -108,7 +108,7 @@ func TestRenderGeneratorProgram(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveContractImports: %v", err)
 	}
-	src, err := renderGeneratorProgram(m, imports)
+	src, err := renderGeneratorProgram(m, imports, map[string][]any{"Severity": {"info", "warn"}})
 	if err != nil {
 		t.Fatalf("renderGeneratorProgram: %v", err)
 	}
@@ -118,10 +118,11 @@ func TestRenderGeneratorProgram(t *testing.T) {
 		"package main",
 		`"github.com/hurtener/dockyard/runtime/tool"`,
 		`"example.com/demo/internal/contracts"`,
-		`tool.New[`,
+		`tool.InputSchemaFor[`,
+		`tool.OutputSchemaFor[`,
+		`tool.WithEnum("Severity"`,
 		"GreetInput",
 		"GreetOutput",
-		`"greet"`,
 		"tool.MarshalSchema",
 	} {
 		if !strings.Contains(src, want) {
@@ -138,7 +139,7 @@ func TestRenderGeneratorProgram(t *testing.T) {
 func TestRenderGeneratorProgram_NoTools(t *testing.T) {
 	t.Parallel()
 	m := &manifest.Manifest{}
-	_, err := renderGeneratorProgram(m, nil)
+	_, err := renderGeneratorProgram(m, nil, nil)
 	if !errors.Is(err, ErrGenerate) {
 		t.Fatalf("renderGeneratorProgram with no tools: want ErrGenerate, got %v", err)
 	}

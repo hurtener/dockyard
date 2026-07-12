@@ -1,7 +1,6 @@
 package validate
 
 import (
-	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -54,14 +53,8 @@ func checkSchemas(rp *reporter, projectDir string, lm loadedManifest) {
 					"tool %q %s schema %s is missing — run `dockyard generate`", t.Name, side, rel)
 				continue
 			}
-			var s jsonschema.Schema
-			if err := json.Unmarshal(raw, &s); err != nil {
-				rp.block(CheckSchema, "tool %q %s schema %s is not valid JSON Schema: %v",
-					t.Name, side, rel, err)
-				continue
-			}
-			if _, err := s.Resolve(&jsonschema.ResolveOptions{ValidateDefaults: true}); err != nil {
-				rp.block(CheckSchema, "tool %q %s schema %s does not resolve: %v",
+			if _, err := codegen.ValidateSchema(raw, side == "input"); err != nil {
+				rp.block(CheckSchema, "tool %q %s schema %s is nonconformant: %v",
 					t.Name, side, rel, err)
 			}
 		}
@@ -370,11 +363,14 @@ func checkCrossCodegen(rp *reporter, projectDir string, lm loadedManifest) {
 			if err != nil {
 				continue // a missing schema is already a checkStaleCodegen Blocker.
 			}
-			var s jsonschema.Schema
-			if err := json.Unmarshal(raw, &s); err != nil {
+			s, err := codegen.ValidateSchema(raw, side == "input")
+			if err != nil {
 				continue // an unparseable schema is already a checkSchemas Blocker.
 			}
-			if err := codegen.CrossCheck(&s, tsName, tsRaw); err != nil {
+			if side == "output" && !schemaObjectForCrossCheck(s) {
+				continue
+			}
+			if err := codegen.CrossCheck(s, tsName, tsRaw); err != nil {
 				rp.block(CheckStaleCodegen,
 					"tool %q %s: schema %s and TypeScript %s have drifted apart — %v; "+
 						"run `dockyard generate`",
@@ -382,6 +378,18 @@ func checkCrossCodegen(rp *reporter, projectDir string, lm loadedManifest) {
 			}
 		}
 	}
+}
+
+func schemaObjectForCrossCheck(s *jsonschema.Schema) bool {
+	if s.Type == "object" {
+		return true
+	}
+	for _, typ := range s.Types {
+		if typ == "object" {
+			return true
+		}
+	}
+	return false
 }
 
 // contractTypeName extracts the TypeScript interface name from a manifest tool

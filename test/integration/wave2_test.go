@@ -436,10 +436,9 @@ func TestWave2FailureModes(t *testing.T) {
 		}
 	})
 
-	// runtime/tool: a non-object output contract is rejected by Register with a
-	// typed error — never a panic across the MCP boundary — and the rejected
-	// tool is not installed on the server.
-	t.Run("tool/invalid-contract-rejected", func(t *testing.T) {
+	// Modern structured output permits any JSON value while input remains an
+	// object contract.
+	t.Run("tool/scalar-output-accepted", func(t *testing.T) {
 		t.Parallel()
 		srv, err := server.New(server.Info{Name: "bad-contract", Version: "0.0.1"},
 			&server.Options{Logger: quietLogger()})
@@ -451,11 +450,11 @@ func TestWave2FailureModes(t *testing.T) {
 				return tool.Result[string]{}, nil
 			}).
 			Register(srv)
-		if err == nil {
-			t.Fatal("Register of a non-object output contract: want error, got nil")
+		if err != nil {
+			t.Fatalf("Register scalar output: %v", err)
 		}
-		if len(srv.Tools()) != 0 {
-			t.Errorf("a rejected tool must not be registered: %v", srv.Tools())
+		if len(srv.Tools()) != 1 {
+			t.Errorf("registered tools = %v", srv.Tools())
 		}
 	})
 }

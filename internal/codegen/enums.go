@@ -28,6 +28,25 @@ import (
 // is skipped (it cannot be expressed as a static `enum`). On a parse failure
 // the error wraps ErrInvalidContract.
 func EnumsFromSource(goSource string) ([]SchemaOption, error) {
+	values, err := EnumValuesFromSource(goSource)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	opts := make([]SchemaOption, 0, len(names))
+	for _, name := range names {
+		opts = append(opts, WithEnum(name, values[name]...))
+	}
+	return opts, nil
+}
+
+// EnumValuesFromSource returns the source-visible enum sets used by the real
+// generate path. The returned map and slices are newly allocated.
+func EnumValuesFromSource(goSource string) (map[string][]any, error) {
 	src := goSource
 	if !hasPackageClause(src) {
 		src = "package contracts\n\n" + src
@@ -92,18 +111,7 @@ func EnumsFromSource(goSource string) ([]SchemaOption, error) {
 		}
 	}
 
-	// Build one option per discovered enum, in stable type-name order so the
-	// option slice is deterministic.
-	names := make([]string, 0, len(values))
-	for name := range values {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	opts := make([]SchemaOption, 0, len(names))
-	for _, name := range names {
-		opts = append(opts, WithEnum(name, values[name]...))
-	}
-	return opts, nil
+	return values, nil
 }
 
 // literalValue converts a Go basic literal to its JSON value, reporting false

@@ -31,9 +31,8 @@ between the new schema target and V1's documented recursive-contract limit.
 
 ## Findings I'm departing from (if any)
 
-- **D-052:** V1's recursive-contract limitation is revisited because full
-  JSON Schema 2020-12 compatibility cannot silently retain it. The chosen outcome
-  requires a superseding decision and generated-output goldens.
+- **D-052:** superseded by D-193 with design-owner approval. Recursive contracts
+  now generate deterministic, package-qualified local `$defs`/`$ref` graphs.
 
 ## Goals
 
@@ -49,16 +48,17 @@ between the new schema target and V1's documented recursive-contract limit.
 
 ## Acceptance criteria
 
-- [ ] Generated tool schemas are valid JSON Schema 2020-12 and golden-tested for
+- [x] Generated tool schemas are valid JSON Schema 2020-12 and golden-tested for
       composition, references, enums, embedded structs, and recursive contracts.
-- [ ] Validation bounds schema depth/time and never dereferences external `$ref`.
-- [ ] Structured tool content can carry every JSON value the new protocol permits
+- [x] Validation bounds schema bytes, depth, nodes, and local-reference work and
+      never dereferences external `$ref` or `$dynamicRef`.
+- [x] Structured tool content can carry every JSON value the new protocol permits
       without weakening typed Go handler contracts.
-- [ ] Missing resources return the current standard JSON-RPC error code in modern
+- [x] Missing resources return the current standard JSON-RPC error code in modern
       mode while legacy behavior remains versioned.
-- [ ] List/resource responses expose typed cache lifetime and scope metadata where
+- [x] List/resource responses expose typed cache lifetime and scope metadata where
       the protocol permits it.
-- [ ] `dockyard generate`, `validate`, and `test` reject stale or nonconformant
+- [x] `dockyard generate`, `validate`, and `test` reject stale or nonconformant
       generated output under the new schema dialect.
 
 ## Files added or changed
@@ -69,6 +69,7 @@ between the new schema target and V1's documented recursive-contract limit.
 - `internal/validate/*`, `internal/testgate/*`
 - `docs/specifications/*`, `docs/decisions.md`, `docs/glossary.md`
 - `docs/site/`, `skills/define-contracts/SKILL.md`, `skills/add-a-tool/SKILL.md`
+- `skills/validate/SKILL.md`
 - `docs/plans/phase-34-contracts-server-semantics.md`
 - `scripts/smoke/phase-34.sh`
 
@@ -86,10 +87,11 @@ inside the versioned codec.
 
 ## Design gate
 
-- Compare the pinned JSON Schema 2020-12 requirements against the current schema
-  engine and D-052 before choosing a generator extension or replacement.
-- The design owner approves any recursive-contract decision, output-shape change,
-  and cache-policy API before implementation.
+- [x] Compared the pinned RC's JSON Schema 2020-12 requirements with the current
+      engine and D-052; retained and extended `google/jsonschema-go`.
+- [x] The design owner approved recursion, unrestricted typed output (including
+      explicit null presence), the cache-policy API/private read default, and
+      versioned resource errors. Recorded in D-193.
 
 ## Test plan
 
@@ -118,27 +120,31 @@ inside the versioned codec.
 
 ## Risks / open questions
 
-- The pinned schema engine may not produce every required 2020-12 construct;
-  replacing or extending it requires a decision, not an unreviewed post-process.
-- Cache scope may require an explicit principal-aware safety rule in Phase 36.
+- Resolved: retain the pinned engine and own only deterministic recursive local
+  references; D-193 records the approved extension.
+- Resolved for this surface: reads default to private and immediately stale;
+  public cache scope requires an explicit declaration. Principal derivation stays
+  with the authorization work.
 
 ## Glossary additions
 
 - Cache policy.
 - Cache scope.
+- Resource-not-found error.
+- Structured presence.
 
 ## Pre-merge checklist
 
-- [ ] `make drift-audit` passes
-- [ ] `make check-mirror` passes
-- [ ] `make preflight` passes
-- [ ] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
-- [ ] `make docs` passes
-- [ ] `go test -race ./...` and `golangci-lint run` clean
-- [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
-- [ ] Coverage on touched packages ≥ stated target
-- [ ] New CLI command / manifest field / public API has a smoke check in this PR
-- [ ] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
-- [ ] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
-- [ ] New vocabulary added to `docs/glossary.md`
-- [ ] New / changed architectural decision filed in `docs/decisions.md`
+- [x] `make drift-audit` passes
+- [x] `make check-mirror` passes
+- [x] `make preflight` passes
+- [x] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
+- [x] `make docs` passes
+- [x] `go test -race ./...` and `golangci-lint run` clean
+- [x] All cross-references (`RFC §X.Y`, `brief NN`) resolve
+- [x] Coverage on touched packages ≥ stated target
+- [x] New CLI command / manifest field / public API has a smoke check in this PR
+- [x] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
+- [x] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
+- [x] New vocabulary added to `docs/glossary.md`
+- [x] New / changed architectural decision filed in `docs/decisions.md`

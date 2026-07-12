@@ -84,6 +84,11 @@ The conventions that pay off downstream:
   — the model decides what to render; the App renders what arrives. So a
   `create_chart` output carries the input back through `Data` + `Options`
   plus the resolved `Theme`.
+- **Use recursive types when the domain is recursive.** Dockyard emits local
+  package-qualified `$defs`/`$ref` graphs deterministically; do not flatten a
+  tree merely to avoid recursion.
+- **Let outputs match their JSON value.** Inputs remain object-shaped, but an
+  output may be an object, array, scalar, or null.
 
 ## Generate
 
@@ -102,6 +107,9 @@ What happens:
   - The TypeScript types (in `web/src/generated/contracts.ts`).
 - The output is byte-deterministic: rerun with no source change ⇒ no
   diff (RFC §6.2 — idempotence is part of P1).
+- JSON Schema output declares draft 2020-12. References are local-only;
+  validation rejects external `$ref`/`$dynamicRef` and bounds schema size,
+  depth, node count, and reference work.
 
 If `dockyard generate` fails:
 
@@ -111,6 +119,20 @@ If `dockyard generate` fails:
 - **"unsupported field type"** — Dockyard's codegen handles the common
   JSON-compatible Go types. Replace `time.Time` with `string` (ISO 8601)
   or `int64`, channels with serializable shapes, etc.
+
+### Explicit null output
+
+A typed nil pointer, map, slice, or interface is absent by default. Set
+`StructuredPresent: true` when null itself is the intended result:
+
+```go
+return tool.Result[*LookupOutput]{
+    StructuredPresent: true,
+}, nil
+```
+
+This emits `structuredContent: null` and its JSON text fallback without
+weakening the typed `Out` contract.
 
 ## Validate (the drift catcher)
 
@@ -130,6 +152,9 @@ relevant ones:
 - **Hand-edited generated files** — a generated file modified by hand is
   rejected; the standard fix is to revert and re-author the underlying Go
   contract.
+- **Schema profile** — schemas must declare JSON Schema 2020-12, resolve using
+  local references only, and stay within Dockyard's validation bounds. Input
+  roots must be objects; output roots may be any JSON value.
 
 A clean validate report ends with `0 blockers`. A blocker fails the
 process exit code; warnings do not.

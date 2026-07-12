@@ -6617,3 +6617,54 @@ never stores core `requestState`, and core MRTR never updates a task. The legacy
 An App bridge may carry an operator's response to a Dockyard-aware host, but the
 host must translate it into the correct standard lifecycle rather than making
 the bridge message itself a protocol continuation mechanism.
+
+---
+
+## D-193 — Contract and resource response semantics use bounded local schemas and typed versioned surfaces
+
+**Date:** 2026-07-12
+**Status:** Settled (design-owner approved). Supersedes D-052.
+**Where it lives:** `internal/codegen`, `runtime/tool`, `runtime/server`,
+`internal/protocolcodec`, and `internal/validate`.
+
+**Why.** The pinned MCP `2026-07-28` release-candidate snapshot expands tool
+output schemas beyond object roots, uses JSON Schema 2020-12, adds cache metadata
+to resource responses, and changes the standard missing-resource error code.
+Dockyard needed those semantics without abandoning Go-first contracts, permitting
+network schema resolution, leaking raw wire types, or silently changing legacy
+responses. D-052's rejection of recursive contracts also no longer fits the
+required local-reference model.
+
+**The decision.** The design owner approved the following contract and server
+surface as one coherent design:
+
+1. **Retain and extend `google/jsonschema-go`.** It remains the inference engine
+   shared with the official Go SDK. Dockyard owns a small recursive-type builder
+   for the capability the engine does not provide. Recursive definitions use
+   deterministic, package-qualified keys (`<import-path>.<TypeName>`) under
+   `$defs`, escaped as JSON Pointers, and only local `$ref` edges. This supersedes
+   D-052: recursive contracts are supported rather than rejected.
+2. **Accept only a bounded, local JSON Schema 2020-12 profile.** Every generated
+   or validated schema must declare the 2020-12 dialect. Validation rejects
+   external `$ref` and `$dynamicRef`, limits input to 4 MiB, nesting to 128,
+   schema nodes to 100,000, and aggregate local-reference work to 1,000,000,
+   then resolves locally with default validation. This is conformance to
+   Dockyard's pinned RC snapshot and safety policy, not a claim that the final
+   upstream specification has shipped or been audited.
+3. **Keep input object-shaped and allow unrestricted typed output.** Tool input
+   roots remain objects. Output contracts may describe any JSON value, including
+   scalar, array, and null. `Result[Out]` remains generic and typed;
+   `StructuredPresent` explicitly distinguishes an absent typed nil from a
+   present JSON `null`, preserving null presence through the wire mapping and
+   text fallback.
+4. **Expose cache policy as a typed API.** `server.CachePolicy` carries a
+   whole-millisecond non-negative `TTL` and a `CacheScope` of `public` or
+   `private`. `Options.ResourceListCache` controls resource and template lists;
+   `ResourceContent.Cache` controls reads. A read's zero value is immediately
+   stale and private, because resource bodies may be principal-specific; public
+   sharing is always explicit. Legacy responses omit cache metadata.
+5. **Version resource errors at the protocol edge.** Dynamic handlers report a
+   missing concrete URI with `server.ErrResourceNotFound`. The versioned codec
+   maps missing resources to JSON-RPC `-32602` for `2026-07-28` and preserves
+   legacy `-32002` for `2025-11-25`; unrelated handler errors retain their own
+   code and message. Raw response wire shapes remain isolated behind the codec.

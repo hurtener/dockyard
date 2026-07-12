@@ -5,12 +5,47 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/hurtener/dockyard/runtime/obs"
 )
+
+// CacheScope controls who may reuse a cached MCP response.
+type CacheScope string
+
+const (
+	// CacheScopePublic permits shared-cache reuse.
+	CacheScopePublic CacheScope = "public"
+	// CacheScopePrivate limits reuse to a single client context.
+	CacheScopePrivate CacheScope = "private"
+)
+
+// CachePolicy is the typed cache metadata emitted by modern MCP responses.
+// TTL must be non-negative and exactly representable in milliseconds.
+type CachePolicy struct {
+	TTL   time.Duration
+	Scope CacheScope
+}
+
+func (p CachePolicy) validate() error {
+	if p.TTL < 0 {
+		return errors.New("dockyard/runtime/server: cache TTL must not be negative")
+	}
+	if p.TTL%time.Millisecond != 0 {
+		return errors.New("dockyard/runtime/server: cache TTL must be a whole number of milliseconds")
+	}
+	if p.TTL/time.Millisecond > time.Duration(maxInt()) {
+		return errors.New("dockyard/runtime/server: cache TTL exceeds the platform int millisecond range")
+	}
+	if p.Scope != "" && p.Scope != CacheScopePublic && p.Scope != CacheScopePrivate {
+		return fmt.Errorf("dockyard/runtime/server: invalid cache scope %q", p.Scope)
+	}
+	return nil
+}
 
 // ResourceDef describes a resource to register on the server. URI and Name are
 // required; the rest are hints surfaced to MCP hosts (RFC §5.3).
@@ -69,6 +104,11 @@ func (d ResourceDef) validate() error {
 // Exactly one of Text or Blob is meaningful for a given resource; when both are
 // set, Blob takes precedence.
 type ResourceContent struct {
+	// Cache controls modern resources/read response caching. Legacy responses
+	// omit cache metadata. The zero value is private and immediately stale: a
+	// resource body may be principal-specific, so sharing requires an explicit
+	// CacheScopePublic policy.
+	Cache CachePolicy
 	// MIMEType is the media type of the content. When empty, the registered
 	// ResourceDef.MIMEType is used.
 	MIMEType string
@@ -156,6 +196,11 @@ func (s *Server) AddResource(def ResourceDef, fn ResourceFunc) error {
 			endObs("", 0, err)
 			return nil, err
 		}
+		if err := content.Cache.validate(); err != nil {
+			endObs("", 0, err)
+			return nil, err
+		}
+		setResourceCache(ctx, content.Cache)
 		mime := content.MIMEType
 		if mime == "" {
 			mime = def.MIMEType
@@ -167,7 +212,7 @@ func (s *Server) AddResource(def ResourceDef, fn ResourceFunc) error {
 			rc.Text = content.Text
 		}
 		endObs(mime, resourceBytes(content), nil)
-		return &mcpsdk.ReadResourceResult{Contents: []*mcpsdk.ResourceContents{rc}}, nil
+		return &mcpsdk.ReadResourceResult{Cacheable: cacheable(content.Cache), Contents: []*mcpsdk.ResourceContents{rc}}, nil
 	}
 
 	// mcp.AddResource panics if the URI is invalid or not absolute. Recover so
@@ -308,6 +353,11 @@ func (s *Server) AddResourceTemplate(def ResourceTemplateDef, fn ResourceFunc) e
 			endObs("", 0, err)
 			return nil, err
 		}
+		if err := content.Cache.validate(); err != nil {
+			endObs("", 0, err)
+			return nil, err
+		}
+		setResourceCache(ctx, content.Cache)
 		mime := content.MIMEType
 		if mime == "" {
 			mime = def.MIMEType
@@ -319,7 +369,7 @@ func (s *Server) AddResourceTemplate(def ResourceTemplateDef, fn ResourceFunc) e
 			rc.Text = content.Text
 		}
 		endObs(mime, resourceBytes(content), nil)
-		return &mcpsdk.ReadResourceResult{Contents: []*mcpsdk.ResourceContents{rc}}, nil
+		return &mcpsdk.ReadResourceResult{Cacheable: cacheable(content.Cache), Contents: []*mcpsdk.ResourceContents{rc}}, nil
 	}
 
 	// mcp.AddResourceTemplate panics if the URI template is invalid or not
@@ -339,6 +389,21 @@ func (s *Server) AddResourceTemplate(def ResourceTemplateDef, fn ResourceFunc) e
 
 	s.resourceTemplates = append(s.resourceTemplates, def.URITemplate)
 	return nil
+}
+
+func cacheable(p CachePolicy) mcpsdk.Cacheable {
+	scope := p.Scope
+	if scope == "" {
+		scope = CacheScopePrivate
+	}
+	return mcpsdk.Cacheable{TTLMs: int(p.TTL / time.Millisecond), CacheScope: string(scope)}
+}
+
+func maxInt() int64 {
+	if strconv.IntSize == 32 {
+		return int64(^uint32(0) >> 1)
+	}
+	return int64(^uint64(0) >> 1)
 }
 
 func (s *Server) addResourceTemplateSafe(

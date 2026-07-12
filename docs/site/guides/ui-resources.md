@@ -199,6 +199,47 @@ session (decisions [D-103](/reference/decisions),
 server side-effects on its own — every mutating call comes from an
 explicit UI action.
 
+## Resource cache policy and missing resources
+
+Resource cache metadata is a typed server API, not raw response metadata:
+
+```go
+srv, err := server.New(info, &server.Options{
+    ResourceListCache: server.CachePolicy{
+        TTL:   30 * time.Second,
+        Scope: server.CacheScopePublic,
+    },
+})
+
+content := server.ResourceContent{
+    Text: html,
+    Cache: server.CachePolicy{
+        TTL:   5 * time.Minute,
+        Scope: server.CacheScopePrivate,
+    },
+}
+```
+
+`ResourceListCache` applies to both `resources/list` and
+`resources/templates/list`; `ResourceContent.Cache` applies to a read. TTLs
+must be non-negative whole milliseconds. A read's zero value means immediately
+stale and private, so principal-specific content is never shared accidentally.
+Use `CacheScopePublic` only when the body is independent of the verified
+principal. Legacy protocol responses omit cache metadata.
+
+For a resource template whose requested concrete URI does not exist, wrap or
+return `server.ErrResourceNotFound`:
+
+```go
+return server.ResourceContent{}, fmt.Errorf(
+    "%w: report %q", server.ErrResourceNotFound, id,
+)
+```
+
+Dockyard maps that sentinel to the protocol-version-appropriate standard error:
+`-32602` for `2026-07-28`, while legacy `2025-11-25` keeps `-32002`. Other
+handler errors retain their own code and message.
+
 ## Troubleshooting: a blank App in the host
 
 If your App renders fine in the inspector but shows as a blank/white area

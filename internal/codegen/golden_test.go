@@ -73,6 +73,13 @@ func goldenContracts() []goldenContract {
 			}
 			return codegen.Marshal(s)
 		}},
+		{"recursive_node.golden", func() ([]byte, error) {
+			s, err := codegen.SchemaFor[auditNode]()
+			if err != nil {
+				return nil, err
+			}
+			return codegen.Marshal(s)
+		}},
 	}
 }
 

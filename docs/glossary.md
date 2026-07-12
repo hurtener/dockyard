@@ -113,11 +113,16 @@ RFC §7.5, §19.1. D-011, D-190.
 **Cache policy** — typed server guidance attached to a list or resource response:
 how long a client may reuse it and whether it may share it across principals. The
 server derives it from its resource semantics; raw wire fields remain versioned
-codec details. RFC §19.1.
+codec details. `server.CachePolicy` requires a non-negative, whole-millisecond
+TTL. `Options.ResourceListCache` applies to resource and template lists;
+`ResourceContent.Cache` applies to reads. Legacy responses omit this metadata.
+RFC §19.1. D-193.
 
 **Cache scope** — the sharing boundary of a cache policy, such as requestor-only
 or safely shared. An authorization-aware response must not be marked shareable
-unless its contents are independent of the verified principal. RFC §19.1.
+unless its contents are independent of the verified principal. A resource read
+defaults to private and immediately stale; public sharing must be explicit.
+RFC §19.1. D-193.
 
 **`ChartFrame`** — the template-local Svelte wrapper around Apache ECharts in
 `templates/analytics-widgets/web/src/widgets/`. Owns ECharts setup, responsive
@@ -764,10 +769,10 @@ version, a fresh id, a timestamp, and the identity automatically. `runtime/serve
 D-074.
 
 **Recursive contract** — a Go contract type that, directly or transitively,
-contains itself. An explicit, documented V1 limitation of the schema generator:
-the pinned inference engine cannot emit `$ref`/`$defs` for cycles, so
-`SchemaForType` rejects a recursive contract with `ErrRecursiveContract` rather
-than fail vaguely. RFC §6.1. D-052.
+contains itself. Dockyard extends its pinned schema inference engine for this
+case, emitting deterministic package-qualified definitions under `$defs` and
+local `$ref` back-edges. External references remain forbidden. RFC §6.1. D-193
+(supersedes D-052).
 
 **Request `_meta`** — the inbound `params._meta` of a `tools/call`, surfaced to a
 typed tool handler read-only via `runtime/server.RequestMeta(ctx) map[string]any`
@@ -795,6 +800,12 @@ than one fixed URI. Exposed as `runtime/server.Server.AddResourceTemplate` with
 a typed `ResourceTemplateDef`; the handler receives the concrete URI a host
 requested. The typed surface Phase 10's `ui://` auto-discovery composes. RFC
 §5.1. D-054.
+
+**Resource-not-found error** — the typed `server.ErrResourceNotFound` sentinel a
+dynamic resource handler returns when a concrete URI does not exist. The server
+maps it at the protocol edge to JSON-RPC `-32602` for `2026-07-28` and preserves
+legacy `-32002` for `2025-11-25`; unrelated JSON-RPC errors are not rewritten.
+RFC §5, §19.1. D-193.
 
 **Routing flag** — a typed, non-fatal signal the handler runtime raises when a
 tool's output is oversized (`FlagOversizeOutput` — serialized `structuredContent`
@@ -850,6 +861,12 @@ a value (`obs.ValueShape` — kind, byte size, object field *names*, array lengt
 and never the values themselves, so secrets and PII never leak into the event
 stream. Full-content capture (`CapturePolicyFull`) is an opt-in honoured only
 when a redaction-aware `obs.Redactor` is supplied. CLAUDE.md §7. RFC §11.2. D-074.
+
+**Structured presence** — the distinction between omitted `structuredContent`
+and a present JSON `null`. A typed nil output is omitted by default;
+`tool.Result[Out].StructuredPresent` (or the lower-level server equivalent)
+forces it to be emitted as explicit null while retaining the typed output
+contract. D-193.
 
 **Single-file bundle** — the default build output for a Dockyard App UI: one HTML
 file with no external origins, so the deny-by-default CSP works without declaring

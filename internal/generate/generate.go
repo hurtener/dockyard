@@ -2,8 +2,12 @@ package generate
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"go/parser"
+	"go/token"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,11 +95,18 @@ func Plan(opts Options) (map[string][]byte, error) {
 	planned[TSFileName()] = ts
 
 	// --- JSON Schema half — ephemeral in-project generator (D-081). ---------
-	schemas, err := runSchemaGenerator(opts.ProjectDir, opts.Manifest)
+	schemas, enumMetadata, err := runSchemaGenerator(opts.ProjectDir, opts.Manifest)
 	if err != nil {
 		return nil, err
 	}
 	for rel, content := range schemas {
+		requireObject := strings.Contains(rel, "_input.schema.json")
+		if _, err := codegen.ValidateSchema(content, requireObject); err != nil {
+			return nil, fmt.Errorf("%w: generated schema %s: %w", ErrGenerate, rel, err)
+		}
+		planned[rel] = content
+	}
+	for rel, content := range enumMetadata {
 		planned[rel] = content
 	}
 	return planned, nil
@@ -166,14 +177,14 @@ func SchemaFileName(toolName, side string) string {
 // directory inside the project, `go run`s it, and returns the generated schema
 // files keyed by project-relative path. See D-081 for why generation cannot
 // happen in the `dockyard` binary directly.
-func runSchemaGenerator(projectDir string, m *manifest.Manifest) (map[string][]byte, error) {
+func runSchemaGenerator(projectDir string, m *manifest.Manifest) (map[string][]byte, map[string][]byte, error) {
 	modulePath, err := readModulePath(projectDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	contractTypes, err := resolveContractImports(m, modulePath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// The generator program lives in a temp dir inside the project module so it
@@ -182,22 +193,26 @@ func runSchemaGenerator(projectDir string, m *manifest.Manifest) (map[string][]b
 	// internal/contracts tree — so Plan stays a true dry run.
 	genDir, err := os.MkdirTemp(projectDir, ".dockyard-gen-*")
 	if err != nil {
-		return nil, fmt.Errorf("%w: create generator temp dir: %w", ErrGenerate, err)
+		return nil, nil, fmt.Errorf("%w: create generator temp dir: %w", ErrGenerate, err)
 	}
 	defer func() { _ = os.RemoveAll(genDir) }()
 	outDir, err := os.MkdirTemp("", "dockyard-schemas-*")
 	if err != nil {
-		return nil, fmt.Errorf("%w: create schema output temp dir: %w", ErrGenerate, err)
+		return nil, nil, fmt.Errorf("%w: create schema output temp dir: %w", ErrGenerate, err)
 	}
 	defer func() { _ = os.RemoveAll(outDir) }()
 
-	src, err := renderGeneratorProgram(m, contractTypes)
+	enums, metadata, err := enumValuesForImports(projectDir, contractTypes)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	src, err := renderGeneratorProgram(m, contractTypes, enums)
+	if err != nil {
+		return nil, nil, err
 	}
 	mainGo := filepath.Join(genDir, "main.go")
 	if err := os.WriteFile(mainGo, []byte(src), 0o644); err != nil { //nolint:gosec // generated source, not a secret
-		return nil, fmt.Errorf("%w: write generator program: %w", ErrGenerate, err)
+		return nil, nil, fmt.Errorf("%w: write generator program: %w", ErrGenerate, err)
 	}
 
 	// Run the generator as a package directory ("./.dockyard-gen-XXX"), not a
@@ -214,7 +229,7 @@ func runSchemaGenerator(projectDir string, m *manifest.Manifest) (map[string][]b
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("%w: schema generator failed: %w\n%s",
+		return nil, nil, fmt.Errorf("%w: schema generator failed: %w\n%s",
 			ErrGenerate, err, strings.TrimSpace(stderr.String()))
 	}
 
@@ -224,13 +239,120 @@ func runSchemaGenerator(projectDir string, m *manifest.Manifest) (map[string][]b
 			flat := t.Name + "_" + side + ".schema.json"
 			content, err := os.ReadFile(filepath.Join(outDir, flat)) //nolint:gosec // outDir is a Dockyard-created temp dir
 			if err != nil {
-				return nil, fmt.Errorf("%w: schema generator did not produce %s: %w",
+				return nil, nil, fmt.Errorf("%w: schema generator did not produce %s: %w",
 					ErrGenerate, SchemaFileName(t.Name, side), err)
 			}
 			out[SchemaFileName(t.Name, side)] = content
 		}
 	}
-	return out, nil
+	return out, metadata, nil
+}
+
+func enumValuesForImports(projectDir string, imports map[string]contractImport) (map[string][]any, map[string][]byte, error) {
+	out := make(map[string][]any)
+	metadata := make(map[string][]byte)
+	rels := make([]string, 0, len(imports))
+	for rel := range imports {
+		rels = append(rels, rel)
+	}
+	sort.Strings(rels)
+	for _, rel := range rels {
+		values, packageName, err := enumValuesForDir(filepath.Join(projectDir, filepath.FromSlash(rel)))
+		if err != nil {
+			return nil, nil, err
+		}
+		qualified := make(map[string][]any, len(values))
+		for name, members := range values {
+			key := imports[rel].path + "." + name
+			out[key] = append([]any(nil), members...)
+			qualified[key] = members
+		}
+		metadataRel := filepath.ToSlash(filepath.Join(rel, "dockyard_enums.generated.go"))
+		_, metadataExists := os.Stat(filepath.Join(projectDir, filepath.FromSlash(metadataRel)))
+		if len(qualified) > 0 || metadataExists == nil {
+			content, err := renderEnumMetadata(packageName, qualified)
+			if err != nil {
+				return nil, nil, err
+			}
+			metadata[metadataRel] = content
+		}
+	}
+	return out, metadata, nil
+}
+
+func enumValuesForDir(dir string) (map[string][]any, string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: read contracts for enums: %w", ErrGenerate, err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: open contracts for enums: %w", ErrGenerate, err)
+	}
+	defer func() { _ = root.Close() }()
+	out := make(map[string][]any)
+	packageName := ""
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") || strings.HasSuffix(entry.Name(), ".generated.go") {
+			continue
+		}
+		file, err := root.Open(entry.Name())
+		if err != nil {
+			return nil, "", fmt.Errorf("%w: open enum source: %w", ErrGenerate, err)
+		}
+		raw, readErr := io.ReadAll(file)
+		closeErr := file.Close()
+		if readErr != nil {
+			return nil, "", fmt.Errorf("%w: read enum source: %w", ErrGenerate, readErr)
+		}
+		if closeErr != nil {
+			return nil, "", fmt.Errorf("%w: close enum source: %w", ErrGenerate, closeErr)
+		}
+		if packageName == "" {
+			file, parseErr := parser.ParseFile(token.NewFileSet(), entry.Name(), raw, parser.PackageClauseOnly)
+			if parseErr != nil {
+				return nil, "", fmt.Errorf("%w: package clause: %w", ErrGenerate, parseErr)
+			}
+			packageName = file.Name.Name
+		}
+		values, err := codegen.EnumValuesFromSource(string(raw))
+		if err != nil {
+			return nil, "", fmt.Errorf("%w: enums: %w", ErrGenerate, err)
+		}
+		for name, members := range values {
+			out[name] = append(out[name], members...)
+		}
+	}
+	return out, packageName, nil
+}
+
+func renderEnumMetadata(packageName string, enums map[string][]any) ([]byte, error) {
+	var b strings.Builder
+	b.WriteString("// Code generated by dockyard generate; DO NOT EDIT.\n\npackage ")
+	b.WriteString(packageName)
+	if len(enums) == 0 {
+		b.WriteByte('\n')
+		return []byte(b.String()), nil
+	}
+	b.WriteString("\n\nimport \"github.com/hurtener/dockyard/runtime/tool\"\n\nfunc init() {\n")
+	names := make([]string, 0, len(enums))
+	for name := range enums {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fmt.Fprintf(&b, "\ttool.RegisterEnumMetadata(%q", name)
+		for _, value := range enums[name] {
+			literal, err := json.Marshal(value)
+			if err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(&b, ", %s", literal)
+		}
+		b.WriteString(")\n")
+	}
+	b.WriteString("}\n")
+	return []byte(b.String()), nil
 }
 
 // contractImport is one contracts package referenced by the manifest, with the

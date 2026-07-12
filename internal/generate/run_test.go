@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -133,6 +134,94 @@ func TestRun_RegeneratesAfterContractChange(t *testing.T) {
 	}
 	if len(res.Changed) == 0 {
 		t.Error("Run after a contract change reported no changed files")
+	}
+}
+
+func TestPlan_EnumsRecursiveAndScalarOutput(t *testing.T) {
+	t.Parallel()
+	projectDir := scaffoldProject(t, "gen-modern-contracts")
+	contractsPath := filepath.Join(projectDir, "internal", "contracts", "contracts.go")
+	f, err := os.OpenFile(contractsPath, os.O_APPEND|os.O_WRONLY, 0) //nolint:gosec // test temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString(`
+type Severity string
+const (
+	SeverityInfo Severity = "info"
+	SeverityWarn Severity = "warn"
+)
+type Node struct {
+	Level Severity ` + "`json:\"level\"`" + `
+	Children []*Node ` + "`json:\"children,omitempty\"`" + `
+}
+`)
+	if closeErr := f.Close(); err != nil || closeErr != nil {
+		t.Fatalf("append contracts: %v / %v", err, closeErr)
+	}
+	writeFile(t, projectDir, "internal/other/contracts.go", `package other
+type Severity string
+const (
+	SeverityLow Severity = "low"
+	SeverityHigh Severity = "high"
+)
+type Input struct { Value string `+"`json:\"value\"`"+` }
+`)
+	m, err := manifest.LoadFile(filepath.Join(projectDir, manifest.DefaultFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Tools = append(m.Tools,
+		manifest.Tool{Name: "tree", Description: "tree", Input: "internal/contracts.GreetInput", Output: "internal/contracts.Node", TaskSupport: manifest.TaskSupportForbidden},
+		manifest.Tool{Name: "severity", Description: "severity", Input: "internal/contracts.GreetInput", Output: "internal/contracts.Severity", TaskSupport: manifest.TaskSupportForbidden},
+		manifest.Tool{Name: "other_severity", Description: "other", Input: "internal/other.Input", Output: "internal/other.Severity", TaskSupport: manifest.TaskSupportForbidden},
+	)
+	planned, err := Plan(Options{ProjectDir: projectDir, Manifest: m})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	tree := string(planned[SchemaFileName("tree", "output")])
+	if !strings.Contains(tree, `"$ref": "#/$defs/example.com~1gen-modern-contracts~1internal~1contracts.Node"`) || !strings.Contains(tree, `"enum":`) {
+		t.Fatalf("recursive enum schema missing expected graph:\n%s", tree)
+	}
+	var scalar map[string]any
+	if err := json.Unmarshal(planned[SchemaFileName("severity", "output")], &scalar); err != nil {
+		t.Fatal(err)
+	}
+	if scalar["type"] != "string" {
+		t.Fatalf("scalar output type = %v", scalar["type"])
+	}
+	if got := scalar["enum"].([]any); len(got) != 2 {
+		t.Fatalf("scalar enum = %v", got)
+	}
+	other := string(planned[SchemaFileName("other_severity", "output")])
+	if !strings.Contains(other, `"low"`) || strings.Contains(other, `"info"`) {
+		t.Fatalf("package enum contamination:\n%s", other)
+	}
+	metadata := planned["internal/contracts/dockyard_enums.generated.go"]
+	if !strings.Contains(string(metadata), `example.com/gen-modern-contracts/internal/contracts.Severity`) {
+		t.Fatalf("qualified enum metadata missing:\n%s", metadata)
+	}
+	if _, err := Run(Options{ProjectDir: projectDir, Manifest: m}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	writeFile(t, projectDir, "enum_parity_test.go", `package main
+import (
+	"testing"
+	"example.com/gen-modern-contracts/internal/contracts"
+	"github.com/hurtener/dockyard/runtime/tool"
+)
+func TestGeneratedEnumRuntimeParity(t *testing.T) {
+	s, err := tool.OutputSchemaFor[contracts.Node]()
+	if err != nil { t.Fatal(err) }
+	if len(s.Properties["level"].Enum) != 2 { t.Fatalf("enum = %v", s.Properties["level"].Enum) }
+}
+`)
+	cmd := exec.Command("go", "test", "./...")
+	cmd.Dir = projectDir
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("runtime enum parity: %v\n%s", err, output)
 	}
 }
 

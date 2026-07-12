@@ -50,6 +50,12 @@ The `fixtures` and `contract tests` gates are opt-in via the manifest's
 from v1.3. `require_fixtures` is **UI-scoped** — it only requires fixtures
 for tools that declare a `ui:` app (a non-UI server needs none).
 
+The schema gate accepts only JSON Schema 2020-12. It rejects external `$ref`
+and `$dynamicRef` targets and bounds schema bytes (4 MiB), nesting depth (128),
+node count (100,000), and local-reference work (1,000,000). Input roots must
+resolve to objects; output roots may be any JSON value. These checks target the
+vendored release-candidate snapshot, not an unaudited final specification.
+
 A blocker exits non-zero (`validate: build blockers found`); a warning
 reports inline but does not change the exit code.
 
@@ -131,6 +137,9 @@ they are the framework's quality bar, codified.
 - **"Spec-compliance" diagnostic citing a wire-format deviation.** Open
   the cited spec section in `docs/specifications/` — the vendored snapshot
   is the source of truth for the wire format Dockyard enforces.
+- **"External `$ref` is forbidden".** Keep the contract self-contained. Define
+  the referenced Go type in the project and regenerate so Dockyard emits a local
+  package-qualified `$defs` entry.
 
 ## What to do next
 

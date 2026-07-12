@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ import (
 // for the duration of one `go run` and is deleted afterwards. It depends solely
 // on public packages, so it compiles inside the project's own module — the
 // project cannot import Dockyard's internal/ packages.
-func renderGeneratorProgram(m *manifest.Manifest, imports map[string]contractImport) (string, error) {
+func renderGeneratorProgram(m *manifest.Manifest, imports map[string]contractImport, enums map[string][]any) (string, error) {
 	if len(m.Tools) == 0 {
 		return "", fmt.Errorf("%w: manifest declares no tools", ErrGenerate)
 	}
@@ -60,6 +61,24 @@ func renderGeneratorProgram(m *manifest.Manifest, imports map[string]contractImp
 	b.WriteString("}\n\n")
 
 	b.WriteString("func run(outDir string) error {\n")
+	b.WriteString("\topts := []tool.SchemaOption{\n")
+	names := make([]string, 0, len(enums))
+	for name := range enums {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fmt.Fprintf(&b, "\t\ttool.WithEnum(%q", name)
+		for _, value := range enums[name] {
+			literal, err := json.Marshal(value)
+			if err != nil {
+				return "", err
+			}
+			fmt.Fprintf(&b, ", %s", literal)
+		}
+		b.WriteString("),\n")
+	}
+	b.WriteString("\t}\n")
 	for _, t := range m.Tools {
 		in, err := manifest.ParseContractReference(t.Input)
 		if err != nil {
@@ -72,10 +91,12 @@ func renderGeneratorProgram(m *manifest.Manifest, imports map[string]contractImp
 		inType := imports[in.Package].alias + "." + in.TypeName
 		outType := imports[out.Package].alias + "." + out.TypeName
 		fmt.Fprintf(&b, "\t{\n")
-		fmt.Fprintf(&b, "\t\tin, out, err := tool.New[%s, %s](%q).Schemas()\n", inType, outType, t.Name)
+		fmt.Fprintf(&b, "\t\tin, err := tool.InputSchemaFor[%s](opts...)\n", inType)
 		fmt.Fprintf(&b, "\t\tif err != nil {\n")
 		fmt.Fprintf(&b, "\t\t\treturn fmt.Errorf(\"tool %s: %%w\", err)\n", t.Name)
 		fmt.Fprintf(&b, "\t\t}\n")
+		fmt.Fprintf(&b, "\t\tout, err := tool.OutputSchemaFor[%s](opts...)\n", outType)
+		fmt.Fprintf(&b, "\t\tif err != nil { return fmt.Errorf(\"tool %s: %%w\", err) }\n", t.Name)
 		fmt.Fprintf(&b, "\t\tif err := writeSchema(outDir, %q, in); err != nil {\n",
 			t.Name+"_input.schema.json")
 		fmt.Fprintf(&b, "\t\t\treturn err\n")
