@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/hurtener/dockyard/runtime/tasks"
@@ -96,54 +95,6 @@ func TestProposeWithEditsSummary(t *testing.T) {
 			t.Parallel()
 			if got := proposeWithEditsSummary(c.reply); got != c.want {
 				t.Errorf("proposeWithEditsSummary = %q, want %q", got, c.want)
-			}
-		})
-	}
-}
-
-// TestDecodeCreatedTaskID covers the tiny JSON helper that pulls the task
-// id out of the CreateTaskResult envelope CreateForToolCall returns. Every
-// failure mode is silent on purpose (the handlers fall back to an empty
-// task id when the codec changes shape on them); the test pins that
-// silence + the happy path.
-func TestDecodeCreatedTaskID(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name string
-		in   json.RawMessage
-		want string
-	}{
-		{
-			name: "happy — valid envelope",
-			in:   json.RawMessage(`{"task":{"taskId":"task_abc123"}}`),
-			want: "task_abc123",
-		},
-		{
-			name: "empty raw — empty id",
-			in:   json.RawMessage{},
-			want: "",
-		},
-		{
-			name: "malformed JSON — empty id (silent)",
-			in:   json.RawMessage(`not-json`),
-			want: "",
-		},
-		{
-			name: "missing task key — empty id (silent)",
-			in:   json.RawMessage(`{}`),
-			want: "",
-		},
-		{
-			name: "missing taskId key — empty id (silent)",
-			in:   json.RawMessage(`{"task":{}}`),
-			want: "",
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			if got := decodeCreatedTaskID(c.in); got != c.want {
-				t.Errorf("decodeCreatedTaskID(%q) = %q, want %q", c.in, got, c.want)
 			}
 		})
 	}

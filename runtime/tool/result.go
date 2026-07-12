@@ -1,5 +1,7 @@
 package tool
 
+import "github.com/hurtener/dockyard/runtime/tasks"
+
 // Result is what a Dockyard tool handler returns: a small typed value the
 // runtime maps onto a standard MCP CallToolResult (RFC §6.3).
 //
@@ -20,4 +22,12 @@ type Result[Out any] struct {
 	Structured Out
 	// Meta is optional extension metadata rendered into _meta.
 	Meta map[string]any
+	// InputRequests asks the client to fulfill typed requests and retry this
+	// tool. It must be empty for a complete result.
+	InputRequests map[string]InputRequest
+	// RequestState is opaque continuation state echoed on the retry.
+	RequestState RequestState
+	// CreatedTask designates this call's result as an accepted task. It is a
+	// domain value; the server edge chooses the versioned wire representation.
+	CreatedTask *tasks.CreatedTask
 }

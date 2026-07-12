@@ -64,6 +64,7 @@ export type {
   AppCapabilities,
   CallToolParams,
   CallToolResult,
+  CompleteResult,
   ContainerDimensions,
   ContentBlock,
   DisplayMode,
@@ -72,6 +73,7 @@ export type {
   HostContextChangedParams,
   InitializeParams,
   InitializeResult,
+  InputRequiredResult,
   JsonRpcError,
   JsonRpcId,
   JsonRpcMessage,
@@ -87,4 +89,5 @@ export type {
   ToolCancelledParams,
   ToolInputParams,
   UpdateModelContextParams,
+  UpdateTaskParams,
 } from './protocol.js';

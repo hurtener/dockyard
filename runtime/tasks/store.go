@@ -24,6 +24,32 @@ type TaskResult struct {
 	Err string
 }
 
+// InputMethod is one of the three client request methods permitted by the
+// modern Tasks extension for mid-flight input.
+type InputMethod string
+
+const (
+	// InputMethodElicitation requests structured user input.
+	InputMethodElicitation InputMethod = protocolcodec.CoreMethodElicitation
+	// InputMethodSampling requests an LLM completion.
+	InputMethodSampling InputMethod = protocolcodec.CoreMethodSampling
+	// InputMethodRoots requests the client's exposed roots.
+	InputMethodRoots InputMethod = protocolcodec.CoreMethodRoots
+)
+
+// InputRequest is a persisted modern task input request. Payload is the request
+// object consumed by the client; the codec owns its wire interpretation.
+type InputRequest struct {
+	Key     string
+	Method  InputMethod
+	Payload json.RawMessage
+}
+
+// TaskInputResponse is a persisted response to a modern task input request.
+type TaskInputResponse struct {
+	Payload json.RawMessage
+}
+
 // TaskRecord is the durable state of one task — the [TaskStore] row. It is the
 // Dockyard-internal superset of protocolcodec.Task: it carries the lifecycle
 // fields plus the bookkeeping the engine and Phase 14 need (the underlying
@@ -71,6 +97,11 @@ type TaskRecord struct {
 	AuthContext string
 	// Result is the terminal outcome; meaningful only once Status is terminal.
 	Result TaskResult
+	// InputRequests are currently outstanding modern task input requests.
+	InputRequests map[string]InputRequest
+	// InputResponses retains accepted responses for the task lifetime. Retention
+	// makes request keys single-use even after the worker consumes a response.
+	InputResponses map[string]TaskInputResponse
 }
 
 // Task projects the protocol-facing protocolcodec.Task from a record — the
@@ -134,6 +165,15 @@ type TaskStore interface {
 	// with the transition into a terminal status; it does not itself move the
 	// lifecycle.
 	SetResult(ctx context.Context, id string, result TaskResult) error
+
+	// AddInputRequest atomically persists a lifetime-unique request and moves the
+	// task to input_required. A duplicate key returns ErrDuplicateInputKey.
+	AddInputRequest(ctx context.Context, id string, req InputRequest) error
+
+	// ApplyInputResponses atomically accepts responses for currently outstanding
+	// keys. Unknown and previously satisfied keys are ignored. It returns the
+	// accepted subset and the resulting record.
+	ApplyInputResponses(ctx context.Context, id string, responses map[string]TaskInputResponse) (map[string]TaskInputResponse, TaskRecord, error)
 
 	// List returns a page of records and an opaque next-page cursor (empty when
 	// the page is the last). An empty cursor requests the first page. limit
@@ -202,7 +242,7 @@ func (s *inMemoryStore) Get(_ context.Context, id string) (TaskRecord, error) {
 	if !ok {
 		return TaskRecord{}, fmt.Errorf("%w: %q", ErrTaskNotFound, id)
 	}
-	return rec, nil
+	return cloneTaskRecord(rec), nil
 }
 
 func (s *inMemoryStore) Transition(
@@ -248,6 +288,91 @@ func (s *inMemoryStore) SetResult(_ context.Context, id string, result TaskResul
 	rec.Result = result
 	s.tasks[id] = rec
 	return nil
+}
+
+func (s *inMemoryStore) AddInputRequest(_ context.Context, id string, req InputRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.tasks[id]
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrTaskNotFound, id)
+	}
+	if rec.Status.IsTerminal() {
+		return transitionError(rec.Status, protocolcodec.TaskInputRequired)
+	}
+	if req.Key == "" || !req.Method.valid() || len(req.Payload) == 0 || !json.Valid(req.Payload) {
+		return fmt.Errorf("%w: invalid input request", ErrInvalidParams)
+	}
+	if _, exists := rec.InputRequests[req.Key]; exists {
+		return fmt.Errorf("%w: %q", ErrDuplicateInputKey, req.Key)
+	}
+	if _, exists := rec.InputResponses[req.Key]; exists {
+		return fmt.Errorf("%w: %q", ErrDuplicateInputKey, req.Key)
+	}
+	if rec.InputRequests == nil {
+		rec.InputRequests = make(map[string]InputRequest)
+	}
+	rec.InputRequests[req.Key] = cloneInputRequest(req)
+	rec.Status = protocolcodec.TaskInputRequired
+	rec.UpdatedAt = time.Now().UTC()
+	s.tasks[id] = rec
+	return nil
+}
+
+func (s *inMemoryStore) ApplyInputResponses(_ context.Context, id string, responses map[string]TaskInputResponse) (map[string]TaskInputResponse, TaskRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.tasks[id]
+	if !ok {
+		return nil, TaskRecord{}, fmt.Errorf("%w: %q", ErrTaskNotFound, id)
+	}
+	accepted := make(map[string]TaskInputResponse)
+	if rec.InputResponses == nil {
+		rec.InputResponses = make(map[string]TaskInputResponse)
+	}
+	for key, resp := range responses {
+		if _, pending := rec.InputRequests[key]; !pending || len(resp.Payload) == 0 || !json.Valid(resp.Payload) {
+			continue
+		}
+		resp.Payload = append(json.RawMessage(nil), resp.Payload...)
+		rec.InputResponses[key] = resp
+		accepted[key] = resp
+		delete(rec.InputRequests, key)
+	}
+	if len(accepted) > 0 {
+		if len(rec.InputRequests) == 0 && rec.Status == protocolcodec.TaskInputRequired {
+			rec.Status = protocolcodec.TaskWorking
+			rec.StatusMessage = "input received, resuming"
+		}
+		rec.UpdatedAt = time.Now().UTC()
+		s.tasks[id] = rec
+	}
+	return accepted, cloneTaskRecord(rec), nil
+}
+
+func (m InputMethod) valid() bool {
+	return m == InputMethodElicitation || m == InputMethodSampling || m == InputMethodRoots
+}
+
+func cloneInputRequest(req InputRequest) InputRequest {
+	req.Payload = append(json.RawMessage(nil), req.Payload...)
+	return req
+}
+
+func cloneTaskRecord(rec TaskRecord) TaskRecord {
+	rec.Result.Payload = append(json.RawMessage(nil), rec.Result.Payload...)
+	requests := rec.InputRequests
+	responses := rec.InputResponses
+	rec.InputRequests = make(map[string]InputRequest, len(requests))
+	for key, req := range requests {
+		rec.InputRequests[key] = cloneInputRequest(req)
+	}
+	rec.InputResponses = make(map[string]TaskInputResponse, len(responses))
+	for key, resp := range responses {
+		resp.Payload = append(json.RawMessage(nil), resp.Payload...)
+		rec.InputResponses[key] = resp
+	}
+	return rec
 }
 
 // defaultPageSize bounds an in-memory tasks/list page when the caller passes

@@ -28,6 +28,10 @@ const (
 // the MCP boundary (AGENTS.md §5, §13).
 type Handler[In, Out any] func(ctx context.Context, in In) (Result[Out], error)
 
+// ContinuationHandler is an MRTR-capable handler. It receives typed responses
+// and opaque request state without exposing MCP SDK request envelopes.
+type ContinuationHandler[In, Out any] func(context.Context, Call[In]) (Result[Out], error)
+
 // Builder declares a single MCP tool in the contract-first style (RFC §6). The
 // input and output contract types are bound by New; the fluent methods set the
 // remaining metadata; Register generates the schema and installs the tool on a
@@ -35,11 +39,12 @@ type Handler[In, Out any] func(ctx context.Context, in In) (Result[Out], error)
 // then discard the Builder; independent Builders on independent servers may run
 // concurrently.
 type Builder[In, Out any] struct {
-	name         string
-	description  string
-	uiResource   string
-	uiVisibility []string
-	handler      Handler[In, Out]
+	name                string
+	description         string
+	uiResource          string
+	uiVisibility        []string
+	handler             Handler[In, Out]
+	continuationHandler ContinuationHandler[In, Out]
 
 	// runtime is the per-tool handler runtime, created by Register. It is the
 	// seam Flags reads. nil before Register.
@@ -88,6 +93,14 @@ func (b *Builder[In, Out]) UI(resourceName string, visibility ...string) *Builde
 // Handler sets the tool's handler.
 func (b *Builder[In, Out]) Handler(h Handler[In, Out]) *Builder[In, Out] {
 	b.handler = h
+	b.continuationHandler = nil
+	return b
+}
+
+// ContinuationHandler sets the MRTR-capable form of the tool handler.
+func (b *Builder[In, Out]) ContinuationHandler(h ContinuationHandler[In, Out]) *Builder[In, Out] {
+	b.continuationHandler = h
+	b.handler = nil
 	return b
 }
 
@@ -128,7 +141,7 @@ func (b *Builder[In, Out]) Register(s *server.Server) error {
 	if b.name == "" {
 		return errors.New("dockyard/runtime/tool: tool name is required")
 	}
-	if b.handler == nil {
+	if b.handler == nil && b.continuationHandler == nil {
 		return fmt.Errorf("dockyard/runtime/tool: tool %q has no handler", b.name)
 	}
 
@@ -140,7 +153,11 @@ func (b *Builder[In, Out]) Register(s *server.Server) error {
 	// Build the production handler runtime (Phase 08): it validates incoming
 	// arguments against the generated input schema at the catalog edge, runs
 	// the handler, and flags oversized or misrouted payloads (RFC §5, §6.3).
-	rt, err := newHandlerRuntime(b.name, b.handler, in, DefaultOutputSizeBudget)
+	handler := b.continuationHandler
+	if handler == nil {
+		handler = func(ctx context.Context, call Call[In]) (Result[Out], error) { return b.handler(ctx, call.Input) }
+	}
+	rt, err := newContinuationHandlerRuntime(b.name, handler, in, DefaultOutputSizeBudget)
 	if err != nil {
 		return err
 	}
@@ -175,7 +192,7 @@ func (b *Builder[In, Out]) Register(s *server.Server) error {
 		def.Meta = meta
 	}
 
-	if err := server.AddToolWithSchemas(s, def, in, out, rt.serve); err != nil {
+	if err := server.AddToolWithSchemasMRTR(s, def, in, out, rt.serve); err != nil {
 		return fmt.Errorf("dockyard/runtime/tool: register tool %q: %w", b.name, err)
 	}
 	return nil

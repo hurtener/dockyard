@@ -31,7 +31,7 @@ fi
 # 3. The empty-TextContent quirk is fixed: AddToolWithSchemas no longer emits an
 #    unconditional TextContent block (D-043).
 if [ -f runtime/server/tool.go ]; then
-  if grep -q 'if out.Text != ""' runtime/server/tool.go; then
+  if grep -Eq 'if[[:space:]]+(out|result)\.Text[[:space:]]*!=[[:space:]]*""' runtime/server/tool.go; then
     ok "empty-TextContent quirk fixed — content block is conditional (D-043)"
   else
     fail "runtime/server/tool.go still emits an unconditional TextContent block"

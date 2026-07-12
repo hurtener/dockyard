@@ -16,6 +16,18 @@ import (
 // legal transitions are fixed by the schema (brief 02 §2.2).
 type TaskStatus string
 
+// Modern Tasks extension and method identifiers. Protocol-facing packages use
+// these domain constants rather than duplicating experimental wire literals.
+const (
+	ModernTasksExtension  = "io.modelcontextprotocol/tasks"
+	ModernMethodGet       = "tasks/get"
+	ModernMethodUpdate    = "tasks/update"
+	ModernMethodCancel    = "tasks/cancel"
+	CoreMethodElicitation = "elicitation/create"
+	CoreMethodSampling    = "sampling/createMessage"
+	CoreMethodRoots       = "roots/list"
+)
+
 // The five task statuses. A task MUST begin in [TaskWorking]; [TaskCompleted],
 // [TaskFailed] and [TaskCancelled] are terminal and immutable.
 const (
@@ -185,6 +197,21 @@ type ListTasksResult struct {
 	// NextCursor is the opaque cursor for the next page; empty means the page
 	// is the last one.
 	NextCursor string
+}
+
+// DetailedTask is the modern tasks/get status-specific task shape. Exactly one
+// of InputRequests, Result, or Error is emitted when required by Status.
+type DetailedTask struct {
+	Task
+	InputRequests map[string]json.RawMessage
+	Result        map[string]any
+	Error         map[string]any
+}
+
+// UpdateTaskParams is the modern tasks/update params object.
+type UpdateTaskParams struct {
+	TaskID         string
+	InputResponses map[string]json.RawMessage
 }
 
 // ---- wire shapes (raw JSON; stay inside the seam) ----

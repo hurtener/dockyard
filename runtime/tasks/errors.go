@@ -40,7 +40,8 @@ var (
 
 	// ErrNoPendingInput is returned by [Engine.SupplyInput] when the named task
 	// has no outstanding input_required elicitation. JSON-RPC -32602.
-	ErrNoPendingInput = errors.New("dockyard/runtime/tasks: task has no pending input_required elicitation")
+	ErrNoPendingInput    = errors.New("dockyard/runtime/tasks: task has no pending input_required elicitation")
+	ErrDuplicateInputKey = errors.New("dockyard/runtime/tasks: task input key already used")
 
 	// ErrCrossContext is returned when a tasks/get|result|cancel names a task
 	// that exists but belongs to a different authorization context — the
@@ -76,6 +77,7 @@ func JSONRPCCode(err error) int {
 		errors.Is(err, ErrInvalidParams),
 		errors.Is(err, ErrConcurrencyCap),
 		errors.Is(err, ErrNoPendingInput),
+		errors.Is(err, ErrDuplicateInputKey),
 		errors.Is(err, ErrCrossContext),
 		errors.Is(err, protocolcodec.ErrMalformedMeta):
 		return CodeInvalidParams

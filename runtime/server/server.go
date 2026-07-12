@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"sort"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/hurtener/dockyard/internal/protocolcodec"
 	"github.com/hurtener/dockyard/runtime/obs"
 	"github.com/hurtener/dockyard/runtime/tasks"
 )
@@ -162,6 +164,7 @@ type Server struct {
 	info              Info
 	log               *slog.Logger
 	mcp               *mcpsdk.Server
+	sdkCapabilities   *mcpsdk.ServerCapabilities
 	rec               *obs.Recorder // obs/v1 emit helper; never nil (NopEmitter when unconfigured)
 	tools             []string      // registered tool names, in registration order
 	resources         []string      // registered resource URIs, in registration order
@@ -179,7 +182,8 @@ type Server struct {
 	// ahead of the SDK server (RFC §8.2). It is nil unless a Tasks engine was
 	// attached via Options.Tasks or WithTasks; a nil mount means the server is
 	// a plain MCP server with no tasks/* interception.
-	tasksMount *tasks.Mount
+	tasksMount       *tasks.Mount
+	tasksAuthContext tasks.AuthContextFunc
 
 	// emitLegacyToolUIMeta mirrors Options.EmitLegacyToolUIMeta: when true the
 	// runtime/tool builder additionally emits the deprecated flat tool-UI _meta
@@ -205,19 +209,28 @@ func New(info Info, opts *Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	var sdkOpts *mcpsdk.ServerOptions
-	if caps != nil {
-		sdkOpts = &mcpsdk.ServerOptions{Capabilities: caps}
+	if opts != nil && opts.Tasks != nil {
+		if caps == nil {
+			caps = &mcpsdk.ServerCapabilities{}
+		}
+		caps.AddExtension(protocolcodec.ModernTasksExtension, modernTasksSettings())
 	}
+	if caps == nil {
+		// Dockyard must advertise logging while bridging MCP logging into obs/v1.
+		caps = &mcpsdk.ServerCapabilities{Logging: &mcpsdk.LoggingCapabilities{}} //nolint:staticcheck // Required by RFC §11 despite MCP 2026-07-28 deprecation.
+	}
+	sdkOpts := &mcpsdk.ServerOptions{Capabilities: caps}
 	mcpSrv := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    info.Name,
 		Title:   info.Title,
 		Version: info.Version,
 	}, sdkOpts)
+	mcpSrv.AddReceivingMiddleware(createdTaskResultMiddleware())
 	s := &Server{
 		info:                 info,
 		log:                  log,
 		mcp:                  mcpSrv,
+		sdkCapabilities:      caps,
 		rec:                  newRecorder(info, opts),
 		emitLegacyToolUIMeta: opts != nil && opts.EmitLegacyToolUIMeta,
 	}
@@ -255,6 +268,43 @@ func (s *Server) attachTasks(engine *tasks.Engine, authContext tasks.AuthContext
 		mount = mount.WithAuthContext(authContext)
 	}
 	s.tasksMount = mount
+	s.tasksAuthContext = authContext
+	s.sdkCapabilities.AddExtension(protocolcodec.ModernTasksExtension, modernTasksSettings())
+	s.registerModernTasks(engine)
+}
+
+func modernTasksSettings() map[string]any {
+	return map[string]any{}
+}
+
+type modernTaskParams struct {
+	mcpsdk.ParamsBase
+	TaskID         string                     `json:"taskId"`
+	InputResponses map[string]json.RawMessage `json:"inputResponses"`
+}
+
+type modernTaskResult struct {
+	mcpsdk.ResultBase
+	raw json.RawMessage
+}
+
+func (r *modernTaskResult) MarshalJSON() ([]byte, error) { return r.raw, nil }
+
+func (s *Server) registerModernTasks(engine *tasks.Engine) {
+	for _, method := range []string{protocolcodec.ModernMethodGet, protocolcodec.ModernMethodUpdate, protocolcodec.ModernMethodCancel} {
+		_ = mcpsdk.AddReceivingCustomMethod(s.mcp, method,
+			func(ctx context.Context, _ *mcpsdk.ServerSession, p *modernTaskParams) (*modernTaskResult, error) {
+				params, err := json.Marshal(p)
+				if err != nil {
+					return nil, err
+				}
+				raw, err := engine.DispatchModernWire(ctx, taskAuthContext(ctx), method, params)
+				if err != nil {
+					return nil, &jsonrpc.Error{Code: int64(tasks.JSONRPCCode(err)), Message: err.Error()}
+				}
+				return &modernTaskResult{raw: raw}, nil
+			})
+	}
 }
 
 // TasksEnabled reports whether a Tasks engine is attached — true once

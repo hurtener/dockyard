@@ -33,9 +33,11 @@ one endpoint supports both revisions without a body-inspection downgrade path.
 
 Tasks moves to an extension lifecycle suited to stateless requests. The old
 `tasks/list` surface disappears; task state is driven through `tasks/get`,
-`tasks/update`, and `tasks/cancel`. Multi Round-Trip Requests replace
+`tasks/update`, and `tasks/cancel`. Core Multi Round-Trip Requests replace
 long-lived-stream interaction by returning input requests plus retryable request
-state.
+state. Task mid-flight input is related but distinct: `tasks/get` returns
+outstanding input requests and `tasks/update` accepts their responses without
+retrying the original method or carrying core request state.
 
 **Implication:** Dockyard's raw `tasks/*` mount, initialize-response rewrite, and
 `dockyard/tasks/supplyInput` extension require a versioned migration behind

@@ -6,13 +6,9 @@
    - approval  → ApprovalCard (the request_approval card)
    - proposal  → EditsForm (the propose_with_edits form)
 
-  When the user decides, the App posts the reply back through the
-  bridge's `sendElicitationResponse` View helper (Phase 25 / D-134); the
-  inspector's host-half delivers it to the attached server's
-  `tasks/result` endpoint and the suspended task resumes. The bridge
-  also extracts the related-task id from the `tool-result`'s `_meta`
-  (the runtime stamps it via the related-task association — RFC §8.6),
-  so the App always answers the right task.
+  request_approval submits its keyed modern task response through
+  tasks/update. propose_with_edits uses core MRTR before task creation.
+  exposes the typed core-MRTR continuation API.
 
   Composes only `dockyard-ui` primitives — every renderer routes
   through `PageState` (the four-state page rule, CLAUDE.md §20). The
@@ -42,7 +38,6 @@
 
   type ApprovalPayload = {
     kind: 'approval';
-    task_id?: string;
     title: string;
     description: string;
     category?: string;
@@ -55,7 +50,6 @@
   };
   type ProposalPayload = {
     kind: 'proposal';
-    task_id?: string;
     title: string;
     description: string;
     fields: Field[];
@@ -107,15 +101,9 @@
     payload = r.structuredContent;
     payloadEverSet = true;
     renderTick = renderTick + 1;
-    // Prefer the task_id stamped into the payload by the handler
-    // (Phase 25 — handlers stamp it on Create). Fall back to the
-    // _meta.taskId the runtime stamps on tasks/result.
-    if (payload.task_id) {
-      taskId = payload.task_id;
-    }
     const meta = r._meta as Record<string, unknown> | undefined;
     if (meta) {
-      const id = (meta['taskId'] ?? meta['task_id']) as string | undefined;
+      const id = meta['taskId'] as string | undefined;
       if (id) taskId = id;
     }
     pageState = mapState(payload.state);
@@ -160,14 +148,27 @@
       payload = { ...payload, state: approved ? 'approved' : 'rejected', approved, reason, edits, decided_at: decidedAt };
     }
     pageState = 'ready';
-    bridge.sendElicitationResponse(taskId, { approved, reason, edits });
+    if (payload.kind === 'approval' && taskId) {
+      void bridge.updateTask({
+        taskId,
+        inputResponses: { 'approval-decision': { approved, reason } },
+      }).catch((err: unknown) => {
+        pageState = 'error';
+        message = `Could not submit the decision: ${(err as Error)?.message ?? err}`;
+      });
+    }
   }
 
   function onDecline() {
     if (!payload) return;
     payload = { ...payload, state: 'rejected', approved: false, reason: 'declined' } as Payload;
     pageState = 'ready';
-    bridge.sendElicitationResponse(taskId, undefined, { declined: true });
+    if (payload.kind === 'approval' && taskId) {
+      void bridge.updateTask({
+        taskId,
+        inputResponses: { 'approval-decision': { approved: false, reason: 'declined' } },
+      });
+    }
   }
 
   onMount(() => {

@@ -96,7 +96,8 @@ The two V1 templates:
   one Svelte App. The canonical read-side example.
 - **`approval-flows`** — two task-augmented tools (`request_approval`,
   `propose_with_edits`) rendered as a human-in-the-loop card / form by one
-  Svelte App; drives the `input_required` round-trip. The canonical
+  Svelte App; demonstrates core MRTR before task creation and `tasks/update`
+  during durable work. The canonical
   write-side example.
 
 ```bash

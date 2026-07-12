@@ -1,7 +1,7 @@
 /**
  * dockyard-ext.ts — Dockyard's Tasks×Apps `ui/` extensions (D-183).
  *
- * These two notifications are emitted/consumed by the bridge for the Tasks×Apps
+ * These notifications are the explicit legacy Tasks×Apps adapter
  * surface (RFC §8, D-134) but are **NOT in the vendored MCP Apps schema** — they
  * are Dockyard extensions. They are fenced here, separate from the conformed
  * `protocol.ts` wire surface, for two reasons:
@@ -31,9 +31,7 @@ export const DockyardExtMethod = {
   taskProgress: 'ui/notifications/task-progress',
   /**
    * `ui/notifications/elicitation-response` (View → host) — the App's reply to a
-   * task's `input_required` prompt. A Dockyard-aware host forwards the reply to
-   * the attached server's `tasks/result` endpoint, which resumes the suspended
-   * task (RFC §8.4, §8.6; D-134).
+     * task's legacy `input_required` prompt. Modern peers use `tasks/update`.
    */
   elicitationResponse: 'ui/notifications/elicitation-response',
 } as const;
@@ -77,8 +75,7 @@ export interface TaskProgressParams {
 /**
  * `ui/notifications/elicitation-response` params — the App's reply to a
  * task's `input_required` prompt. The host forwards `data` to the attached
- * server's `tasks/result` endpoint (the elicited-input payload the MCP
- * Tasks experimental spec specifies; RFC §8.4).
+ * server's legacy input relay. It must not be used with modern Tasks peers.
  *
  * `data` is opaque to the bridge — it is the App's contract with its
  * server-side handler. A `request_approval` App posts

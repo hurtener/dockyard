@@ -146,6 +146,20 @@ completed`):
 
 ![tasks panel](/screenshots/phase-25/tasks-panel-live.png)
 
+The inspector keeps two input flows distinct:
+
+- **Core MRTR:** an input-required `tools/call`, `prompts/get`, or
+  `resources/read` response carries input requests and optional opaque
+  `requestState`. After the operator responds, the inspector retries that same
+  method with a new JSON-RPC ID, `inputResponses`, and the echoed state.
+- **Task input:** `tasks/get` reports a durable task's outstanding
+  `inputRequests`. After the operator responds, the inspector sends
+  `inputResponses` through `tasks/update` and resumes `tasks/get` polling. It
+  does not retry the original method or attach core `requestState` to the task.
+
+The legacy `dockyard/tasks/supplyInput` relay is used only when the attached
+peer negotiated the legacy protocol.
+
 ## Why this is different
 
 mcp-use's inspector is interactive but **not a test harness** (brief

@@ -69,39 +69,43 @@ func Migrations() *store.MigrationSet {
 // type, and no raw experimental protocol struct is persisted (P3). Timestamps
 // are RFC3339Nano strings for stable, human-readable rows.
 type taskRow struct {
-	SchemaVersion int                      `json:"schemaVersion"`
-	ID            string                   `json:"id"`
-	Status        protocolcodec.TaskStatus `json:"status"`
-	StatusMessage string                   `json:"statusMessage,omitempty"`
-	CreatedAt     string                   `json:"createdAt"`
-	UpdatedAt     string                   `json:"updatedAt"`
-	RequestedTTL  *int64                   `json:"requestedTtl,omitempty"`
-	TTL           *int64                   `json:"ttl,omitempty"`
-	ExpiresAt     string                   `json:"expiresAt,omitempty"`
-	PollInterval  *int64                   `json:"pollInterval,omitempty"`
-	Method        string                   `json:"method,omitempty"`
-	ToolName      string                   `json:"toolName,omitempty"`
-	AuthContext   string                   `json:"authContext,omitempty"`
-	ResultPayload json.RawMessage          `json:"resultPayload,omitempty"`
-	ResultErr     string                   `json:"resultErr,omitempty"`
+	SchemaVersion  int                          `json:"schemaVersion"`
+	ID             string                       `json:"id"`
+	Status         protocolcodec.TaskStatus     `json:"status"`
+	StatusMessage  string                       `json:"statusMessage,omitempty"`
+	CreatedAt      string                       `json:"createdAt"`
+	UpdatedAt      string                       `json:"updatedAt"`
+	RequestedTTL   *int64                       `json:"requestedTtl,omitempty"`
+	TTL            *int64                       `json:"ttl,omitempty"`
+	ExpiresAt      string                       `json:"expiresAt,omitempty"`
+	PollInterval   *int64                       `json:"pollInterval,omitempty"`
+	Method         string                       `json:"method,omitempty"`
+	ToolName       string                       `json:"toolName,omitempty"`
+	AuthContext    string                       `json:"authContext,omitempty"`
+	ResultPayload  json.RawMessage              `json:"resultPayload,omitempty"`
+	ResultErr      string                       `json:"resultErr,omitempty"`
+	InputRequests  map[string]InputRequest      `json:"inputRequests,omitempty"`
+	InputResponses map[string]TaskInputResponse `json:"inputResponses,omitempty"`
 }
 
 func rowFromRecord(r TaskRecord) taskRow {
 	row := taskRow{
-		SchemaVersion: taskStoreSchemaVersion,
-		ID:            r.ID,
-		Status:        r.Status,
-		StatusMessage: r.StatusMessage,
-		CreatedAt:     r.CreatedAt.UTC().Format(time.RFC3339Nano),
-		UpdatedAt:     r.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		RequestedTTL:  r.RequestedTTL,
-		TTL:           r.TTL,
-		PollInterval:  r.PollInterval,
-		Method:        r.Method,
-		ToolName:      r.ToolName,
-		AuthContext:   r.AuthContext,
-		ResultPayload: r.Result.Payload,
-		ResultErr:     r.Result.Err,
+		SchemaVersion:  taskStoreSchemaVersion,
+		ID:             r.ID,
+		Status:         r.Status,
+		StatusMessage:  r.StatusMessage,
+		CreatedAt:      r.CreatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt:      r.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		RequestedTTL:   r.RequestedTTL,
+		TTL:            r.TTL,
+		PollInterval:   r.PollInterval,
+		Method:         r.Method,
+		ToolName:       r.ToolName,
+		AuthContext:    r.AuthContext,
+		ResultPayload:  r.Result.Payload,
+		ResultErr:      r.Result.Err,
+		InputRequests:  r.InputRequests,
+		InputResponses: r.InputResponses,
 	}
 	if !r.ExpiresAt.IsZero() {
 		row.ExpiresAt = r.ExpiresAt.UTC().Format(time.RFC3339Nano)
@@ -124,18 +128,20 @@ func recordFromRow(row taskRow) (TaskRecord, error) {
 		return TaskRecord{}, fmt.Errorf("dockyard/runtime/tasks: task row %q updatedAt: %w", row.ID, err)
 	}
 	rec := TaskRecord{
-		ID:            row.ID,
-		Status:        row.Status,
-		StatusMessage: row.StatusMessage,
-		CreatedAt:     created.UTC(),
-		UpdatedAt:     updated.UTC(),
-		RequestedTTL:  row.RequestedTTL,
-		TTL:           row.TTL,
-		PollInterval:  row.PollInterval,
-		Method:        row.Method,
-		ToolName:      row.ToolName,
-		AuthContext:   row.AuthContext,
-		Result:        TaskResult{Payload: row.ResultPayload, Err: row.ResultErr},
+		ID:             row.ID,
+		Status:         row.Status,
+		StatusMessage:  row.StatusMessage,
+		CreatedAt:      created.UTC(),
+		UpdatedAt:      updated.UTC(),
+		RequestedTTL:   row.RequestedTTL,
+		TTL:            row.TTL,
+		PollInterval:   row.PollInterval,
+		Method:         row.Method,
+		ToolName:       row.ToolName,
+		AuthContext:    row.AuthContext,
+		Result:         TaskResult{Payload: row.ResultPayload, Err: row.ResultErr},
+		InputRequests:  row.InputRequests,
+		InputResponses: row.InputResponses,
 	}
 	if row.ExpiresAt != "" {
 		expires, err := time.Parse(time.RFC3339Nano, row.ExpiresAt)
@@ -290,6 +296,78 @@ func (d *durableStore) SetResult(ctx context.Context, id string, result TaskResu
 		}
 		return tx.Put(taskStoreNamespace, id, row)
 	})
+}
+
+func (d *durableStore) AddInputRequest(ctx context.Context, id string, req InputRequest) error {
+	if req.Key == "" || !req.Method.valid() || len(req.Payload) == 0 || !json.Valid(req.Payload) {
+		return fmt.Errorf("%w: invalid input request", ErrInvalidParams)
+	}
+	return d.st.Update(ctx, func(tx store.Tx) error {
+		rec, err := readRow(tx, id)
+		if err != nil {
+			return err
+		}
+		if rec.Status.IsTerminal() {
+			return transitionError(rec.Status, protocolcodec.TaskInputRequired)
+		}
+		if _, ok := rec.InputRequests[req.Key]; ok {
+			return fmt.Errorf("%w: %q", ErrDuplicateInputKey, req.Key)
+		}
+		if _, ok := rec.InputResponses[req.Key]; ok {
+			return fmt.Errorf("%w: %q", ErrDuplicateInputKey, req.Key)
+		}
+		if rec.InputRequests == nil {
+			rec.InputRequests = make(map[string]InputRequest)
+		}
+		rec.InputRequests[req.Key] = cloneInputRequest(req)
+		rec.Status = protocolcodec.TaskInputRequired
+		rec.UpdatedAt = time.Now().UTC()
+		row, err := json.Marshal(rowFromRecord(rec))
+		if err != nil {
+			return fmt.Errorf("dockyard/runtime/tasks: encode task row: %w", err)
+		}
+		return tx.Put(taskStoreNamespace, id, row)
+	})
+}
+
+func (d *durableStore) ApplyInputResponses(ctx context.Context, id string, responses map[string]TaskInputResponse) (map[string]TaskInputResponse, TaskRecord, error) {
+	accepted := make(map[string]TaskInputResponse)
+	var out TaskRecord
+	err := d.st.Update(ctx, func(tx store.Tx) error {
+		rec, err := readRow(tx, id)
+		if err != nil {
+			return err
+		}
+		if rec.InputResponses == nil {
+			rec.InputResponses = make(map[string]TaskInputResponse)
+		}
+		for key, resp := range responses {
+			if _, ok := rec.InputRequests[key]; !ok || len(resp.Payload) == 0 || !json.Valid(resp.Payload) {
+				continue
+			}
+			resp.Payload = append(json.RawMessage(nil), resp.Payload...)
+			rec.InputResponses[key] = resp
+			accepted[key] = resp
+			delete(rec.InputRequests, key)
+		}
+		if len(accepted) > 0 {
+			if len(rec.InputRequests) == 0 && rec.Status == protocolcodec.TaskInputRequired {
+				rec.Status = protocolcodec.TaskWorking
+				rec.StatusMessage = "input received, resuming"
+			}
+			rec.UpdatedAt = time.Now().UTC()
+			row, err := json.Marshal(rowFromRecord(rec))
+			if err != nil {
+				return err
+			}
+			if err := tx.Put(taskStoreNamespace, id, row); err != nil {
+				return err
+			}
+		}
+		out = cloneTaskRecord(rec)
+		return nil
+	})
+	return accepted, out, err
 }
 
 // scanRecords returns every task record in the store, in stable order

@@ -100,12 +100,7 @@ func main() {
 	engine, err := tasks.NewEngine(taskStore, &tasks.Options{
 		Logger: logger,
 		Obs:    obsSink,
-		// Stdio is single-user and unauthenticated: tasks/list is not
-		// advertised (brief 02 §4.5). An HTTP deployment with real
-		// authentication should set RequestorIdentifiable=true and pass
-		// an AuthContextFunc through WithTasks (see below).
-		RequestorIdentifiable: false,
-		AdvertiseList:         false,
+		// Stdio is single-user and unauthenticated.
 		// A short poll interval keeps the inspector's Tasks panel
 		// responsive; production deployments may want to raise this.
 		PollInterval: 250,
@@ -202,7 +197,7 @@ func registerTools(srv *server.Server, engine *tasks.Engine) error {
 	if err := tool.New[contracts.ProposeWithEditsInput, contracts.ProposeWithEditsOutput]("propose_with_edits").
 		Describe("Propose a structured change with user-editable fields; pause for review; resume with the final edits.").
 		UI(appName).
-		Handler(proposeEdits.Handler).
+		ContinuationHandler(proposeEdits.Handler).
 		Register(srv); err != nil {
 		return err
 	}

@@ -73,7 +73,8 @@ example.
 
 Two task-augmented tools (`request_approval`, `propose_with_edits`)
 rendered as a human-in-the-loop card / form by one Svelte App that drives
-the `input_required` round-trip from inside the iframe. The canonical
+approval before task creation through core MRTR or during durable work through
+`tasks/update`. The canonical
 Tasks × Apps showcase.
 
 ![approval-flows](/screenshots/phase-25/request-approval.png)

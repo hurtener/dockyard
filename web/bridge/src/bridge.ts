@@ -37,17 +37,20 @@ import {
   ViewNotification,
   type AppCapabilities,
   type CallToolResult,
+  type CompleteResult,
   type ContentBlock,
   type DisplayMode,
   type HostCapabilities,
   type HostContextChangedParams,
   type InitializeParams,
   type InitializeResult,
+  type InputRequiredResult,
   type JsonRpcId,
   type RequestDisplayModeResult,
   type SizeChangedParams,
   type ToolCancelledParams,
   type ToolInputParams,
+  type UpdateTaskParams,
   type UpdateModelContextParams,
 } from './protocol.js';
 import {
@@ -154,6 +157,20 @@ export class BridgeShell {
   private unsubTransport: Unsubscribe | undefined;
   private unsubRequests: Unsubscribe | undefined;
   private stopSizeReporting: (() => void) | undefined;
+
+  /** Explicit adapter for the pre-2026 Tasks×Apps relay. */
+  readonly legacy = {
+    sendElicitationResponse: (
+      taskId: string,
+      data?: unknown,
+      options?: { declined?: boolean },
+    ): void => {
+      const params: ElicitationResponseParams = { taskId };
+      if (data !== undefined) params.data = data;
+      if (options?.declined) params.declined = true;
+      this.transport.notify(DockyardExtMethod.elicitationResponse, params);
+    },
+  };
 
   constructor(options: BridgeOptions = {}) {
     this.options = options;
@@ -473,6 +490,29 @@ export class BridgeShell {
     });
   }
 
+  /** Retries the original tools/call for a core MRTR input-required result. */
+  async retryToolCall<I = unknown, O = unknown>(
+    name: string,
+    args: I | undefined,
+    continuation: Pick<InputRequiredResult, 'requestState'>,
+    inputResponses: Record<string, unknown>,
+    view?: { uuid: string },
+  ): Promise<CallToolResult<O> | InputRequiredResult> {
+    const meta = view ? { viewUUID: view.uuid } : undefined;
+    return this.transport.request(ViewMethod.callTool, {
+      name,
+      arguments: args,
+      inputResponses,
+      ...(continuation.requestState ? { requestState: continuation.requestState } : {}),
+      ...(meta ? { _meta: meta } : {}),
+    });
+  }
+
+  /** Submits keyed responses to a modern task without retrying tools/call. */
+  updateTask(params: UpdateTaskParams): Promise<CompleteResult> {
+    return this.transport.request<CompleteResult>(ViewMethod.updateTask, params);
+  }
+
   /**
    * Calls a tool through its generated `ToolContract`, so input and
    * `structuredContent` output are typed end-to-end (P1, contract-first).
@@ -499,22 +539,16 @@ export class BridgeShell {
    * explicit "no input" signal that the handler routes differently
    * from a real decision.
    *
-   * The notification is fire-and-forget: the host forwards the reply
-   * to the attached server's `tasks/result` endpoint, which resumes
-   * the suspended task. The App observes the terminal outcome through
-   * a subsequent `tool-result` push or through the inspector's Tasks
-   * panel — there is no synchronous result here by design (single
-   * round-trip, mirroring the existing notification shape).
+   * The legacy notification is fire-and-forget. Modern peers must use
+   * `updateTask`, which returns the standards-shaped acknowledgement.
    */
+  /** @deprecated Use `legacy.sendElicitationResponse` only for a legacy peer. */
   sendElicitationResponse(
     taskId: string,
     data?: unknown,
     options?: { declined?: boolean },
   ): void {
-    const params: ElicitationResponseParams = { taskId };
-    if (data !== undefined) params.data = data;
-    if (options?.declined) params.declined = true;
-    this.transport.notify(DockyardExtMethod.elicitationResponse, params);
+    this.legacy.sendElicitationResponse(taskId, data, options);
   }
 
   /**

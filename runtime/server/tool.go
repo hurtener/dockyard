@@ -10,6 +10,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/hurtener/dockyard/runtime/obs"
+	"github.com/hurtener/dockyard/runtime/tasks"
 )
 
 // ToolFunc is a Dockyard tool handler. It is generic over a typed input and a
@@ -48,13 +49,19 @@ type ToolDef struct {
 // reaching past the runtime into the raw SDK result type (P3 — the runtime
 // surface does not expose raw protocol structs).
 type ToolOutput[Out any] struct {
-	Text       string
-	Structured Out
-	Meta       map[string]any
+	Text          string
+	Structured    Out
+	Meta          map[string]any
+	InputRequests map[string]InputRequest
+	RequestState  RequestState
+	CreatedTask   *tasks.CreatedTask
 }
 
 // ToolOutputFunc is a tool handler that returns the full ToolOutput split.
 type ToolOutputFunc[In, Out any] func(ctx context.Context, in In) (ToolOutput[Out], error)
+
+// ToolContinuationFunc is the MRTR-capable form of ToolOutputFunc.
+type ToolContinuationFunc[In, Out any] func(context.Context, ToolCall[In]) (ToolOutput[Out], error)
 
 // rawArgsKey is the unexported context key under which AddToolWithSchemas
 // stashes the raw, undecoded tool-call arguments for the duration of a handler
@@ -242,14 +249,25 @@ func AddToolWithSchemas[In, Out any](
 	in, out *jsonschema.Schema,
 	fn ToolOutputFunc[In, Out],
 ) error {
+	if fn == nil {
+		return fmt.Errorf("dockyard/runtime/server: tool %q has a nil handler", def.Name)
+	}
+	return addToolWithSchemasCore(s, def, in, out, func(ctx context.Context, call ToolCall[In]) (ToolOutput[Out], error) {
+		return fn(ctx, call.Input)
+	})
+}
+
+func addToolWithSchemasCore[In, Out any](
+	s *Server,
+	def ToolDef,
+	in, out *jsonschema.Schema,
+	fn ToolContinuationFunc[In, Out],
+) error {
 	if s == nil {
 		return errors.New("dockyard/runtime/server: AddToolWithSchemas on nil server")
 	}
 	if def.Name == "" {
 		return errors.New("dockyard/runtime/server: ToolDef.Name is required")
-	}
-	if fn == nil {
-		return fmt.Errorf("dockyard/runtime/server: tool %q has a nil handler", def.Name)
 	}
 	for _, existing := range s.tools {
 		if existing == def.Name {
@@ -284,13 +302,24 @@ func AddToolWithSchemas[In, Out any](
 		// guardHandler converts a panic in the app author's handler into a
 		// typed error result — the server survives a panicking tool on a live
 		// tools/call (AGENTS.md §5, §13; D-053).
-		var out ToolOutput[Out]
-		err := guardHandler(ctx, s.log, "tool", def.Name, func() error {
+		var sdkResponses mcpsdk.InputResponseMap
+		var state string
+		if req != nil && req.Params != nil {
+			sdkResponses = req.Params.InputResponses
+			state = req.Params.RequestState
+		}
+		responses, err := decodeInputResponses(sdkResponses)
+		if err != nil {
+			var zero Out
+			return nil, zero, err
+		}
+		var result ToolOutput[Out]
+		err = guardHandler(ctx, s.log, "tool", def.Name, func() error {
 			var herr error
-			out, herr = fn(ctx, arg)
+			result, herr = fn(ctx, ToolCall[In]{Input: arg, InputResponses: responses, RequestState: RequestState(state)})
 			return herr
 		})
-		endObs(toolArgs(req), marshalForObs(out.Structured), err)
+		endObs(toolArgs(req), marshalForObs(result.Structured), err)
 		if err != nil {
 			var zero Out
 			return nil, zero, err
@@ -307,13 +336,27 @@ func AddToolWithSchemas[In, Out any](
 		// no empty TextContent block is emitted either (D-043, the Wave 2 audit
 		// quirk). A non-empty Text yields exactly one TextContent block.
 		res := &mcpsdk.CallToolResult{Content: []mcpsdk.Content{}}
-		if out.Text != "" {
-			res.Content = []mcpsdk.Content{&mcpsdk.TextContent{Text: out.Text}}
+		if result.Text != "" {
+			res.Content = []mcpsdk.Content{&mcpsdk.TextContent{Text: result.Text}}
 		}
-		if len(out.Meta) > 0 {
-			res.Meta = mcpsdk.Meta(out.Meta)
+		if len(result.Meta) > 0 {
+			res.Meta = mcpsdk.Meta(result.Meta)
 		}
-		return res, out.Structured, nil
+		res.InputRequests, err = encodeInputRequests(result.InputRequests)
+		if err != nil {
+			var zero Out
+			return nil, zero, err
+		}
+		res.RequestState = string(result.RequestState)
+		if result.CreatedTask != nil {
+			if res.Meta == nil {
+				res.Meta = mcpsdk.Meta{}
+			} else {
+				res.Meta = cloneMeta(res.Meta)
+			}
+			res.Meta[createdTaskMarkerKey] = result.CreatedTask
+		}
+		return res, result.Structured, nil
 	}
 
 	tool := &mcpsdk.Tool{
@@ -334,6 +377,15 @@ func AddToolWithSchemas[In, Out any](
 
 	s.tools = append(s.tools, def.Name)
 	return nil
+}
+
+// AddToolWithSchemasMRTR registers a contract-first tool that can inspect and
+// return multi-round-trip continuation data without exposing SDK envelopes.
+func AddToolWithSchemasMRTR[In, Out any](s *Server, def ToolDef, in, out *jsonschema.Schema, fn ToolContinuationFunc[In, Out]) error {
+	if fn == nil {
+		return fmt.Errorf("dockyard/runtime/server: tool %q has a nil handler", def.Name)
+	}
+	return addToolWithSchemasCore(s, def, in, out, fn)
 }
 
 // cloneMeta returns a shallow copy of m, or nil if m is nil/empty. Registration

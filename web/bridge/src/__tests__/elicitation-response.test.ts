@@ -122,7 +122,7 @@ describe('BridgeShell.sendElicitationResponse (D-134)', () => {
     // Now post an elicitation response.
     const taskId = 'task-abc-123';
     const data = { approved: true, decided_at: '2026-05-23T18:00:00Z' };
-    bridge.sendElicitationResponse(taskId, data);
+    bridge.legacy.sendElicitationResponse(taskId, data);
 
     // Drain microtasks so the message lands.
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -170,7 +170,7 @@ describe('BridgeShell.sendElicitationResponse (D-134)', () => {
     });
     await bridge.connect();
 
-    bridge.sendElicitationResponse('task-xyz', undefined, { declined: true });
+    bridge.legacy.sendElicitationResponse('task-xyz', undefined, { declined: true });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const elicitation = channel.notifications.find(

@@ -37,8 +37,11 @@ func TestElicitationFromServer_DeliversTasksResult(t *testing.T) {
 
 	elicitor := ElicitationFromServer(stand.URL)
 	resp, err := elicitor(context.Background(), ElicitationRequest{
-		TaskID: "task-123",
-		Data:   json.RawMessage(`{"approved":true,"reason":"OK"}`),
+		Protocol: legacyProtocol,
+		TaskID:   "task-123",
+		InputResponses: map[string]json.RawMessage{
+			"approval": json.RawMessage(`{"approved":true,"reason":"OK"}`),
+		},
 	})
 	if err != nil {
 		t.Fatalf("elicitor: %v", err)
@@ -87,8 +90,11 @@ func TestElicitationFromServer_DeclinedShape(t *testing.T) {
 
 	elicitor := ElicitationFromServer(stand.URL)
 	resp, err := elicitor(context.Background(), ElicitationRequest{
+		Protocol: legacyProtocol,
 		TaskID:   "task-decl",
-		Declined: true,
+		InputResponses: map[string]json.RawMessage{
+			"approval": json.RawMessage(`{"action":"decline"}`),
+		},
 	})
 	if err != nil {
 		t.Fatalf("elicitor: %v", err)
@@ -97,11 +103,9 @@ func TestElicitationFromServer_DeclinedShape(t *testing.T) {
 		t.Errorf("Delivered = false")
 	}
 	params := captured["params"].(map[string]any)
-	if params["declined"] != true {
-		t.Errorf("params.declined = %v, want true", params["declined"])
-	}
-	if _, hasData := params["data"]; hasData {
-		t.Errorf("params.data should be absent for a declined reply")
+	data := params["data"].(map[string]any)
+	if data["action"] != "decline" {
+		t.Errorf("params.data.action = %v, want decline", data["action"])
 	}
 }
 
@@ -117,8 +121,11 @@ func TestElicitationFromServer_ServerErrorIsDeliveredFalse(t *testing.T) {
 	defer stand.Close()
 
 	resp, err := ElicitationFromServer(stand.URL)(context.Background(), ElicitationRequest{
-		TaskID: "stale",
-		Data:   json.RawMessage(`{"approved":true}`),
+		Protocol: legacyProtocol,
+		TaskID:   "stale",
+		InputResponses: map[string]json.RawMessage{
+			"approval": json.RawMessage(`{"approved":true}`),
+		},
 	})
 	if err != nil {
 		t.Fatalf("elicitor returned a transport error on a server error: %v", err)
@@ -136,13 +143,51 @@ func TestElicitationFromServer_ServerErrorIsDeliveredFalse(t *testing.T) {
 func TestElicitationFromServer_DetachedReturnsError(t *testing.T) {
 	t.Parallel()
 	resp, err := ElicitationFromServer("")(context.Background(), ElicitationRequest{
-		TaskID: "x",
+		Protocol: modernProtocol, TaskID: "x", InputResponses: map[string]json.RawMessage{},
 	})
 	if err == nil {
 		t.Fatal("want a typed detached error, got nil")
 	}
 	if resp != nil {
 		t.Errorf("want nil response on detached, got %+v", resp)
+	}
+}
+
+func TestTaskRoutingTransportAddsLifecycleHeadersWithoutChangingBody(t *testing.T) {
+	t.Parallel()
+
+	for _, method := range []string{"tasks/get", "tasks/update", "tasks/cancel"} {
+		t.Run(method, func(t *testing.T) {
+			t.Parallel()
+			body := []byte(`{"jsonrpc":"2.0", "id":7, "method":"` + method + `", "params":{"taskId":"task-123","inputResponses":{"approval":true}}}`)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotBody, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("read body: %v", err)
+				}
+				if !bytes.Equal(gotBody, body) {
+					t.Errorf("body changed:\n got: %s\nwant: %s", gotBody, body)
+				}
+				if got := r.Header.Get("Mcp-Method"); got != method {
+					t.Errorf("Mcp-Method = %q, want %q", got, method)
+				}
+				if got := r.Header.Get("Mcp-Name"); got != "task-123" {
+					t.Errorf("Mcp-Name = %q, want task-123", got)
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+
+			req, err := http.NewRequest(http.MethodPost, server.URL, bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+			resp, err := (&http.Client{Transport: taskRoutingTransport{base: http.DefaultTransport}}).Do(req)
+			if err != nil {
+				t.Fatalf("do request: %v", err)
+			}
+			_ = resp.Body.Close()
+		})
 	}
 }
 
@@ -155,7 +200,10 @@ func TestElicitationFromServer_NonOKStatusIsError(t *testing.T) {
 		_, _ = w.Write([]byte("upstream unavailable"))
 	}))
 	defer stand.Close()
-	_, err := ElicitationFromServer(stand.URL)(context.Background(), ElicitationRequest{TaskID: "x"})
+	_, err := ElicitationFromServer(stand.URL)(context.Background(), ElicitationRequest{
+		Protocol: legacyProtocol, TaskID: "x",
+		InputResponses: map[string]json.RawMessage{"answer": json.RawMessage(`{}`)},
+	})
 	if err == nil {
 		t.Fatal("want a transport error, got nil")
 	}
@@ -167,7 +215,7 @@ func TestAssetsMux_Elicitation_Detached(t *testing.T) {
 	t.Parallel()
 	mux := newMux(Options{}, slog.New(slog.DiscardHandler))
 	req := httptest.NewRequest(http.MethodPost, "/api/tasks/elicitation", bytes.NewReader(
-		[]byte(`{"taskId":"x"}`)))
+		[]byte(`{"protocol":"2026-07-28","taskId":"x","inputResponses":{}}`)))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusServiceUnavailable {
@@ -211,7 +259,7 @@ func TestAssetsMux_Elicitation_RequiresTaskID(t *testing.T) {
 		},
 	}, slog.New(slog.DiscardHandler))
 	req := httptest.NewRequest(http.MethodPost, "/api/tasks/elicitation",
-		bytes.NewReader([]byte(`{"taskId":"","data":{"x":1}}`)))
+		bytes.NewReader([]byte(`{"protocol":"2026-07-28","taskId":"","inputResponses":{}}`)))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -227,11 +275,17 @@ func TestAssetsMux_Elicitation_Success(t *testing.T) {
 			if req.TaskID != "task-99" {
 				t.Errorf("TaskID = %q, want task-99", req.TaskID)
 			}
+			if req.Protocol != modernProtocol {
+				t.Errorf("Protocol = %q, want %q", req.Protocol, modernProtocol)
+			}
+			if got := string(req.InputResponses["approval"]); got != `{"action":"accept"}` {
+				t.Errorf("inputResponses.approval = %s", got)
+			}
 			return &ElicitationResponse{TaskID: req.TaskID, Delivered: true}, nil
 		},
 	}, slog.New(slog.DiscardHandler))
 	req := httptest.NewRequest(http.MethodPost, "/api/tasks/elicitation",
-		bytes.NewReader([]byte(`{"taskId":"task-99","data":{"approved":true}}`)))
+		bytes.NewReader([]byte(`{"protocol":"2026-07-28","taskId":"task-99","inputResponses":{"approval":{"action":"accept"}}}`)))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -256,7 +310,7 @@ func TestAssetsMux_Elicitation_ErrorIs502(t *testing.T) {
 		},
 	}, slog.New(slog.DiscardHandler))
 	req := httptest.NewRequest(http.MethodPost, "/api/tasks/elicitation",
-		bytes.NewReader([]byte(`{"taskId":"x","data":{"a":1}}`)))
+		bytes.NewReader([]byte(`{"protocol":"2026-07-28","taskId":"x","inputResponses":{"answer":{"action":"accept"}}}`)))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusBadGateway {

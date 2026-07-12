@@ -47,20 +47,12 @@ type RequestApprovalInput struct {
 // View — the model decides what to ask; the App renders what arrives)
 // and carries the user's decision when one has been made.
 //
-// The lifecycle: `CreateTaskResult` flows first (a Tasks-aware host
-// renders this output's State="awaiting" while the task is in
-// input_required); when the user decides, the handler resumes and the
-// terminal `tool-result` carries State="approved" or State="rejected"
-// with the decision payload.
+// A Tasks-aware host reads the outstanding keyed input request from tasks/get,
+// submits the decision with tasks/update, and then observes the completed task.
 type RequestApprovalOutput struct {
 	// Kind is always "approval" for a request_approval output. The
 	// App's dispatcher reads it to route to the approval renderer.
 	Kind string `json:"kind"`
-	// TaskID is the id of the task the App is answering — stamped by
-	// the handler when the task is created so the App's
-	// elicitation-response post carries the right id. Empty when no
-	// task was created (the capability-degraded path).
-	TaskID string `json:"task_id,omitempty"`
 	// Title is the prompt headline, passed through.
 	Title string `json:"title"`
 	// Description is the prompt body, passed through.
@@ -177,9 +169,6 @@ type ProposeWithEditsInput struct {
 type ProposeWithEditsOutput struct {
 	// Kind is always "proposal" for a propose_with_edits output.
 	Kind string `json:"kind"`
-	// TaskID is the id of the task the App is answering — see the
-	// RequestApprovalOutput.TaskID comment.
-	TaskID string `json:"task_id,omitempty"`
 	// Title is the proposal headline, passed through.
 	Title string `json:"title"`
 	// Description is the proposal body, passed through.
@@ -217,9 +206,8 @@ type ProposeWithEditsOutput struct {
 // ---------------------------------------------------------------------------
 
 // ApprovalReply is the App-supplied reply the handlers decode out of
-// the elicitation response. The App posts this verbatim through the
-// bridge's `sendElicitationResponse` View helper; the
-// `TaskHandle.RequireInput` body unmarshals it.
+// the keyed input response. The App submits it through tasks/update and the
+// TaskHandle.RequestInput body reads the durably persisted response.
 //
 // This is the contract between the App and the handler — not part of
 // the model-facing tool I/O contract. Distinct from RequestApprovalOutput
