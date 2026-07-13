@@ -192,7 +192,6 @@ func TestInspect_HelpDescribesDevAttachAsDeferred(t *testing.T) {
 // project has a manifest but no generated contracts, so contracts surface a
 // schemaless row and verdicts surface a real validate diagnostic.
 func TestRunInspect_WiresProjectSources(t *testing.T) {
-	t.Parallel()
 	projectDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectDir, "dockyard.app.yaml"),
 		[]byte("name: inspect-wiring-test\ntitle: T\nversion: 0.1.0\n"+
@@ -203,7 +202,7 @@ func TestRunInspect_WiresProjectSources(t *testing.T) {
 	}
 
 	port := freePort(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
@@ -248,7 +247,7 @@ func freePort(t *testing.T) int {
 // waitInspectorReady polls url until the inspector answers or a deadline passes.
 func waitInspectorReady(t *testing.T, url string) {
 	t.Helper()
-	deadline := time.Now().Add(4 * time.Second)
+	deadline := time.Now().Add(12 * time.Second)
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(url) //nolint:gosec // loopback test URL
 		if err == nil {

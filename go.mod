@@ -4,6 +4,7 @@ go 1.26.2
 
 require (
 	github.com/fsnotify/fsnotify v1.9.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/jsonschema-go v0.4.3
 	github.com/gzuidhof/tygo v0.2.21
 	github.com/modelcontextprotocol/go-sdk v1.7.0-pre.2

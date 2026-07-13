@@ -90,9 +90,17 @@ dockyard inspect --url http://127.0.0.1:8080
 
 Same surface, separate process.
 
+An OAuth-protected server will reject the auto-attached and standalone inspector
+unless the development client can authenticate. The inspector deliberately has
+no OAuth flow, token-forwarding option, or credential store. Exercise protected
+endpoints with Harbor or a purpose-built test client; use an unauthenticated
+loopback-only development configuration when inspecting locally. See the
+[OAuth protected resource guide](oauth-protected-resource).
+
 ## See also
 
 - [`run-the-dev-loop` agent skill](/agent-skills/)
 - [Inspector guide](inspector)
+- [OAuth protected resource guide](oauth-protected-resource)
 - [Decisions: D-161 — dockyard dev auto-attaches the inspector](/reference/decisions)
 - [Decisions: D-162 — the supervised inspector is in-process](/reference/decisions)

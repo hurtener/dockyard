@@ -54,19 +54,19 @@ None.
 
 ## Acceptance criteria
 
-- [ ] Auth-enabled HTTP serves path-aware RFC 9728 metadata with one configured
+- [x] Auth-enabled HTTP serves path-aware RFC 9728 metadata with one configured
       canonical resource URL, issuer, Bearer header support, and resource scopes.
-- [ ] Missing, malformed, expired, bad-signature, wrong-algorithm, wrong-issuer,
+- [x] Missing, malformed, expired, bad-signature, wrong-algorithm, wrong-issuer,
       or wrong-audience tokens receive `401` with `resource_metadata`.
-- [ ] A valid token lacking all required scopes receives `403` with
+- [x] A valid token lacking all required scopes receives `403` with
       `insufficient_scope`, every required operation scope, and resource metadata.
-- [ ] The JWT/JWKS driver discovers metadata only from its configured issuer,
+- [x] The JWT/JWKS driver discovers metadata only from its configured issuer,
       handles bounded key rotation safely, and never logs/stores a token.
-- [ ] Each modern and legacy HTTP request receives a verified principal through
+- [x] Each modern and legacy HTTP request receives a verified principal through
       context; an untrusted `_meta` value cannot impersonate it.
-- [ ] Task creation, get, update, cancel, and MRTR retries bind to the same
+- [x] Task creation, get, update, cancel, and MRTR retries bind to the same
       verified issuer/subject identity and reject cross-principal access.
-- [ ] A real local TLS authorization-server fixture, a real Dockyard server, and
+- [x] A real local TLS authorization-server fixture, a real Dockyard server, and
       a test-only SDK client prove metadata → token → protected MCP call end to end.
 
 ## Files added or changed
@@ -99,7 +99,10 @@ type Validator interface {
 
 `HTTPOptions` gains typed authorization configuration. Driver selection follows
 the repository's interface + factory + init-registration rule; handler-facing APIs
-never expose JWT/JWKS wire types or a raw bearer string.
+never expose JWT/JWKS wire types or a raw bearer string. `Config.Scopes` advertises
+supported metadata scopes, while `Config.RequiredScopes` is the global scope set
+required on every protected MCP operation; operation-specific callbacks are out of
+scope for this phase.
 
 ## Design gate
 
@@ -153,16 +156,16 @@ never expose JWT/JWKS wire types or a raw bearer string.
 
 ## Pre-merge checklist
 
-- [ ] `make drift-audit` passes
-- [ ] `make check-mirror` passes
-- [ ] `make preflight` passes
-- [ ] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
-- [ ] `make docs` passes
-- [ ] `go test -race ./...` and `golangci-lint run` clean
-- [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
-- [ ] Coverage on touched packages ≥ stated target
-- [ ] New CLI command / manifest field / public API has a smoke check in this PR
-- [ ] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
-- [ ] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
-- [ ] New vocabulary added to `docs/glossary.md`
-- [ ] New / changed architectural decision filed in `docs/decisions.md`
+- [x] `make drift-audit` passes
+- [x] `make check-mirror` passes
+- [x] `make preflight` passes
+- [x] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
+- [x] `make docs` passes
+- [x] `go test -race ./...` and `golangci-lint run` clean
+- [x] All cross-references (`RFC §X.Y`, `brief NN`) resolve
+- [x] Coverage on touched packages ≥ stated target
+- [x] New CLI command / manifest field / public API has a smoke check in this PR
+- [x] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
+- [x] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
+- [x] New vocabulary added to `docs/glossary.md`
+- [x] New / changed architectural decision filed in `docs/decisions.md`

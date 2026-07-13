@@ -593,7 +593,14 @@ func renderReadme(o Options) string {
 		"- Add a tool: write a handler and a `tool.New(...)` call in `greet.go`.\n"+
 		"- Edit a contract: change the struct in `internal/contracts`, then\n"+
 		"  regenerate the schema with `dockyard generate`.\n"+
-		"- Validate the project with `dockyard validate`.\n",
+		"- Validate the project with `dockyard validate`.\n"+
+		"\n## Optional OAuth protection for HTTP\n\n"+
+		"HTTP is unauthenticated by default. To make it an OAuth protected resource,\n"+
+		"configure `server.HTTPOptions.Authorization` as shown in\n"+
+		"[`examples/oauth-resource-server`](https://github.com/hurtener/dockyard/tree/main/examples/oauth-resource-server).\n"+
+		"The example reads the canonical resource URL, trusted issuer, required scopes,\n"+
+		"and continuation key from the environment and rejects partial or unsafe\n"+
+		"configuration. It does not change the default stdio or HTTP behavior.\n",
 		titleCase(o.Name))
 }
 

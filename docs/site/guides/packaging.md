@@ -49,6 +49,12 @@ The generated HTTP server exposes one dual-lifecycle endpoint. Modern
 `2026-07-28` clients use stateless `server/discover`; legacy `2025-11-25`
 clients use the session-based `initialize` lifecycle.
 
+For a public HTTP deployment, terminate TLS at a trusted boundary and configure
+the handler's canonical HTTPS resource URL explicitly. To require signed bearer
+tokens and publish RFC 9728 metadata, follow the
+[OAuth protected resource guide](oauth-protected-resource). Packaging does not
+acquire, embed, forward, or store OAuth credentials.
+
 ## `dockyard install`
 
 ```bash
@@ -85,3 +91,4 @@ CGo — test binaries are not shipped.
 - [`package` agent skill](/agent-skills/)
 - [Validate + test guide](validate)
 - [Dev loop guide](dev-loop)
+- [OAuth protected resource guide](oauth-protected-resource)

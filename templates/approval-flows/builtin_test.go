@@ -29,6 +29,10 @@ func TestBuiltin_TemplateShape(t *testing.T) {
 	if !strings.Contains(string(files["main.go"]), "HTTPOptions{ProtocolMode: server.Dual}") {
 		t.Fatal("main.go.tmpl does not explicitly enable dual HTTP lifecycle support")
 	}
+	readme := string(files["README.md"])
+	if !strings.Contains(readme, "Optional OAuth protection for HTTP") || !strings.Contains(readme, "examples/oauth-resource-server") {
+		t.Fatal("README does not document opt-in OAuth resource-server configuration")
+	}
 
 	// TextExts covers the textual file types the template ships.
 	wantExts := []string{".tmpl", ".yaml", ".md", ".go", ".ts", ".svelte", ".json", ".html", ".css"}

@@ -62,6 +62,13 @@ dockyard inspect --url http://127.0.0.1:8080 --dir path/to/project
 A non-loopback `--port` host is refused before the listener opens
 (the CVE-2025-49596 lesson).
 
+The inspector does not run OAuth authorization-code/PKCE, accept a bearer-token
+flag, forward credentials, or store tokens. An OAuth-protected endpoint therefore
+fails attachment with its authorization challenge rather than silently falling
+back. Use Harbor or a purpose-built test client for the authenticated path, and
+an unauthenticated loopback-only server for inspector work. See the
+[OAuth protected resource guide](oauth-protected-resource).
+
 ## Rail tabs
 
 | Tab        | What it shows / does                                                       |
@@ -180,4 +187,5 @@ quality gates.
 
 - [`test-with-the-inspector` agent skill](/agent-skills/)
 - [Dev loop guide](dev-loop)
+- [OAuth protected resource guide](oauth-protected-resource)
 - [Decisions: D-103, D-130, D-131, D-163](/reference/decisions)

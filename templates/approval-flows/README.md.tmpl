@@ -102,6 +102,15 @@ pass an `AuthContextFunc` to `WithTasks` that derives the requestor's
 identity from the bearer token; the engine then binds tasks to that
 auth context.
 
+## Optional OAuth protection for HTTP
+
+HTTP is unauthenticated by default. To make it an OAuth protected resource,
+configure `server.HTTPOptions.Authorization` using the validated,
+environment-driven example in
+[`examples/oauth-resource-server`](https://github.com/hurtener/dockyard/tree/main/examples/oauth-resource-server).
+The verified principal automatically binds Tasks and continuation retries to the
+issuer and subject. Stdio and the default HTTP setup remain unchanged.
+
 ## Swap to a real decision store
 
 The handlers are pure functions over their typed contracts. Replace

@@ -65,6 +65,7 @@ export default defineConfig({
             { text: "UI resources (MCP Apps)", link: "/guides/ui-resources" },
             { text: "Dev loop", link: "/guides/dev-loop" },
             { text: "Validate + test", link: "/guides/validate" },
+            { text: "OAuth protected resource", link: "/guides/oauth-protected-resource" },
             { text: "Packaging + install", link: "/guides/packaging" },
             { text: "Inspector", link: "/guides/inspector" },
           ],

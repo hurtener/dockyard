@@ -175,8 +175,8 @@ func (m *Mount) HTTPMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		authCtx := ""
-		if m.auth != nil {
+		authCtx, verified := requestAuthContext(r.Context())
+		if !verified && m.auth != nil {
 			authCtx = m.auth(r)
 		}
 		resp, handled, err := m.HandleFrame(r.Context(), authCtx, trimmed)

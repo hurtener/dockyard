@@ -66,7 +66,7 @@ discipline.
 | 33 | Apps, Tasks + multi-round-trip requests       | runtime/apps, tasks    | §7, §8, §19.1    | 07,01,02,03| 32, 09, 11, 14 | 85% | Planned |
 | 34 | Contracts + server response semantics          | codegen, server        | §5, §6, §19.1    | 07,06,03  | 31, 32, 04, 05, 08 | 85% | Planned |
 | 35 | Inspector, CLI + quality-gate compatibility    | inspector / CLI        | §9, §12, §19.1   | 07,04,05,03 | 31–34, 19–23 | 80% | Planned |
-| 36 | Stateless OAuth resource server                | runtime/authz          | §15, §19.2       | 08,07,03,02 | 31–33, 35 | 85% | Planned |
+| 36 | Stateless OAuth resource server                | runtime/authz          | §15, §19.2       | 08,07,03,02 | 31–33, 35 | 85% | Done    |
 
 **V1 critical path:** phases 01–30 plus 10a and 21.5 (32 phases beyond the skeleton),
 grouped into ten waves. Lettered/dotted phases (`10a`, `21.5`) insert work into a band

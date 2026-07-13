@@ -26,3 +26,12 @@ go test ./...                     # run the contract tests
 - Edit a contract: change the struct in `internal/contracts`, then
   regenerate the schema with `dockyard generate`.
 - Validate the project with `dockyard validate`.
+
+## Optional OAuth protection for HTTP
+
+HTTP is unauthenticated by default. To make it an OAuth protected resource,
+configure `server.HTTPOptions.Authorization` as shown in
+[`examples/oauth-resource-server`](https://github.com/hurtener/dockyard/tree/main/examples/oauth-resource-server).
+The example reads the canonical resource URL, trusted issuer, required scopes,
+and continuation key from the environment and rejects partial or unsafe
+configuration. It does not change the default stdio or HTTP behavior.

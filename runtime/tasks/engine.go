@@ -273,6 +273,9 @@ func (e *Engine) createForToolCall(ctx context.Context, p CreateToolCallParams) 
 	if (p.Run == nil) == (p.Handle == nil) {
 		return protocolcodec.Task{}, fmt.Errorf("%w: CreateForToolCall requires exactly one of Run or Handle", ErrInvalidParams)
 	}
+	if verified, ok := requestAuthContext(ctx); ok {
+		p.AuthContext = verified
+	}
 
 	// Enforce the per-requestor concurrent-task cap before anything durable is
 	// written — the brief 02 §4.6 resource-exhaustion guard (RFC §8.5).
