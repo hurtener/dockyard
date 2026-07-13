@@ -172,7 +172,7 @@ registered tool; golden tests cover generated output.
 
 #### 05 — Go → TypeScript codegen + drift cross-check (RFC §6.2)
 
-**Goal.** Go contract structs → `web/src/generated/contracts.ts` via `tygo`
+**Goal.** Go contract structs → `internal/contracts/contracts.ts` via `tygo`
 (Design A); the `validate` drift cross-check that fails on desync or stale output.
 **Acceptance.** Generated TS compiles; schema↔TS drift is detected and fails;
 golden tests on TS output.

@@ -61,8 +61,22 @@ type TaskHandle interface {
 }
 
 func (h *taskHandle) RequestInput(ctx context.Context, req InputRequest) error {
-	_, err := h.engine.RequestInput(ctx, h.id, req)
+	waitCtx, cancel := taskWaitContext(ctx, h.ctx)
+	defer cancel()
+	_, err := h.engine.RequestInput(waitCtx, h.id, req)
 	return err
+}
+
+func taskWaitContext(ctx, taskCtx context.Context) (context.Context, context.CancelFunc) {
+	waitCtx, cancel := context.WithCancel(ctx)
+	if taskCtx == nil {
+		return waitCtx, cancel
+	}
+	stop := context.AfterFunc(taskCtx, cancel)
+	return waitCtx, func() {
+		stop()
+		cancel()
+	}
 }
 
 func (h *taskHandle) ModernInputResponse(ctx context.Context, key string) (TaskInputResponse, bool, error) {
@@ -220,6 +234,8 @@ func (h *taskHandle) Cancelled() bool {
 // Engine.SupplyInput to hand the response back; RequireInput blocks on the
 // rendezvous channel until that happens or the task is cancelled.
 func (h *taskHandle) RequireInput(ctx context.Context, prompt InputPrompt) (InputResponse, error) {
+	waitCtx, cancel := taskWaitContext(ctx, h.ctx)
+	defer cancel()
 	ch := make(chan InputResponse, 1)
 	h.mu.Lock()
 	h.inputCh = ch
@@ -232,23 +248,23 @@ func (h *taskHandle) RequireInput(ctx context.Context, prompt InputPrompt) (Inpu
 
 	// Register the outstanding elicitation on the engine and move the task to
 	// input_required so a poller sees the task is waiting.
-	if err := h.engine.beginElicitation(ctx, h.id, prompt, h); err != nil {
+	if err := h.engine.beginElicitation(waitCtx, h.id, prompt, h); err != nil {
 		return InputResponse{}, err
 	}
 
 	select {
 	case resp := <-ch:
 		// Input supplied — return the task to working and hand the reply back.
-		if _, err := h.engine.store.Transition(ctx, h.id, protocolcodec.TaskWorking,
+		if _, err := h.engine.store.Transition(waitCtx, h.id, protocolcodec.TaskWorking,
 			"input received, resuming"); err != nil {
 			return InputResponse{}, err
 		}
 		h.engine.endElicitation(h.id)
 		return resp, nil
-	case <-ctx.Done():
+	case <-waitCtx.Done():
 		h.engine.endElicitation(h.id)
 		return InputResponse{}, fmt.Errorf("%w: input_required wait cancelled: %w",
-			ErrInvalidParams, ctx.Err())
+			ErrInvalidParams, waitCtx.Err())
 	}
 }
 

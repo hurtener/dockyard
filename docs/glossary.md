@@ -110,6 +110,12 @@ peers and request metadata plus `server/discover` for `2026-07-28`. Dockyard
 reads it at run time and adapts; it never hardcodes a per-host capability matrix.
 RFC §7.5, §19.1. D-011, D-190.
 
+**Coordination identity** — the stable comparable process-local key used to
+route a task's cancellation, input, result waiters, and worker cleanup to the
+engine that owns it. Comparable `TaskStore` values identify themselves;
+noncomparable stores and facades over a shared backend expose the key through
+`tasks.CoordinationIdentityProvider`. D-192, D-196.
+
 **Explicit legacy fallback** — a client first sends a complete modern
 `2026-07-28` `server/discover` request, then starts a distinct `2025-11-25`
 `initialize` lifecycle only after a recognized compatibility response. A
@@ -403,11 +409,14 @@ is marshalled deterministically and pinned by golden tests so any drift is a
 visible diff. The typed tool builder registers the generated schema on the tool,
 so the schema a host sees is provably the contract. RFC §6.1, §6.2. D-030, D-031.
 
-**Generated TypeScript** — `web/src/generated/contracts.ts`: the TypeScript
+**Generated TypeScript** — `internal/contracts/contracts.ts`: the TypeScript
 contract types produced from the Go contract structs by `internal/codegen` via
 `gzuidhof/tygo`. The UI-facing half of the Design A codegen pipeline; never
 hand-authored (P1), deterministic, headered with the `Code generated … DO NOT
-EDIT.` marker, and pinned by golden tests. RFC §6.2. D-032, D-033.
+EDIT.` marker, and pinned by golden tests. It is generated at the same path for
+backend-only projects; Apps import the canonical artifact when present. Manifest
+tool contracts must live in `internal/contracts`, so this one artifact contains
+the complete App-facing type surface. RFC §6.2. D-032, D-033, D-198.
 
 ## G (continued)
 

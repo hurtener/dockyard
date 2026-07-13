@@ -2,6 +2,9 @@ package generate
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,9 +14,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/hurtener/dockyard/internal/codegen"
 	"github.com/hurtener/dockyard/internal/manifest"
 )
@@ -22,10 +28,15 @@ import (
 // with errors.Is(err, ErrGenerate).
 var ErrGenerate = errors.New("dockyard/internal/generate: code generation failed")
 
+// ErrMissingOwnershipIndex reports generated artifacts without the index that
+// proves which bytes Dockyard owns. Generate repairs this state; dry-run gates
+// report it as stale instead of guessing ownership.
+var ErrMissingOwnershipIndex = errors.New("generated artifact ownership index is missing")
+
 // ContractsDir is the project-relative directory holding the Go contract source
 // and its generated artifacts. It is the directory `dockyard new` scaffolds and
 // the one the codegen pipeline reads and writes (RFC §6.2).
-const ContractsDir = "internal/contracts"
+const ContractsDir = manifest.ContractsPackage
 
 // contractsTSFile is the generated TypeScript file name within ContractsDir.
 const contractsTSFile = "contracts.ts"
@@ -38,6 +49,19 @@ type Options struct {
 	// Manifest is the loaded, validated manifest. Required: generate reads the
 	// tools list to know which contract types to produce schemas for.
 	Manifest *manifest.Manifest
+
+	// beforeOwnershipCommit is a deterministic test seam for proving that an
+	// index commit failure cannot delete obsolete artifacts.
+	beforeOwnershipCommit func() error
+	// beforeArtifactCommit permits adversarial path-swap tests immediately
+	// before a staged current artifact is published.
+	beforeArtifactCommit func(string) error
+	// beforeQuarantineCleanup is a deterministic test seam for proving that a
+	// post-commit cleanup failure retains detectable orphan ownership.
+	beforeQuarantineCleanup func() error
+	// finalOwnershipDirSync is a deterministic test seam for a rename that
+	// succeeds before the containing-directory durability barrier fails.
+	finalOwnershipDirSync func(*os.File) error
 }
 
 // Result reports what a generate run produced.
@@ -48,6 +72,9 @@ type Result struct {
 	// already on disk. An empty Changed on a rerun is the idempotency
 	// guarantee made observable (RFC §6.2): no source change ⇒ no diff.
 	Changed []string
+	// Removed contains obsolete Dockyard-generated files deleted after all
+	// current artifacts were written successfully.
+	Removed []string
 }
 
 // TSFileName is the project-relative path of the generated TypeScript contract
@@ -79,6 +106,24 @@ func Plan(opts Options) (map[string][]byte, error) {
 	if opts.Manifest == nil {
 		return nil, fmt.Errorf("%w: Manifest is required", ErrGenerate)
 	}
+	for _, tool := range opts.Manifest.Tools {
+		for _, contract := range []struct {
+			side string
+			ref  string
+		}{
+			{side: "input", ref: tool.Input},
+			{side: "output", ref: tool.Output},
+		} {
+			ref, err := manifest.ParseContractReference(contract.ref)
+			if err != nil {
+				return nil, fmt.Errorf("%w: tool %q %s: %w", ErrGenerate, tool.Name, contract.side, err)
+			}
+			if ref.Package != ContractsDir {
+				return nil, fmt.Errorf("%w: tool %q %s contract %q must use canonical package %q",
+					ErrGenerate, tool.Name, contract.side, contract.ref, ContractsDir)
+			}
+		}
+	}
 	contractsDir := filepath.Join(opts.ProjectDir, filepath.FromSlash(ContractsDir))
 	if info, err := os.Stat(contractsDir); err != nil || !info.IsDir() {
 		return nil, fmt.Errorf("%w: contracts directory %s not found — is this a Dockyard project?",
@@ -106,10 +151,52 @@ func Plan(opts Options) (map[string][]byte, error) {
 		}
 		planned[rel] = content
 	}
+	for _, tool := range opts.Manifest.Tools {
+		for _, side := range []string{"input", "output"} {
+			refText := tool.Input
+			if side == "output" {
+				refText = tool.Output
+			}
+			ref, parseErr := manifest.ParseContractReference(refText)
+			if parseErr != nil {
+				return nil, fmt.Errorf("%w: tool %q %s: %w", ErrGenerate, tool.Name, side, parseErr)
+			}
+			if ref.Package != ContractsDir {
+				return nil, fmt.Errorf("%w: tool %q %s contract %q must use canonical package %q",
+					ErrGenerate, tool.Name, side, refText, ContractsDir)
+			}
+			rel := SchemaFileName(tool.Name, side)
+			schema, validateErr := codegen.ValidateSchema(schemas[rel], side == "input")
+			if validateErr != nil {
+				return nil, fmt.Errorf("%w: generated schema %s: %w", ErrGenerate, rel, validateErr)
+			}
+			if side == "output" && !schemaHasObjectType(schema) {
+				continue
+			}
+			if crossErr := codegen.CrossCheck(schema, ref.TypeName, ts); crossErr != nil {
+				return nil, fmt.Errorf("%w: generated schema and TypeScript for %s: %w", ErrGenerate, refText, crossErr)
+			}
+		}
+	}
 	for rel, content := range enumMetadata {
 		planned[rel] = content
 	}
 	return planned, nil
+}
+
+func schemaHasObjectType(schema *jsonschema.Schema) bool {
+	if schema == nil {
+		return false
+	}
+	if schema.Type == "object" {
+		return true
+	}
+	for _, typ := range schema.Types {
+		if typ == "object" {
+			return true
+		}
+	}
+	return false
 }
 
 // Run executes the Design A codegen pipeline (RFC §6.2) for the project: it
@@ -124,43 +211,815 @@ func Run(opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	orphans, err := FindOrphanedArtifacts(opts.ProjectDir, planned)
+	if err != nil {
+		if !errors.Is(err, ErrMissingOwnershipIndex) {
+			return Result{}, fmt.Errorf("%w: find obsolete generated files: %w", ErrGenerate, err)
+		}
+		orphans = nil
+	}
 
+	projectRoot, err := os.OpenRoot(opts.ProjectDir)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: open project root: %w", ErrGenerate, err)
+	}
+	defer func() { _ = projectRoot.Close() }()
+	type stagedArtifact struct {
+		rel       string
+		temp      string
+		backup    string
+		changed   bool
+		committed bool
+	}
 	res := Result{}
+	staged := make([]stagedArtifact, 0, len(planned)+1)
+	defer func() {
+		for _, artifact := range staged {
+			if artifact.temp != "" {
+				_ = projectRoot.Remove(filepath.FromSlash(artifact.temp))
+			}
+		}
+	}()
 	rels := make([]string, 0, len(planned))
 	for rel := range planned {
 		rels = append(rels, rel)
 	}
 	sort.Strings(rels)
 	for _, rel := range rels {
-		full := filepath.Join(opts.ProjectDir, filepath.FromSlash(rel))
-		changed, err := writeIfChanged(full, planned[rel])
-		if err != nil {
-			return Result{}, fmt.Errorf("%w: write %s: %w", ErrGenerate, rel, err)
+		_, safe, pathErr := ownedArtifactPath(opts.ProjectDir, rel)
+		if pathErr != nil {
+			return Result{}, fmt.Errorf("%w: generated output %s is unsafe: %w", ErrGenerate, rel, pathErr)
 		}
+		if !safe {
+			return Result{}, fmt.Errorf("%w: generated output %s belongs to a nested project", ErrGenerate, rel)
+		}
+		temp, changed, stageErr := stageIfChangedRoot(projectRoot, rel, planned[rel])
+		if stageErr != nil {
+			return Result{}, fmt.Errorf("%w: stage %s: %w", ErrGenerate, rel, stageErr)
+		}
+		staged = append(staged, stagedArtifact{rel: rel, temp: temp, changed: changed})
 		res.Written = append(res.Written, rel)
 		if changed {
 			res.Changed = append(res.Changed, rel)
 		}
 	}
+	if len(orphans) > 0 {
+		confirmed, confirmErr := FindOrphanedArtifacts(opts.ProjectDir, planned)
+		if confirmErr != nil {
+			return Result{}, fmt.Errorf("%w: recheck obsolete generated files: %w", ErrGenerate, confirmErr)
+		}
+		if strings.Join(confirmed, "\x00") != strings.Join(orphans, "\x00") {
+			return Result{}, fmt.Errorf("%w: obsolete generated files changed during generation; refusing to remove them", ErrGenerate)
+		}
+	}
+	ownedDigests := make(map[string]string, len(orphans))
+	if len(orphans) > 0 {
+		owned, _, ownershipErr := readOwnership(opts.ProjectDir)
+		if ownershipErr != nil {
+			return Result{}, fmt.Errorf("%w: retain obsolete generated-file ownership: %w", ErrGenerate, ownershipErr)
+		}
+		for _, artifact := range owned.Artifacts {
+			ownedDigests[artifact.Path] = artifact.SHA256
+		}
+	}
+	finalOwnership, err := marshalOwnership(planned)
+	if err != nil {
+		return Result{}, err
+	}
+	ownership := finalOwnership
+	if len(orphans) > 0 {
+		ownership, err = marshalOwnershipRetaining(planned, ownedDigests)
+		if err != nil {
+			return Result{}, err
+		}
+	}
+	_, safe, err := ownedArtifactPath(opts.ProjectDir, ownershipFile)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: ownership index path is unsafe: %w", ErrGenerate, err)
+	}
+	if !safe {
+		return Result{}, fmt.Errorf("%w: ownership index belongs to a nested project", ErrGenerate)
+	}
+	temp, changed, err := stageIfChangedRoot(projectRoot, ownershipFile, ownership)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: stage %s: %w", ErrGenerate, ownershipFile, err)
+	}
+	staged = append(staged, stagedArtifact{rel: ownershipFile, temp: temp, changed: changed})
+	res.Written = append(res.Written, ownershipFile)
+	if changed {
+		res.Changed = append(res.Changed, ownershipFile)
+	}
+
+	quarantined := make([]quarantinedArtifact, 0, len(orphans))
+	for _, rel := range orphans {
+		artifact, quarantineErr := quarantineArtifact(projectRoot, rel, ownedDigests[rel])
+		if quarantineErr != nil {
+			restoreErr := restoreQuarantined(projectRoot, quarantined)
+			return Result{}, errors.Join(
+				fmt.Errorf("%w: quarantine obsolete generated file %s: %w", ErrGenerate, rel, quarantineErr),
+				restoreErr,
+			)
+		}
+		quarantined = append(quarantined, artifact)
+	}
+
+	// Publish complete current artifacts first and a transitional ownership
+	// index last. The transitional index retains every quarantined orphan until
+	// cleanup succeeds, so a crash or cleanup failure remains visible to gates.
+	rollback := func(cause error) error {
+		var rollbackErr error
+		for i := len(staged) - 1; i >= 0; i-- {
+			artifact := &staged[i]
+			if !artifact.committed {
+				continue
+			}
+			if err := rollbackCommittedRoot(projectRoot, artifact.rel, artifact.backup); err != nil {
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("rollback %s: %w", artifact.rel, err))
+				continue
+			}
+			artifact.backup = ""
+			artifact.committed = false
+		}
+		rollbackErr = errors.Join(rollbackErr, restoreQuarantined(projectRoot, quarantined))
+		return errors.Join(cause, rollbackErr)
+	}
+	for i := range staged {
+		artifact := &staged[i]
+		if artifact.rel == ownershipFile || !artifact.changed {
+			continue
+		}
+		if opts.beforeArtifactCommit != nil {
+			if hookErr := opts.beforeArtifactCommit(artifact.rel); hookErr != nil {
+				return Result{}, rollback(fmt.Errorf("%w: commit %s: %w", ErrGenerate, artifact.rel, hookErr))
+			}
+		}
+		backup, committed, commitErr := commitStagedRoot(projectRoot, artifact.temp, artifact.rel)
+		artifact.backup = backup
+		artifact.committed = committed
+		if commitErr != nil {
+			return Result{}, rollback(fmt.Errorf("%w: commit %s: %w", ErrGenerate, artifact.rel, commitErr))
+		}
+		artifact.temp = ""
+	}
+	if opts.beforeOwnershipCommit != nil {
+		if err := opts.beforeOwnershipCommit(); err != nil {
+			return Result{}, rollback(fmt.Errorf("%w: commit %s: %w", ErrGenerate, ownershipFile, err))
+		}
+	}
+	if err := verifyCurrentArtifacts(projectRoot, planned); err != nil {
+		return Result{}, rollback(fmt.Errorf("%w: verify current artifacts before ownership commit: %w", ErrGenerate, err))
+	}
+	if err := verifyQuarantined(projectRoot, quarantined); err != nil {
+		return Result{}, rollback(fmt.Errorf("%w: recheck obsolete generated files before ownership commit: %w", ErrGenerate, err))
+	}
+	for i := range staged {
+		artifact := &staged[i]
+		if artifact.rel != ownershipFile || !artifact.changed {
+			continue
+		}
+		backup, committed, commitErr := commitStagedRoot(projectRoot, artifact.temp, artifact.rel)
+		artifact.backup = backup
+		artifact.committed = committed
+		if commitErr != nil {
+			return Result{}, rollback(fmt.Errorf("%w: commit %s: %w", ErrGenerate, artifact.rel, commitErr))
+		}
+		artifact.temp = ""
+	}
+	// The transitional index is durable. From this point onward, do not roll
+	// back current artifacts: its retained obsolete records make any incomplete
+	// cleanup detectable and safely retryable.
+	for i := range staged {
+		artifact := &staged[i]
+		if artifact.backup == "" {
+			continue
+		}
+		if err := projectRoot.Remove(filepath.FromSlash(artifact.backup)); err != nil {
+			return Result{}, errors.Join(
+				fmt.Errorf("%w: remove commit backup for %s: %w", ErrGenerate, artifact.rel, err),
+				restoreQuarantined(projectRoot, quarantined),
+			)
+		}
+		artifact.backup = ""
+	}
+	if opts.beforeQuarantineCleanup != nil {
+		if err := opts.beforeQuarantineCleanup(); err != nil {
+			return Result{}, errors.Join(
+				fmt.Errorf("%w: clean obsolete generated files: %w", ErrGenerate, err),
+				restoreQuarantined(projectRoot, quarantined),
+			)
+		}
+	}
+	for i, artifact := range quarantined {
+		if err := projectRoot.Remove(filepath.FromSlash(artifact.quarantine)); err != nil {
+			restoreErr := restoreQuarantined(projectRoot, quarantined[i:])
+			return Result{}, errors.Join(
+				fmt.Errorf("%w: remove obsolete generated file %s: %w", ErrGenerate, artifact.rel, err),
+				restoreErr,
+			)
+		}
+		res.Removed = append(res.Removed, artifact.rel)
+	}
+	if !bytes.Equal(ownership, finalOwnership) {
+		finalTemp, finalChanged, stageErr := stageIfChangedRoot(projectRoot, ownershipFile, finalOwnership)
+		if stageErr != nil {
+			return Result{}, fmt.Errorf("%w: stage final %s: %w", ErrGenerate, ownershipFile, stageErr)
+		}
+		if err := verifyCurrentArtifacts(projectRoot, planned); err != nil {
+			_ = projectRoot.Remove(filepath.FromSlash(finalTemp))
+			return Result{}, fmt.Errorf("%w: verify current artifacts before final ownership commit: %w", ErrGenerate, err)
+		}
+		backup, committed, commitErr := commitStagedRootWithSync(projectRoot, finalTemp, ownershipFile, opts.finalOwnershipDirSync)
+		if commitErr != nil {
+			if committed {
+				commitErr = errors.Join(commitErr, rollbackCommittedRoot(projectRoot, ownershipFile, backup))
+			} else {
+				commitErr = errors.Join(commitErr, projectRoot.Remove(filepath.FromSlash(finalTemp)))
+			}
+			return Result{}, fmt.Errorf("%w: commit final %s: %w", ErrGenerate, ownershipFile, commitErr)
+		}
+		if backup != "" {
+			if err := projectRoot.Remove(filepath.FromSlash(backup)); err != nil {
+				return Result{}, fmt.Errorf("%w: remove final ownership backup: %w", ErrGenerate, err)
+			}
+		}
+		if finalChanged && !containsPath(res.Changed, ownershipFile) {
+			res.Changed = append(res.Changed, ownershipFile)
+			sort.Strings(res.Changed)
+		}
+	}
 	return res, nil
 }
 
-// writeIfChanged writes content to path only when it differs from the file
-// already there, and reports whether a write happened. Skipping an identical
-// write keeps generate's mtime footprint minimal — a `dockyard dev` watcher
-// (Phase 19) would otherwise see a spurious change event on every rerun.
-func writeIfChanged(path string, content []byte) (bool, error) {
-	existing, err := os.ReadFile(path) //nolint:gosec // path is composed from a caller-supplied project dir
+func containsPath(paths []string, want string) bool {
+	for _, path := range paths {
+		if path == want {
+			return true
+		}
+	}
+	return false
+}
+
+const enumMetadataFile = "dockyard_enums.generated.go"
+
+const (
+	ownershipFile       = ".dockyard/generated-artifacts.json"
+	maxOwnedArtifacts   = 10000
+	ownershipFileFormat = 1
+)
+
+var generatedEnumHeader = []byte("// Code generated by dockyard generate; DO NOT EDIT.")
+
+var generatedSchemaName = regexp.MustCompile(`^[a-z][a-z0-9_-]*_(input|output)\.schema\.json$`)
+
+var generatedTSMarker = []byte("// Code generated by dockyard; DO NOT EDIT.")
+
+type artifactOwnership struct {
+	Version   int             `json:"version"`
+	Artifacts []ownedArtifact `json:"artifacts"`
+	Files     []string        `json:"files,omitempty"` // rejected legacy shape; retained for a useful error
+}
+
+type ownedArtifact struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
+func marshalOwnership(planned map[string][]byte) ([]byte, error) {
+	return marshalOwnershipRetaining(planned, nil)
+}
+
+func marshalOwnershipRetaining(planned map[string][]byte, retained map[string]string) ([]byte, error) {
+	paths := make([]string, 0, len(planned))
+	for rel := range planned {
+		if rel != ownershipFile {
+			paths = append(paths, filepath.ToSlash(rel))
+		}
+	}
+	sort.Strings(paths)
+	artifacts := make([]ownedArtifact, 0, len(paths))
+	for _, rel := range paths {
+		sum := sha256.Sum256(planned[rel])
+		artifacts = append(artifacts, ownedArtifact{Path: rel, SHA256: fmt.Sprintf("%x", sum)})
+	}
+	for rel, digest := range retained {
+		if _, current := planned[rel]; !current {
+			artifacts = append(artifacts, ownedArtifact{Path: rel, SHA256: digest})
+		}
+	}
+	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
+	raw, err := json.MarshalIndent(artifactOwnership{Version: ownershipFileFormat, Artifacts: artifacts}, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("%w: marshal generated artifact ownership: %w", ErrGenerate, err)
+	}
+	return append(raw, '\n'), nil
+}
+
+// FindOrphanedArtifacts returns previously indexed files that are absent from
+// the current plan and whose current bytes still match the indexed digest. It
+// never infers ownership from a filename. Modified files and symlinked paths are
+// rejected rather than deleted.
+func FindOrphanedArtifacts(projectDir string, planned map[string][]byte) ([]string, error) {
+	expected := make(map[string]bool, len(planned))
+	for rel := range planned {
+		expected[filepath.ToSlash(rel)] = true
+	}
+	owned, found, err := readOwnership(projectDir)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		for rel := range expected {
+			if _, statErr := os.Lstat(filepath.Join(projectDir, filepath.FromSlash(rel))); statErr == nil {
+				return nil, ErrMissingOwnershipIndex
+			} else if !errors.Is(statErr, os.ErrNotExist) {
+				return nil, statErr
+			}
+		}
+		return nil, nil
+	}
+	var orphans []string
+	for _, artifact := range owned.Artifacts {
+		rel := artifact.Path
+		if expected[rel] || rel == ownershipFile {
+			continue
+		}
+		full, safe, err := ownedArtifactPath(projectDir, rel)
+		if err != nil {
+			return nil, err
+		}
+		if !safe {
+			continue
+		}
+		raw, err := os.ReadFile(full) //nolint:gosec // validated root-relative ownership path
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		sum := sha256.Sum256(raw)
+		if fmt.Sprintf("%x", sum) != artifact.SHA256 {
+			return nil, fmt.Errorf("owned generated artifact %s was modified; refusing to remove it", rel)
+		}
+		if err := validateGeneratedMarker(rel, raw); err != nil {
+			return nil, err
+		}
+		orphans = append(orphans, rel)
+	}
+	sort.Strings(orphans)
+	return orphans, nil
+}
+
+// CheckOwnershipIndex proves that the ownership index exactly describes the
+// current generation plan with the digest of the planned bytes. Generation uses
+// FindOrphanedArtifacts separately so valid obsolete records can be cleaned;
+// dry-run gates reject every extra record, even when its file is already missing
+// or belongs to a nested project.
+func CheckOwnershipIndex(projectDir string, planned map[string][]byte) error {
+	owned, found, err := readOwnership(projectDir)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrMissingOwnershipIndex
+	}
+	indexed := make(map[string]string, len(owned.Artifacts))
+	for _, artifact := range owned.Artifacts {
+		indexed[artifact.Path] = artifact.SHA256
+	}
+	for rel, content := range planned {
+		rel = filepath.ToSlash(rel)
+		sum := sha256.Sum256(content)
+		want := fmt.Sprintf("%x", sum)
+		got, ok := indexed[rel]
+		if !ok {
+			return fmt.Errorf("generated artifact ownership index is missing current artifact %s", rel)
+		}
+		if got != want {
+			return fmt.Errorf("generated artifact ownership index has a stale digest for %s", rel)
+		}
+	}
+	for rel := range indexed {
+		if _, ok := planned[rel]; !ok {
+			return fmt.Errorf("generated artifact ownership index contains obsolete artifact %s", rel)
+		}
+	}
+	return nil
+}
+
+func readOwnership(projectDir string) (artifactOwnership, bool, error) {
+	path, safe, err := ownedArtifactPath(projectDir, ownershipFile)
+	if err != nil {
+		return artifactOwnership{}, false, err
+	}
+	if !safe {
+		return artifactOwnership{}, false, fmt.Errorf("generated artifact ownership index belongs to a nested project")
+	}
+	raw, err := os.ReadFile(path) //nolint:gosec // symlink-free, validated project-relative path
+	if errors.Is(err, os.ErrNotExist) {
+		return artifactOwnership{}, false, nil
+	}
+	if err != nil {
+		return artifactOwnership{}, false, err
+	}
+	var owned artifactOwnership
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&owned); err != nil {
+		return artifactOwnership{}, false, fmt.Errorf("invalid generated artifact ownership index: %w", err)
+	}
+	if err := ensureJSONEOF(dec); err != nil {
+		return artifactOwnership{}, false, fmt.Errorf("invalid generated artifact ownership index: %w", err)
+	}
+	if owned.Version != ownershipFileFormat {
+		return artifactOwnership{}, false, fmt.Errorf("unsupported generated artifact ownership index version %d", owned.Version)
+	}
+	if len(owned.Files) > 0 || len(owned.Artifacts) > maxOwnedArtifacts {
+		return artifactOwnership{}, false, fmt.Errorf("generated artifact ownership index has an unsupported or oversized artifact list")
+	}
+	seen := make(map[string]bool, len(owned.Artifacts))
+	type existingOwnedArtifact struct {
+		path string
+		info os.FileInfo
+	}
+	existing := make([]existingOwnedArtifact, 0, len(owned.Artifacts))
+	for _, artifact := range owned.Artifacts {
+		digest, digestErr := hex.DecodeString(artifact.SHA256)
+		canonical := filepath.ToSlash(filepath.Clean(filepath.FromSlash(artifact.Path)))
+		if artifact.Path == "" || strings.Contains(artifact.Path, `\`) || canonical != artifact.Path ||
+			digestErr != nil || len(digest) != sha256.Size || seen[artifact.Path] {
+			return artifactOwnership{}, false, fmt.Errorf("invalid generated artifact ownership record for %q", artifact.Path)
+		}
+		if !isGeneratedArtifactPath(artifact.Path) {
+			return artifactOwnership{}, false, fmt.Errorf("generated artifact ownership record uses unsupported path %q", artifact.Path)
+		}
+		full, _, pathErr := ownedArtifactPath(projectDir, artifact.Path)
+		if pathErr != nil {
+			return artifactOwnership{}, false, pathErr
+		}
+		info, statErr := os.Lstat(full)
+		if statErr == nil {
+			for _, other := range existing {
+				if os.SameFile(info, other.info) {
+					return artifactOwnership{}, false, fmt.Errorf("generated artifact ownership paths %q and %q target the same file", other.path, artifact.Path)
+				}
+			}
+			existing = append(existing, existingOwnedArtifact{path: artifact.Path, info: info})
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return artifactOwnership{}, false, statErr
+		}
+		seen[artifact.Path] = true
+	}
+	canonical := owned
+	canonical.Artifacts = make([]ownedArtifact, len(owned.Artifacts))
+	copy(canonical.Artifacts, owned.Artifacts)
+	sort.Slice(canonical.Artifacts, func(i, j int) bool { return canonical.Artifacts[i].Path < canonical.Artifacts[j].Path })
+	canonicalRaw, err := json.MarshalIndent(canonical, "", "  ")
+	if err != nil {
+		return artifactOwnership{}, false, fmt.Errorf("marshal canonical generated artifact ownership index: %w", err)
+	}
+	canonicalRaw = append(canonicalRaw, '\n')
+	if !bytes.Equal(raw, canonicalRaw) {
+		return artifactOwnership{}, false, fmt.Errorf("generated artifact ownership index is not in canonical generated form")
+	}
+	return owned, true, nil
+}
+
+func ensureJSONEOF(dec *json.Decoder) error {
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values")
+		}
+		return err
+	}
+	return nil
+}
+
+func isGeneratedArtifactPath(rel string) bool {
+	if rel == TSFileName() {
+		return true
+	}
+	if filepath.ToSlash(filepath.Dir(rel)) == ContractsDir && generatedSchemaName.MatchString(filepath.Base(rel)) {
+		return true
+	}
+	return filepath.Base(rel) == enumMetadataFile && filepath.Dir(rel) != "."
+}
+
+func validateGeneratedMarker(rel string, raw []byte) error {
+	switch {
+	case rel == TSFileName():
+		if !bytes.HasPrefix(raw, generatedTSMarker) {
+			return fmt.Errorf("owned generated artifact %s lacks Dockyard's generated header; refusing to remove it", rel)
+		}
+	case filepath.Base(rel) == enumMetadataFile:
+		if !bytes.HasPrefix(raw, generatedEnumHeader) {
+			return fmt.Errorf("owned generated artifact %s lacks Dockyard's generated header; refusing to remove it", rel)
+		}
+	case filepath.ToSlash(filepath.Dir(rel)) == ContractsDir && generatedSchemaName.MatchString(filepath.Base(rel)):
+		var schema struct {
+			Draft   string `json:"$schema"`
+			Comment string `json:"$comment"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil || schema.Draft != codegen.Draft202012 || schema.Comment != codegen.GeneratedSchemaComment {
+			return fmt.Errorf("owned generated artifact %s lacks Dockyard's generated schema marker; refusing to remove it", rel)
+		}
+	default:
+		return fmt.Errorf("owned generated artifact %s is outside Dockyard's generated namespaces; refusing to remove it", rel)
+	}
+	return nil
+}
+
+func ownedArtifactPath(projectDir, rel string) (string, bool, error) {
+	projectDir, err := filepath.Abs(projectDir)
+	if err != nil {
+		return "", false, err
+	}
+	projectDir = filepath.Clean(projectDir)
+	clean := filepath.Clean(filepath.FromSlash(rel))
+	if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", false, fmt.Errorf("invalid generated artifact ownership path %q", rel)
+	}
+	full := filepath.Join(projectDir, clean)
+	current := projectDir
+	parts := strings.Split(clean, string(filepath.Separator))
+	for i, part := range parts {
+		entries, readErr := os.ReadDir(current)
+		if readErr != nil {
+			return "", false, readErr
+		}
+		exact := false
+		caseAlias := false
+		for _, entry := range entries {
+			if entry.Name() == part {
+				exact = true
+				break
+			}
+			caseAlias = caseAlias || strings.EqualFold(entry.Name(), part)
+		}
+		if !exact && caseAlias {
+			return "", false, fmt.Errorf("generated artifact ownership path %q uses non-canonical casing", rel)
+		}
+		current = filepath.Join(current, part)
+		info, statErr := os.Lstat(current)
+		if errors.Is(statErr, os.ErrNotExist) {
+			return full, true, nil
+		}
+		if statErr != nil {
+			return "", false, statErr
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", false, fmt.Errorf("generated artifact ownership path %q contains a symlink", rel)
+		}
+		if i < len(parts)-1 {
+			if !info.IsDir() {
+				return "", false, fmt.Errorf("generated artifact ownership path %q traverses a non-directory", rel)
+			}
+			if _, manifestErr := os.Lstat(filepath.Join(current, manifest.DefaultFilename)); manifestErr == nil {
+				return full, false, nil
+			} else if !errors.Is(manifestErr, os.ErrNotExist) {
+				return "", false, manifestErr
+			}
+		}
+	}
+	return full, true, nil
+}
+
+// stageIfChanged writes changed content to an fsynced temporary file in the
+// destination directory. A same-directory rename then publishes complete bytes
+// atomically. Identical content keeps generate's mtime footprint minimal.
+func stageIfChangedRoot(root *os.Root, rel string, content []byte) (string, bool, error) {
+	rel = filepath.ToSlash(rel)
+	existing, err := root.ReadFile(filepath.FromSlash(rel))
 	if err == nil && bytes.Equal(existing, content) {
-		return false, nil
+		return "", false, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // a project directory is browsable, not a secret
-		return false, err
+	dir := filepath.ToSlash(filepath.Dir(filepath.FromSlash(rel)))
+	if err := root.MkdirAll(filepath.FromSlash(dir), 0o755); err != nil {
+		return "", false, err
 	}
-	if err := os.WriteFile(path, content, 0o644); err != nil { //nolint:gosec // generated source, not a secret
-		return false, err
+	temp, f, err := createRootTemp(root, dir, ".dockyard-stage-")
+	if err != nil {
+		return "", false, err
 	}
-	return true, nil
+	ok := false
+	defer func() {
+		_ = f.Close()
+		if !ok {
+			_ = root.Remove(filepath.FromSlash(temp))
+		}
+	}()
+	if err := f.Chmod(0o644); err != nil {
+		return "", false, err
+	}
+	if _, err := f.Write(content); err != nil {
+		return "", false, err
+	}
+	if err := f.Sync(); err != nil {
+		return "", false, err
+	}
+	if err := f.Close(); err != nil {
+		return "", false, err
+	}
+	ok = true
+	return temp, true, nil
+}
+
+func commitStagedRoot(root *os.Root, staged, rel string) (backup string, committed bool, err error) {
+	return commitStagedRootWithSync(root, staged, rel, nil)
+}
+
+func commitStagedRootWithSync(root *os.Root, staged, rel string, syncDir func(*os.File) error) (backup string, committed bool, err error) {
+	if staged == "" {
+		return "", false, nil
+	}
+	rel = filepath.ToSlash(rel)
+	rootRel := filepath.FromSlash(rel)
+	if _, statErr := root.Lstat(rootRel); statErr == nil {
+		backup, err = reserveRootRenamePath(root, filepath.ToSlash(filepath.Dir(rootRel)), ".dockyard-backup-")
+		if err != nil {
+			return "", false, err
+		}
+		if err = root.Rename(rootRel, filepath.FromSlash(backup)); err != nil {
+			return "", false, err
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return "", false, statErr
+	}
+	if err = root.Rename(filepath.FromSlash(staged), rootRel); err != nil {
+		if backup != "" {
+			if restoreErr := root.Rename(filepath.FromSlash(backup), rootRel); restoreErr != nil {
+				return backup, true, errors.Join(err, fmt.Errorf("restore commit backup: %w", restoreErr))
+			}
+		}
+		return "", false, err
+	}
+	committed = true
+	dir, err := root.Open(filepath.Dir(rootRel))
+	if err != nil {
+		return backup, committed, err
+	}
+	syncErr := dir.Sync()
+	if syncDir != nil {
+		syncErr = syncDir(dir)
+	}
+	// Windows does not expose directory fsync through os.File.Sync. The rename
+	// remains atomic, but only the file contents (synced before rename) receive a
+	// durability barrier there.
+	if runtime.GOOS == "windows" && syncDir == nil {
+		syncErr = nil
+	}
+	return backup, committed, errors.Join(syncErr, dir.Close())
+}
+
+func createRootTemp(root *os.Root, dir, prefix string) (string, *os.File, error) {
+	for range 100 {
+		var random [16]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return "", nil, err
+		}
+		rel := filepath.ToSlash(filepath.Join(dir, prefix+hex.EncodeToString(random[:])))
+		f, err := root.OpenFile(filepath.FromSlash(rel), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		return rel, f, err
+	}
+	return "", nil, errors.New("could not reserve a unique rooted temporary file")
+}
+
+func reserveRootRenamePath(root *os.Root, dir, prefix string) (string, error) {
+	path, f, err := createRootTemp(root, dir, prefix)
+	if err != nil {
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		_ = root.Remove(filepath.FromSlash(path))
+		return "", err
+	}
+	if err := root.Remove(filepath.FromSlash(path)); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func rollbackCommittedRoot(root *os.Root, rel, backup string) error {
+	path := filepath.FromSlash(rel)
+	removeErr := root.Remove(path)
+	if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return removeErr
+	}
+	if backup != "" {
+		if err := root.Rename(filepath.FromSlash(backup), path); err != nil {
+			return err
+		}
+	}
+	dir, err := root.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	syncErr := dir.Sync()
+	if runtime.GOOS == "windows" {
+		syncErr = nil
+	}
+	return errors.Join(syncErr, dir.Close())
+}
+
+type quarantinedArtifact struct {
+	rel        string
+	quarantine string
+	digest     string
+}
+
+func quarantineArtifact(root *os.Root, rel, digest string) (quarantinedArtifact, error) {
+	if digest == "" {
+		return quarantinedArtifact{}, fmt.Errorf("ownership digest is missing")
+	}
+	if err := root.MkdirAll(filepath.FromSlash(".dockyard/quarantine"), 0o700); err != nil {
+		return quarantinedArtifact{}, err
+	}
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return quarantinedArtifact{}, fmt.Errorf("name quarantine file: %w", err)
+	}
+	quarantine := filepath.ToSlash(filepath.Join(".dockyard", "quarantine", hex.EncodeToString(random[:])))
+	if err := root.Rename(filepath.FromSlash(rel), filepath.FromSlash(quarantine)); err != nil {
+		return quarantinedArtifact{}, err
+	}
+	artifact := quarantinedArtifact{rel: rel, quarantine: quarantine, digest: digest}
+	if err := verifyQuarantined(root, []quarantinedArtifact{artifact}); err != nil {
+		return quarantinedArtifact{}, errors.Join(err, restoreQuarantined(root, []quarantinedArtifact{artifact}))
+	}
+	return artifact, nil
+}
+
+func verifyQuarantined(root *os.Root, artifacts []quarantinedArtifact) error {
+	for _, artifact := range artifacts {
+		if _, err := root.Lstat(filepath.FromSlash(artifact.rel)); err == nil {
+			return fmt.Errorf("obsolete generated artifact %s reappeared after quarantine", artifact.rel)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		raw, err := root.ReadFile(filepath.FromSlash(artifact.quarantine))
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(raw)
+		if fmt.Sprintf("%x", sum) != artifact.digest {
+			return fmt.Errorf("owned generated artifact %s was modified after quarantine", artifact.rel)
+		}
+		if err := validateGeneratedMarker(artifact.rel, raw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func verifyCurrentArtifacts(root *os.Root, planned map[string][]byte) error {
+	for _, rel := range sortedArtifactPaths(planned) {
+		raw, err := root.ReadFile(filepath.FromSlash(rel))
+		if err != nil {
+			return fmt.Errorf("read %s: %w", rel, err)
+		}
+		want := sha256.Sum256(planned[rel])
+		got := sha256.Sum256(raw)
+		if got != want || !bytes.Equal(raw, planned[rel]) {
+			return fmt.Errorf("generated artifact %s changed during generation", rel)
+		}
+	}
+	return nil
+}
+
+func sortedArtifactPaths(planned map[string][]byte) []string {
+	paths := make([]string, 0, len(planned))
+	for rel := range planned {
+		paths = append(paths, filepath.ToSlash(rel))
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func restoreQuarantined(root *os.Root, artifacts []quarantinedArtifact) error {
+	var restoreErr error
+	for i := len(artifacts) - 1; i >= 0; i-- {
+		artifact := artifacts[i]
+		if _, err := root.Lstat(filepath.FromSlash(artifact.quarantine)); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			restoreErr = errors.Join(restoreErr, err)
+			continue
+		}
+		// Link is an atomic no-clobber restore. If another file appeared at rel,
+		// retain the quarantined bytes rather than overwrite either file.
+		if err := root.Link(filepath.FromSlash(artifact.quarantine), filepath.FromSlash(artifact.rel)); err != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("artifact %s retained at %s: %w", artifact.rel, artifact.quarantine, err))
+			continue
+		}
+		if err := root.Remove(filepath.FromSlash(artifact.quarantine)); err != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("restored artifact %s but could not remove quarantine %s: %w", artifact.rel, artifact.quarantine, err))
+		}
+	}
+	return restoreErr
 }
 
 // SchemaFileName returns the project-relative path of a tool contract's
@@ -268,8 +1127,22 @@ func enumValuesForImports(projectDir string, imports map[string]contractImport) 
 			qualified[key] = members
 		}
 		metadataRel := filepath.ToSlash(filepath.Join(rel, "dockyard_enums.generated.go"))
-		_, metadataExists := os.Stat(filepath.Join(projectDir, filepath.FromSlash(metadataRel)))
-		if len(qualified) > 0 || metadataExists == nil {
+		metadataPath := filepath.Join(projectDir, filepath.FromSlash(metadataRel))
+		_, metadataErr := os.Stat(metadataPath)
+		metadataExists := metadataErr == nil
+		if metadataErr != nil && !errors.Is(metadataErr, os.ErrNotExist) {
+			return nil, nil, fmt.Errorf("%w: inspect enum metadata %s: %w", ErrGenerate, metadataRel, metadataErr)
+		}
+		if metadataExists {
+			raw, err := os.ReadFile(metadataPath) //nolint:gosec // manifest-resolved project package
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: read enum metadata %s: %w", ErrGenerate, metadataRel, err)
+			}
+			if !bytes.HasPrefix(raw, generatedEnumHeader) {
+				return nil, nil, fmt.Errorf("%w: %s exists without Dockyard's generated header; refusing to overwrite it", ErrGenerate, metadataRel)
+			}
+		}
+		if len(qualified) > 0 || metadataExists {
 			content, err := renderEnumMetadata(packageName, qualified)
 			if err != nil {
 				return nil, nil, err

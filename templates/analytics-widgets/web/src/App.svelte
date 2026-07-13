@@ -16,51 +16,19 @@
   import { createBridge, type StyleVariables } from 'dockyard-bridge';
   import { PageState } from 'dockyard-ui';
   import type { PageStateValue } from 'dockyard-ui';
+  import type {
+    CreateChartOutput,
+    CreateMetricCardOutput,
+    CreateTableOutput,
+    WidgetState,
+  } from '../../internal/contracts/contracts.js';
 
   import Chart from './widgets/Chart.svelte';
   import Table from './widgets/Table.svelte';
   import MetricCardWidget from './widgets/MetricCardWidget.svelte';
-  import { applyHostVariables, hostThemeHint, resolveTheme, type ThemeMode } from './theme.js';
+  import { applyHostVariables, hostThemeHint, resolveTheme } from './theme.js';
 
-  type WidgetState =
-    | 'ready'
-    | 'empty'
-    | 'error'
-    | 'permission'
-    | 'loading';
-
-  type ChartPayload = {
-    kind: 'chart';
-    type: string;
-    data: { series: Array<{ name: string; values: number[] }>; categories?: string[] };
-    title?: string;
-    options?: Record<string, unknown>;
-    theme: ThemeMode;
-    state: WidgetState;
-    message?: string;
-  };
-  type TablePayload = {
-    kind: 'table';
-    columns: Array<{ key: string; label: string; type: string; sortable?: boolean }>;
-    rows: Array<Record<string, unknown>>;
-    sort?: { column: string; dir: string } | null;
-    theme: ThemeMode;
-    state: WidgetState;
-    message?: string;
-  };
-  type MetricPayload = {
-    kind: 'metric_card';
-    label: string;
-    value: unknown;
-    unit?: string;
-    delta?: { value: string; tone: 'ok' | 'warn' | 'error' } | null;
-    series?: number[];
-    breakdowns?: Array<{ label: string; value: unknown; share?: number }>;
-    theme: ThemeMode;
-    state: WidgetState;
-    message?: string;
-  };
-  type Payload = ChartPayload | TablePayload | MetricPayload;
+  type Payload = CreateChartOutput | CreateTableOutput | CreateMetricCardOutput;
 
   let rootEl: HTMLDivElement | undefined = $state();
   let pageState: PageStateValue = $state('loading');
@@ -88,7 +56,7 @@
     pageState = mapState(payload.state);
     message = payload.message ?? '';
     resolvedTheme = resolveTheme(
-      payload.theme as ThemeMode,
+      payload.theme,
       hostThemeHint(currentVariables),
     );
   });
@@ -102,7 +70,7 @@
       if (rootEl) applyHostVariables(rootEl, currentVariables);
       if (payload) {
         resolvedTheme = resolveTheme(
-          payload.theme as ThemeMode,
+          payload.theme,
           hostThemeHint(currentVariables),
         );
       }
@@ -157,11 +125,11 @@
     onRetry={() => { pageState = 'loading'; message = 'Retrying…'; }}
   >
     {#if payload?.kind === 'chart'}
-      <Chart payload={payload as ChartPayload} theme={resolvedTheme} />
+      <Chart payload={payload as CreateChartOutput} theme={resolvedTheme} />
     {:else if payload?.kind === 'table'}
-      <Table payload={payload as TablePayload} />
+      <Table payload={payload as CreateTableOutput} />
     {:else if payload?.kind === 'metric_card'}
-      <MetricCardWidget payload={payload as MetricPayload} />
+      <MetricCardWidget payload={payload as CreateMetricCardOutput} />
     {:else}
       <p class="status error">Unknown widget kind.</p>
     {/if}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sync"
 	"time"
 
@@ -111,6 +112,9 @@ type Engine struct {
 	listOn      bool
 	identifiabl bool
 	life        Lifecycle
+	identity    any         // stable comparable task lifecycle coordination key
+	storeMu     *sync.Mutex // shared across engines using the same comparable legacy TaskStore
+	purgeMu     sync.Mutex
 
 	mu           sync.Mutex
 	cancels      map[string]context.CancelFunc                  // taskID → cancel of its run goroutine
@@ -120,6 +124,152 @@ type Engine struct {
 	spans        map[string]obs.SpanContext                     // taskID → obs/v1 trace span correlating its events
 
 	sweep *purgeSweep // background TTL purge sweep; nil when no interval set
+}
+
+var legacyStoreLocks sync.Map // map[TaskStore]*sync.Mutex
+
+type taskOwnerKey struct {
+	store any
+	id    string
+}
+
+type taskOwner struct {
+	mu     sync.Mutex
+	engine *Engine
+	ready  chan struct{}
+	active bool
+}
+
+var taskOwners = struct {
+	sync.Mutex
+	owners map[taskOwnerKey]*taskOwner
+}{owners: make(map[taskOwnerKey]*taskOwner)}
+
+func coordinationIdentity(store TaskStore) (any, error) {
+	identity := any(store)
+	if provider, ok := store.(CoordinationIdentityProvider); ok {
+		identity = provider.TaskStoreCoordinationIdentity()
+		if !validCoordinationIdentity(identity) {
+			return nil, fmt.Errorf("dockyard/runtime/tasks: TaskStore %T CoordinationIdentityProvider returned a nil or non-comparable identity", store)
+		}
+		return identity, nil
+	}
+	if !validCoordinationIdentity(identity) {
+		return nil, fmt.Errorf("dockyard/runtime/tasks: TaskStore %T has no stable comparable coordination identity; non-comparable stores must implement CoordinationIdentityProvider", store)
+	}
+	return identity, nil
+}
+
+func validCoordinationIdentity(identity any) bool {
+	if identity == nil {
+		return false
+	}
+	value := reflect.ValueOf(identity)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		if value.IsNil() {
+			return false
+		}
+	case reflect.UnsafePointer:
+		if value.Pointer() == 0 {
+			return false
+		}
+	}
+	return value.Comparable()
+}
+
+func taskOwnerForIdentity(identity any, id string) *taskOwner {
+	if identity == nil {
+		return nil
+	}
+	key := taskOwnerKey{store: identity, id: id}
+	taskOwners.Lock()
+	owner := taskOwners.owners[key]
+	taskOwners.Unlock()
+	return owner
+}
+
+// taskOwnerFor is retained for package tests that inspect registry cleanup.
+func taskOwnerFor(store TaskStore, id string) *taskOwner {
+	identity, err := coordinationIdentity(store)
+	if err != nil {
+		return nil
+	}
+	return taskOwnerForIdentity(identity, id)
+}
+
+func unregisterTaskOwner(identity any, id string, engine *Engine) {
+	if identity == nil {
+		return
+	}
+	key := taskOwnerKey{store: identity, id: id}
+	taskOwners.Lock()
+	if owner := taskOwners.owners[key]; owner != nil && owner.engine == engine {
+		delete(taskOwners.owners, key)
+	}
+	taskOwners.Unlock()
+}
+
+func reserveTaskOwner(identity any, id string, engine *Engine) (*taskOwner, bool) {
+	key := taskOwnerKey{store: identity, id: id}
+	owner := &taskOwner{engine: engine, ready: make(chan struct{})}
+	taskOwners.Lock()
+	if _, exists := taskOwners.owners[key]; exists {
+		taskOwners.Unlock()
+		return nil, false
+	}
+	taskOwners.owners[key] = owner
+	taskOwners.Unlock()
+	return owner, true
+}
+
+func releaseTaskOwnerReservation(identity any, id string, owner *taskOwner) {
+	key := taskOwnerKey{store: identity, id: id}
+	taskOwners.Lock()
+	released := false
+	if taskOwners.owners[key] == owner {
+		delete(taskOwners.owners, key)
+		released = true
+	}
+	taskOwners.Unlock()
+	if released {
+		close(owner.ready)
+	}
+}
+
+func activateTaskOwner(owner *taskOwner) {
+	if owner == nil {
+		return
+	}
+	owner.active = true
+	close(owner.ready)
+}
+
+func awaitTaskOwner(ctx context.Context, owner *taskOwner) (bool, error) {
+	if owner == nil {
+		return false, nil
+	}
+	select {
+	case <-owner.ready:
+		return owner.active, nil
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+}
+
+// taskRuntimeFor returns the engine holding id's process-local lifecycle state.
+// A missing or released owner falls back to the receiver; durable state remains
+// authoritative when a task was restored or its owner has already exited.
+func (e *Engine) taskRuntimeFor(ctx context.Context, id string) (*Engine, error) {
+	owner := taskOwnerForIdentity(e.identity, id)
+	active, err := awaitTaskOwner(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
+	if active && owner.engine != nil {
+		return owner.engine, nil
+	}
+	return e, nil
 }
 
 // elicitation is one outstanding input_required round-trip — the prompt the
@@ -135,6 +285,17 @@ type elicitation struct {
 func NewEngine(store TaskStore, opts *Options) (*Engine, error) {
 	if store == nil {
 		return nil, errors.New("dockyard/runtime/tasks: NewEngine requires a non-nil TaskStore")
+	}
+	identity, err := coordinationIdentity(store)
+	if err != nil {
+		return nil, err
+	}
+	var storeMu *sync.Mutex
+	_, atomicCreate := store.(AtomicCreateTaskStore)
+	_, atomicFinalize := store.(AtomicFinalizeTaskStore)
+	if !atomicCreate || !atomicFinalize {
+		lock, _ := legacyStoreLocks.LoadOrStore(identity, &sync.Mutex{})
+		storeMu = lock.(*sync.Mutex)
 	}
 	log := slog.Default()
 	genID := CryptoID
@@ -175,6 +336,8 @@ func NewEngine(store TaskStore, opts *Options) (*Engine, error) {
 		listOn:       listOn && identifiable,
 		identifiabl:  identifiable,
 		life:         life,
+		identity:     identity,
+		storeMu:      storeMu,
 		cancels:      make(map[string]context.CancelFunc),
 		waiters:      make(map[string][]chan struct{}),
 		elicits:      make(map[string]*elicitation),
@@ -182,7 +345,74 @@ func NewEngine(store TaskStore, opts *Options) (*Engine, error) {
 		spans:        make(map[string]obs.SpanContext),
 	}
 	e.sweep = newPurgeSweep(store, life.PurgeInterval, log)
+	if e.sweep != nil {
+		e.sweep.run = e.purgeExpired
+	}
 	return e, nil
+}
+
+// purgeExpired terminalizes expired active tasks before deleting expired
+// terminal records so worker cleanup and concurrency-cap accounting agree with
+// durable retention.
+func (e *Engine) purgeExpired(ctx context.Context, now time.Time) (int, error) {
+	// Serialize scans so overlapping manual and background sweeps cannot do
+	// duplicate cancellation work within this engine.
+	e.purgeMu.Lock()
+	defer e.purgeMu.Unlock()
+
+	expired, err := e.expiredActiveSnapshot(ctx, now)
+	if err != nil {
+		return 0, err
+	}
+	for _, rec := range expired {
+		owner := taskOwnerForIdentity(e.identity, rec.ID)
+		active, err := awaitTaskOwner(ctx, owner)
+		if err != nil {
+			return 0, err
+		}
+		if !active {
+			owner = nil
+		}
+		engine := e
+		if owner != nil {
+			engine = owner.engine
+		}
+		_, _, err = engine.cancelTask(ctx, rec.ID,
+			"The task expired.", TaskResult{Err: "task expired"}, owner)
+		if err != nil {
+			if errors.Is(err, ErrTaskNotFound) {
+				continue // concurrently deleted after the snapshot
+			}
+			return 0, err
+		}
+	}
+	return e.store.PurgeExpired(ctx, now)
+}
+
+func (e *Engine) expiredActiveSnapshot(ctx context.Context, now time.Time) ([]TaskRecord, error) {
+	if scanner, ok := e.store.(ExpiredActiveTaskStore); ok {
+		return scanner.ExpiredActive(ctx, now)
+	}
+	// Legacy stores remain compatible. Their List contract provides stable pages
+	// when the caller does not mutate between reads; destructive purge starts
+	// only after this complete scan.
+	var expired []TaskRecord
+	cursor := ""
+	for {
+		recs, next, err := e.store.List(ctx, cursor, 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, rec := range recs {
+			if !rec.Status.IsTerminal() && rec.IsExpired(now) {
+				expired = append(expired, rec)
+			}
+		}
+		if next == "" {
+			return expired, nil
+		}
+		cursor = next
+	}
 }
 
 // StartSweep launches the background TTL purge sweep bound to ctx, if a purge
@@ -241,7 +471,7 @@ type CreatedTask struct {
 // extension must receive the standard missing-required-capability error rather
 // than the handler's ordinary fallback result.
 func (e *Engine) CreateToolTask(ctx context.Context, p CreateToolCallParams, required bool) (CreatedTask, error) {
-	created, err := e.createForToolCall(ctx, p)
+	created, err := e.createForToolCallWithRequired(ctx, p, &required)
 	if err != nil {
 		return CreatedTask{}, err
 	}
@@ -262,7 +492,11 @@ func (e *Engine) CreateToolTask(ctx context.Context, p CreateToolCallParams, req
 // internal/protocolcodec. The actual tool result is fetched later through
 // tasks/result once the task reaches a terminal status.
 func (e *Engine) CreateForToolCall(ctx context.Context, p CreateToolCallParams) (json.RawMessage, error) {
-	created, err := e.createForToolCall(ctx, p)
+	// This legacy API returns its already-encoded task result directly rather
+	// than handing a CreatedTask to the server response middleware. It therefore
+	// remains immediate even when called from a tools/call carrying deferred
+	// admission; only CreateToolTask participates in that handoff.
+	created, err := e.createForToolCall(withoutDeferredAdmission(ctx), p)
 	if err != nil {
 		return nil, err
 	}
@@ -270,17 +504,15 @@ func (e *Engine) CreateForToolCall(ctx context.Context, p CreateToolCallParams) 
 }
 
 func (e *Engine) createForToolCall(ctx context.Context, p CreateToolCallParams) (protocolcodec.Task, error) {
+	return e.createForToolCallWithRequired(ctx, p, nil)
+}
+
+func (e *Engine) createForToolCallWithRequired(ctx context.Context, p CreateToolCallParams, required *bool) (protocolcodec.Task, error) {
 	if (p.Run == nil) == (p.Handle == nil) {
 		return protocolcodec.Task{}, fmt.Errorf("%w: CreateForToolCall requires exactly one of Run or Handle", ErrInvalidParams)
 	}
 	if verified, ok := requestAuthContext(ctx); ok {
 		p.AuthContext = verified
-	}
-
-	// Enforce the per-requestor concurrent-task cap before anything durable is
-	// written — the brief 02 §4.6 resource-exhaustion guard (RFC §8.5).
-	if err := e.checkConcurrencyCap(ctx, p.AuthContext); err != nil {
-		return protocolcodec.Task{}, err
 	}
 
 	id, err := e.genID()
@@ -307,7 +539,12 @@ func (e *Engine) createForToolCall(ctx context.Context, p CreateToolCallParams) 
 	if ttl != nil {
 		rec.ExpiresAt = now.Add(time.Duration(*ttl) * time.Millisecond)
 	}
-	if err := e.store.Create(ctx, rec); err != nil {
+	limit := e.life.MaxConcurrentPerRequestor
+	if p.AuthContext == "" && !e.identifiabl {
+		limit = 0
+	}
+	owner, err := e.createTask(ctx, rec, limit)
+	if err != nil {
 		return protocolcodec.Task{}, fmt.Errorf("dockyard/runtime/tasks: create task: %w", err)
 	}
 
@@ -331,21 +568,90 @@ func (e *Engine) createForToolCall(ctx context.Context, p CreateToolCallParams) 
 	e.cancels[id] = cancel
 	e.spans[id] = span
 	e.mu.Unlock()
-
-	// Emit the obs/v1 task.progress start event (P2) — a task was created.
-	e.rec.TaskEvent(ctx, span, obs.PhaseStart, obs.TaskProgressPayload{
-		TaskID: id,
-		Status: string(protocolcodec.TaskWorking),
-		Tool:   p.ToolName,
-	}, nil)
+	activateTaskOwner(owner)
 
 	// runTask owns runCtx for its whole lifetime and always releases cancel on
 	// exit; tasks/cancel may also call it early. Calling a CancelFunc twice is
 	// safe, so both paths are correct.
-	go e.runTask(runCtx, cancel, id, run)
-
-	e.log.InfoContext(ctx, "task created",
-		slog.String("taskId", id), slog.String("tool", p.ToolName))
+	start := func(startCtx context.Context, validateAdmission bool) error {
+		if validateAdmission {
+			// Admission and lifecycle cancellation share e.mu. Verify the durable
+			// record and launch while holding it so a sweep cannot cancel/delete the
+			// task between validation and the handler becoming runnable.
+			e.mu.Lock()
+			defer e.mu.Unlock()
+			current, err := e.store.Get(startCtx, id)
+			if err != nil {
+				return fmt.Errorf("dockyard/runtime/tasks: admit task %q: %w", id, err)
+			}
+			if current.Status != protocolcodec.TaskWorking {
+				return fmt.Errorf("dockyard/runtime/tasks: admit task %q: task is in status %q", id, current.Status)
+			}
+			if current.IsExpired(time.Now().UTC()) {
+				return fmt.Errorf("dockyard/runtime/tasks: admit task %q: task expired before admission", id)
+			}
+			if runCtx.Err() != nil {
+				return fmt.Errorf("dockyard/runtime/tasks: admit task %q: %w", id, runCtx.Err())
+			}
+		}
+		// Admission is now final: publish the lifecycle and only then allow app
+		// handler side effects to begin.
+		e.rec.TaskEvent(ctx, span, obs.PhaseStart, obs.TaskProgressPayload{
+			TaskID: id,
+			Status: string(protocolcodec.TaskWorking),
+			Tool:   p.ToolName,
+		}, nil)
+		e.log.InfoContext(ctx, "task created",
+			slog.String("taskId", id), slog.String("tool", p.ToolName))
+		go e.runTask(runCtx, cancel, id, run)
+		return nil
+	}
+	abort := func(abortCtx context.Context) error {
+		if owner != nil {
+			owner.mu.Lock()
+			defer owner.mu.Unlock()
+		}
+		cancel()
+		// All tasks rejected by one tool call share the server edge's cleanup
+		// deadline. Finalization and deletion race within that same budget so
+		// either successful path prevents an active orphan.
+		finalizeDone := make(chan error, 1)
+		deleteDone := make(chan error, 1)
+		go func() {
+			_, _, err := e.finalizeTask(abortCtx, id, protocolcodec.TaskCancelled,
+				"Task admission was aborted.", TaskResult{Err: "task admission aborted"})
+			finalizeDone <- err
+		}()
+		go func() { deleteDone <- e.store.Delete(abortCtx, id) }()
+		finalizeErr, deleteErr := <-finalizeDone, <-deleteDone
+		if deleteErr == nil || errors.Is(deleteErr, ErrTaskNotFound) {
+			e.wake(id)
+			return nil
+		}
+		if finalizeErr == nil || errors.Is(finalizeErr, ErrTaskNotFound) {
+			e.wake(id)
+		}
+		return errors.Join(deleteErr, finalizeErr)
+	}
+	if admission := deferredAdmissionFromContext(ctx); admission != nil {
+		canonical := CreatedTask{
+			ID: rec.ID, Status: string(rec.Status), StatusMessage: rec.StatusMessage,
+			CreatedAt: rec.CreatedAt, LastUpdatedAt: rec.UpdatedAt,
+			TTL: rec.TTL, PollInterval: rec.PollInterval,
+		}
+		if required != nil {
+			canonical.Required = *required
+		}
+		if err := admission.add(id, canonical, func(startCtx context.Context) error {
+			return start(startCtx, true)
+		}, abort); err != nil {
+			return protocolcodec.Task{}, fmt.Errorf("defer task admission: %w", err)
+		}
+	} else {
+		if err := start(ctx, false); err != nil {
+			return protocolcodec.Task{}, errors.Join(err, abort(ctx))
+		}
+	}
 
 	return rec.Task(), nil
 }
@@ -386,33 +692,29 @@ func (e *Engine) runTask(ctx context.Context, cancel context.CancelFunc, id stri
 // authoritative cancelled outcome must be preserved, not clobbered by the
 // handler's unwind error (the race the Wave 5 checkpoint surfaced — D-072).
 //
-// For a task still running, the result payload is recorded BEFORE the
-// terminal-status transition: a tasks/result waiter unblocks the instant it
-// observes a terminal status, so writing SetResult first guarantees the
-// payload is already present whenever the status is terminal. Writing the
-// transition first would open a window in which tasks/result sees `completed`
-// but reads an empty payload.
+// Finalize commits the result and terminal status in one store operation. A
+// tasks/result waiter therefore cannot observe a terminal status paired with
+// an empty or losing-racer result.
 func (e *Engine) finish(
 	ctx context.Context, id string, status protocolcodec.TaskStatus, msg string, res TaskResult,
 ) {
-	// If the task is already terminal — tasks/cancel won the race — preserve its
-	// recorded outcome and only ensure waiters are woken.
-	if rec, err := e.store.Get(ctx, id); err == nil && rec.Status.IsTerminal() {
-		e.wake(id)
+	owner := taskOwnerForIdentity(e.identity, id)
+	if owner != nil && owner.engine == e {
+		owner.mu.Lock()
+		defer owner.mu.Unlock()
+	}
+	_, applied, err := e.finalizeTask(ctx, id, status, msg, res)
+	if err != nil {
+		e.log.ErrorContext(ctx, "task finish failed",
+			slog.String("taskId", id), slog.String("error", err.Error()))
+		if errors.Is(err, ErrTaskNotFound) {
+			e.wake(id)
+		}
 		return
 	}
-	if err := e.store.SetResult(ctx, id, res); err != nil {
-		e.log.ErrorContext(ctx, "task set result failed",
-			slog.String("taskId", id), slog.String("error", err.Error()))
-	}
-	if _, err := e.store.Transition(ctx, id, status, msg); err != nil {
-		// A task that became terminal between the Get above and here (a
-		// concurrent tasks/cancel) rejects this transition; that is the
-		// cooperative no-op, logged at debug, never panicked.
-		if !errors.Is(err, ErrIllegalTransition) {
-			e.log.ErrorContext(ctx, "task finish transition failed",
-				slog.String("taskId", id), slog.String("error", err.Error()))
-		}
+	if !applied {
+		e.wake(id)
+		return
 	}
 	// Emit the obs/v1 task.progress terminal event (P2). A child span of the
 	// task's lifecycle span keeps the end correlated with the start.
@@ -426,6 +728,130 @@ func (e *Engine) finish(
 		Message: msg,
 	}, termErr)
 	e.wake(id)
+}
+
+func (e *Engine) createTask(ctx context.Context, rec TaskRecord, limit int) (*taskOwner, error) {
+	reservation, reserved := reserveTaskOwner(e.identity, rec.ID, e)
+	if !reserved {
+		return nil, fmt.Errorf("dockyard/runtime/tasks: generated task ID %q is already reserved", rec.ID)
+	}
+	created := false
+	defer func() {
+		if !created {
+			releaseTaskOwnerReservation(e.identity, rec.ID, reservation)
+		}
+	}()
+	var err error
+	if atomic, ok := e.store.(AtomicCreateTaskStore); ok {
+		err = atomic.CreateWithConcurrencyLimit(ctx, rec, limit)
+	} else {
+		if e.storeMu == nil {
+			return nil, errors.New("dockyard/runtime/tasks: legacy TaskStore synchronization is unavailable")
+		}
+		e.storeMu.Lock()
+		defer e.storeMu.Unlock()
+		if limit > 0 {
+			active := 0
+			cursor := ""
+			for {
+				recs, next, listErr := e.store.ListByAuthContext(ctx, rec.AuthContext, cursor, 0)
+				if listErr != nil {
+					return nil, listErr
+				}
+				for _, existing := range recs {
+					if !existing.Status.IsTerminal() {
+						active++
+					}
+				}
+				if next == "" {
+					break
+				}
+				cursor = next
+			}
+			if active >= limit {
+				return nil, fmt.Errorf("%w: requestor has %d active tasks, the per-requestor cap is %d", ErrConcurrencyCap, active, limit)
+			}
+		}
+		err = e.store.Create(ctx, rec)
+	}
+	created = err == nil
+	if err != nil {
+		return nil, err
+	}
+	return reservation, nil
+}
+
+func (e *Engine) finalizeTask(
+	ctx context.Context, id string, status protocolcodec.TaskStatus, msg string, result TaskResult,
+) (TaskRecord, bool, error) {
+	if atomic, ok := e.store.(AtomicFinalizeTaskStore); ok {
+		return atomic.Finalize(ctx, id, status, msg, result)
+	}
+	if e.storeMu == nil {
+		return TaskRecord{}, false, errors.New("dockyard/runtime/tasks: legacy TaskStore synchronization is unavailable")
+	}
+	e.storeMu.Lock()
+	defer e.storeMu.Unlock()
+	rec, err := e.store.Get(ctx, id)
+	if err != nil {
+		return TaskRecord{}, false, err
+	}
+	if rec.Status.IsTerminal() {
+		return rec, false, nil
+	}
+	if !status.IsTerminal() || !rec.Status.CanTransitionTo(status) {
+		return TaskRecord{}, false, transitionError(rec.Status, status)
+	}
+	if err := e.store.SetResult(ctx, id, result); err != nil {
+		return TaskRecord{}, false, err
+	}
+	rec, err = e.store.Transition(ctx, id, status, msg)
+	return rec, err == nil, err
+}
+
+// finalizeCancellation serializes terminal cancellation with legacy input
+// delivery. Once cancellation commits, no stale elicitation can be claimed.
+func (e *Engine) finalizeCancellation(
+	ctx context.Context, id, msg string, result TaskResult,
+) (TaskRecord, bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	rec, applied, err := e.finalizeTask(ctx, id, protocolcodec.TaskCancelled, msg, result)
+	if err == nil && rec.Status.IsTerminal() {
+		delete(e.elicits, id)
+	}
+	return rec, applied, err
+}
+
+// cancelTask owns the complete cancellation terminal section. When owner is
+// non-nil, callers from any engine serialize with the engine that created the
+// task before touching its worker, observability span, or waiters.
+func (e *Engine) cancelTask(
+	ctx context.Context, id, msg string, result TaskResult, owner *taskOwner,
+) (TaskRecord, bool, error) {
+	if owner != nil && owner.engine != e {
+		return owner.engine.cancelTask(ctx, id, msg, result, owner)
+	}
+	if owner != nil {
+		owner.mu.Lock()
+		defer owner.mu.Unlock()
+	}
+	rec, applied, err := e.finalizeCancellation(ctx, id, msg, result)
+	if err != nil || !applied {
+		return rec, applied, err
+	}
+	e.mu.Lock()
+	cancel := e.cancels[id]
+	e.mu.Unlock()
+	span := e.taskSpan(id).Child()
+	if cancel != nil {
+		cancel()
+	}
+	e.rec.TaskEvent(ctx, span, obs.PhaseEnd, obs.TaskProgressPayload{
+		TaskID: id, Status: string(protocolcodec.TaskCancelled), Message: msg,
+	}, nil)
+	e.wake(id)
+	return rec, true, nil
 }
 
 // taskSpan returns the obs/v1 lifecycle span recorded for id, or a fresh trace
@@ -450,8 +876,10 @@ func (e *Engine) wake(id string) {
 	chans := e.waiters[id]
 	delete(e.waiters, id)
 	delete(e.cancels, id)
+	delete(e.inputWaiters, id)
 	delete(e.spans, id)
 	e.mu.Unlock()
+	unregisterTaskOwner(e.identity, id, e)
 	for _, ch := range chans {
 		close(ch)
 	}
@@ -465,6 +893,23 @@ func (e *Engine) waitChan(id string) chan struct{} {
 	e.waiters[id] = append(e.waiters[id], ch)
 	e.mu.Unlock()
 	return ch
+}
+
+func (e *Engine) removeWaiter(id string, target chan struct{}) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	waiters := e.waiters[id]
+	for i, waiter := range waiters {
+		if waiter == target {
+			waiters = append(waiters[:i], waiters[i+1:]...)
+			break
+		}
+	}
+	if len(waiters) == 0 {
+		delete(e.waiters, id)
+	} else {
+		e.waiters[id] = waiters
+	}
 }
 
 // Capability returns the protocolcodec.TasksServerCapability the engine
@@ -481,55 +926,24 @@ func (e *Engine) Capability() protocolcodec.TasksServerCapability {
 	}
 }
 
-// checkConcurrencyCap rejects a task creation that would push authContext over
-// the per-requestor concurrent-task cap (RFC §8.5; brief 02 §4.6). A zero cap,
-// or an unidentifiable requestor (empty authContext under an engine that does
-// not identify requestors), is uncapped — the cap is a per-authorization-
-// context limit and is meaningless without an identity. Non-terminal tasks
-// count against the cap; terminal tasks have released their resources.
-func (e *Engine) checkConcurrencyCap(ctx context.Context, authContext string) error {
-	limit := e.life.MaxConcurrentPerRequestor
-	if limit <= 0 {
-		return nil
-	}
-	if authContext == "" && !e.identifiabl {
-		return nil
-	}
-	active := 0
-	cursor := ""
-	for {
-		recs, next, err := e.store.ListByAuthContext(ctx, authContext, cursor, 0)
-		if err != nil {
-			return fmt.Errorf("dockyard/runtime/tasks: concurrency-cap check: %w", err)
-		}
-		for _, r := range recs {
-			if !r.Status.IsTerminal() {
-				active++
-			}
-		}
-		if next == "" {
-			break
-		}
-		cursor = next
-	}
-	if active >= limit {
-		return fmt.Errorf("%w: requestor has %d active tasks, the per-requestor cap is %d",
-			ErrConcurrencyCap, active, limit)
-	}
-	return nil
-}
-
 // beginElicitation registers an outstanding input_required round-trip and moves
 // the task to the input_required status so a tasks/get poller sees it is
 // waiting (RFC §8.4). It is called by a taskHandle's RequireInput.
 func (e *Engine) beginElicitation(ctx context.Context, id string, prompt InputPrompt, h *taskHandle) error {
+	pending := &elicitation{prompt: prompt, handle: h}
+	e.mu.Lock()
+	e.elicits[id] = pending
+	e.mu.Unlock()
+
 	if _, err := e.store.Transition(ctx, id, protocolcodec.TaskInputRequired,
 		prompt.Message); err != nil {
+		e.mu.Lock()
+		if e.elicits[id] == pending {
+			delete(e.elicits, id)
+		}
+		e.mu.Unlock()
 		return err
 	}
-	e.mu.Lock()
-	e.elicits[id] = &elicitation{prompt: prompt, handle: h}
-	e.mu.Unlock()
 	return nil
 }
 
@@ -560,11 +974,26 @@ func (e *Engine) PendingInput(id string) (InputPrompt, bool) {
 // task has no outstanding elicitation. It is the write side of the
 // input_required round-trip (RFC §8.4).
 func (e *Engine) SupplyInput(ctx context.Context, id string, resp InputResponse) error {
-	if _, err := e.store.Get(ctx, id); err != nil {
+	runtime, err := e.taskRuntimeFor(ctx, id)
+	if err != nil {
 		return err
+	}
+	return runtime.supplyInput(ctx, id, resp)
+}
+
+func (e *Engine) supplyInput(ctx context.Context, id string, resp InputResponse) error {
+	rec, err := e.store.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if rec.Status != protocolcodec.TaskInputRequired {
+		return fmt.Errorf("%w: task %q is in status %q", ErrNoPendingInput, id, rec.Status)
 	}
 	e.mu.Lock()
 	el, ok := e.elicits[id]
+	if ok {
+		delete(e.elicits, id)
+	}
 	e.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("%w: task %q", ErrNoPendingInput, id)

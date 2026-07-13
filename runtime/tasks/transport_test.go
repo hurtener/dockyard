@@ -155,6 +155,31 @@ func TestMount_HTTPMiddleware_ForwardsNonTasks(t *testing.T) {
 	}
 }
 
+func TestMount_HTTPMiddleware_RejectsOversizedTaskAndForwardedBodies(t *testing.T) {
+	t.Parallel()
+	m := NewMount(newEngine(t, nil))
+
+	for _, method := range []string{MethodGet, "tools/call"} {
+		t.Run(method, func(t *testing.T) {
+			innerCalled := false
+			inner := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { innerCalled = true })
+			body := `{"jsonrpc":"2.0","id":1,"method":"` + method + `","padding":"` +
+				strings.Repeat("x", maxLegacyTaskRequestBytes) + `"}`
+			req := httptest.NewRequest(http.MethodPost, "http://example.test/mcp", strings.NewReader(body))
+			res := httptest.NewRecorder()
+
+			m.HTTPMiddleware(inner).ServeHTTP(res, req)
+
+			if res.Code != http.StatusRequestEntityTooLarge || !strings.Contains(res.Body.String(), "exceeds 4 MiB") {
+				t.Fatalf("status/body = %d/%q, want clear 413", res.Code, res.Body.String())
+			}
+			if innerCalled {
+				t.Fatal("oversized request reached the forwarded handler")
+			}
+		})
+	}
+}
+
 // TestMount_HTTPMiddleware_AuthContextBinding proves the HTTP middleware
 // applies the AuthContextFunc so a cross-context tasks/get over HTTP is
 // rejected.

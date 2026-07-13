@@ -31,6 +31,7 @@ func TestValidate_InvalidFixtures(t *testing.T) {
 		{"bad-ui-uri.yaml", "not a well-formed ui:// resource URI", true},
 		{"bad-visibility.yaml", "unknown value \"everyone\"", true},
 		{"bad-contract-ref.yaml", "not a Go type reference", true},
+		{"bad-contract-package.yaml", "canonical \"internal/contracts\" package", true},
 		{"bad-no-tools.yaml", "at least one tool is required", true},
 		{"bad-csp-origin.yaml", "must carry an explicit scheme", true},
 		{"bad-csp-single-file.yaml", "single-file", true},
@@ -127,8 +128,8 @@ func TestValidate_OnHandBuiltManifest(t *testing.T) {
 		Tools: []Tool{{
 			Name:        "t",
 			Description: "A tool.",
-			Input:       "pkg.In",
-			Output:      "pkg.Out",
+			Input:       "internal/contracts.In",
+			Output:      "internal/contracts.Out",
 		}},
 	}
 	if err := ok.Validate(); err != nil {
@@ -163,7 +164,7 @@ func TestValidate_RuntimeUIPartial(t *testing.T) {
 			Transports: []Transport{TransportStdio},
 			UI:         &RuntimeUI{Framework: UIFrameworkSvelte}, // Bundle omitted.
 		},
-		Tools: []Tool{{Name: "t", Description: "d", Input: "p.In", Output: "p.Out"}},
+		Tools: []Tool{{Name: "t", Description: "d", Input: "internal/contracts.In", Output: "internal/contracts.Out"}},
 	}
 	err := m.Validate()
 	if err == nil || !strings.Contains(err.Error(), "runtime.ui.bundle") {
@@ -175,7 +176,7 @@ func TestValidate_DuplicateAppID(t *testing.T) {
 	m := &Manifest{
 		Name: "dup-app", Title: "Dup App", Version: "1.0.0",
 		Runtime: Runtime{Transports: []Transport{TransportStdio}},
-		Tools:   []Tool{{Name: "t", Description: "d", Input: "p.In", Output: "p.Out"}},
+		Tools:   []Tool{{Name: "t", Description: "d", Input: "internal/contracts.In", Output: "internal/contracts.Out"}},
 		Apps: []App{
 			{ID: "w", URI: "ui://dup-app/a", Entry: "a.svelte", DisplayModes: []DisplayMode{DisplayModeInline}},
 			{ID: "w", URI: "ui://dup-app/b", Entry: "b.svelte", DisplayModes: []DisplayMode{DisplayModeInline}},
@@ -226,7 +227,7 @@ func TestValidate_SingleFileBundleAllowsEmptyCSP(t *testing.T) {
 			Transports: []Transport{TransportStdio},
 			UI:         &RuntimeUI{Framework: UIFrameworkSvelte, Bundle: BundleSingleFile},
 		},
-		Tools: []Tool{{Name: "t", Description: "d", Input: "p.In", Output: "p.Out", UI: "w"}},
+		Tools: []Tool{{Name: "t", Description: "d", Input: "internal/contracts.In", Output: "internal/contracts.Out", UI: "w"}},
 		Apps: []App{{
 			ID: "w", URI: "ui://single-clean/main", Entry: "w.svelte",
 			DisplayModes: []DisplayMode{DisplayModeInline},
@@ -245,8 +246,8 @@ func TestValidate_TaskSupportAgreementOnSameApp(t *testing.T) {
 		Name: "task-agree", Title: "Task Agree", Version: "1.0.0",
 		Runtime: Runtime{Transports: []Transport{TransportStdio}},
 		Tools: []Tool{
-			{Name: "a", Description: "d", Input: "p.In", Output: "p.Out", UI: "w", TaskSupport: TaskSupportRequired},
-			{Name: "b", Description: "d", Input: "p.In", Output: "p.Out", UI: "w", TaskSupport: TaskSupportRequired},
+			{Name: "a", Description: "d", Input: "internal/contracts.In", Output: "internal/contracts.Out", UI: "w", TaskSupport: TaskSupportRequired},
+			{Name: "b", Description: "d", Input: "internal/contracts.In", Output: "internal/contracts.Out", UI: "w", TaskSupport: TaskSupportRequired},
 		},
 		Apps: []App{{
 			ID: "w", URI: "ui://task-agree/main", Entry: "w.svelte",

@@ -83,6 +83,9 @@ func checkCoreFixture(fsys fs.FS, version string) versionOutcome {
 	if fmt.Sprint(request["id"]) != fmt.Sprint(response["id"]) {
 		return versionOutcome{version: version, detail: "response id does not match request id"}
 	}
+	if err := validateLifecycleShape(version, request, response); err != nil {
+		return versionOutcome{version: version, detail: err.Error()}
+	}
 
 	for path, want := range fixture.Expect {
 		got, ok := lookupJSONPath(response, path)
@@ -91,6 +94,78 @@ func checkCoreFixture(fsys fs.FS, version string) versionOutcome {
 		}
 	}
 	return versionOutcome{version: version, passed: true, detail: wantLifecycle + " fixture conforms"}
+}
+
+func validateLifecycleShape(version string, request, response map[string]any) error {
+	params, ok := request["params"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("request params must be an object")
+	}
+	result, ok := response["result"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("response result must be an object")
+	}
+	if version == legacyCoreVersion {
+		if params["protocolVersion"] != legacyCoreVersion || result["protocolVersion"] != legacyCoreVersion {
+			return fmt.Errorf("legacy initialize must declare protocol version %s", legacyCoreVersion)
+		}
+		return nil
+	}
+	for _, legacy := range []string{"protocolVersion", "capabilities", "clientInfo"} {
+		if _, present := params[legacy]; present {
+			return fmt.Errorf("modern discovery request must not contain legacy params.%s", legacy)
+		}
+	}
+	if _, present := result["protocolVersion"]; present {
+		return fmt.Errorf("modern discovery result must not contain legacy protocolVersion")
+	}
+	meta, ok := params["_meta"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("modern discovery request params._meta must be an object")
+	}
+	if meta["io.modelcontextprotocol/protocolVersion"] != modernCoreVersion {
+		return fmt.Errorf("modern discovery request metadata must declare protocol version %s", modernCoreVersion)
+	}
+	clientInfo, ok := meta["io.modelcontextprotocol/clientInfo"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("modern discovery request metadata must contain clientInfo")
+	}
+	if clientInfo["name"] == "" || clientInfo["version"] == "" {
+		return fmt.Errorf("modern discovery request clientInfo must contain name and version")
+	}
+	if _, ok := meta["io.modelcontextprotocol/clientCapabilities"].(map[string]any); !ok {
+		return fmt.Errorf("modern discovery request metadata must contain clientCapabilities")
+	}
+	// DiscoverResult extends the pinned core Result and CacheableResult schemas,
+	// so all three fields are required even though the prerelease Go SDK's
+	// DiscoverResult currently omits the common resultType discriminator.
+	if result["resultType"] != "complete" {
+		return fmt.Errorf("modern discovery resultType must be complete")
+	}
+	ttl, ok := result["ttlMs"].(float64)
+	if !ok || ttl < 0 {
+		return fmt.Errorf("modern discovery result ttlMs must be a non-negative number")
+	}
+	if scope := result["cacheScope"]; scope != "public" && scope != "private" {
+		return fmt.Errorf("modern discovery result cacheScope must be public or private")
+	}
+	if _, ok := result["capabilities"].(map[string]any); !ok {
+		return fmt.Errorf("modern discovery result must contain capabilities")
+	}
+	serverInfo, ok := result["serverInfo"].(map[string]any)
+	if !ok || serverInfo["name"] == "" || serverInfo["version"] == "" {
+		return fmt.Errorf("modern discovery result serverInfo must contain name and version")
+	}
+	versions, ok := result["supportedVersions"].([]any)
+	if !ok || len(versions) == 0 {
+		return fmt.Errorf("modern discovery result must contain supportedVersions")
+	}
+	for _, supported := range versions {
+		if supported == modernCoreVersion {
+			return nil
+		}
+	}
+	return fmt.Errorf("modern discovery result does not support %s", modernCoreVersion)
 }
 
 func decodeObject(raw json.RawMessage) (map[string]any, error) {

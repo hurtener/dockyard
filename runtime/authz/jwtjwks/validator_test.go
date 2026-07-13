@@ -28,6 +28,7 @@ type issuerFixture struct {
 	server   *httptest.Server
 	mu       sync.RWMutex
 	keys     map[string]*rsa.PrivateKey
+	extra    []map[string]string
 	requests atomic.Int64
 	outage   atomic.Bool
 }
@@ -50,6 +51,7 @@ func newIssuer(t testing.TB) *issuerFixture {
 			for kid, key := range f.keys {
 				keys = append(keys, rsaJWK(kid, &key.PublicKey))
 			}
+			keys = append(keys, f.extra...)
 			_ = json.NewEncoder(w).Encode(map[string]any{"keys": keys})
 		default:
 			http.NotFound(w, r)
@@ -155,12 +157,14 @@ func TestRejectsJWTAlgorithmThatConflictsWithJWKMetadata(t *testing.T) {
 func TestConcurrentKeyRotation(t *testing.T) {
 	f := newIssuer(t)
 	oldKey := f.rotate("old")
-	v := newValidator(t, f, Config{CacheTTL: time.Nanosecond, RefreshCooldown: time.Nanosecond})
+	now := time.Now()
+	v := newValidator(t, f, Config{CacheTTL: time.Second, RefreshCooldown: time.Second, Now: func() time.Time { return now }})
 	oldToken := sign(t, oldKey, "old", f.server.URL+"/tenant", "https://resource.example/mcp", "alice", time.Now().Add(time.Hour))
 	if _, err := v.Validate(context.Background(), oldToken); err != nil {
 		t.Fatal(err)
 	}
 	newKey := f.rotate("new")
+	now = now.Add(2 * time.Second)
 	newToken := sign(t, newKey, "new", f.server.URL+"/tenant", "https://resource.example/mcp", "alice", time.Now().Add(time.Hour))
 	var wg sync.WaitGroup
 	errs := make(chan error, 32)
@@ -185,16 +189,47 @@ func TestExpiredCacheFailsClosedWhenRemovedKeyCannotRefresh(t *testing.T) {
 	f := newIssuer(t)
 	key := f.rotate("removed")
 	now := time.Now()
-	v := newValidator(t, f, Config{CacheTTL: time.Minute, RefreshCooldown: time.Hour, Now: func() time.Time { return now }})
+	v := newValidator(t, f, Config{CacheTTL: time.Minute, RefreshCooldown: 5 * time.Minute, Now: func() time.Time { return now }})
 	token := sign(t, key, "removed", f.server.URL+"/tenant", "https://resource.example/mcp", "alice", time.Now().Add(time.Hour))
 	if _, err := v.Validate(context.Background(), token); err != nil {
 		t.Fatal(err)
 	}
 	f.rotate("replacement")
 	f.outage.Store(true)
-	now = now.Add(2 * time.Minute)
+	now = now.Add(6 * time.Minute)
 	if _, err := v.Validate(context.Background(), token); !errors.Is(err, authz.ErrInvalidToken) {
 		t.Fatalf("expired cached key accepted during outage: %v", err)
+	}
+}
+
+func TestExpiredCacheRefreshesWhenTTLIsShorterThanCooldown(t *testing.T) {
+	f := newIssuer(t)
+	key := f.rotate("stable")
+	now := time.Now()
+	v := newValidator(t, f, Config{CacheTTL: time.Second, RefreshCooldown: 5 * time.Minute, Now: func() time.Time { return now }})
+	token := sign(t, key, "stable", f.server.URL+"/tenant", "https://resource.example/mcp", "alice", now.Add(time.Hour))
+
+	before := f.requests.Load()
+	now = now.Add(2 * time.Second)
+	if _, err := v.Validate(context.Background(), token); err != nil {
+		t.Fatalf("valid unchanged-key token rejected after cache expiry: %v", err)
+	}
+	if got := f.requests.Load() - before; got != 1 {
+		t.Fatalf("post-expiry refresh requests = %d, want 1", got)
+	}
+
+	// A failed post-expiry refresh is still throttled even though the cache
+	// remains expired and its TTL is shorter than the cooldown.
+	now = now.Add(2 * time.Second)
+	f.outage.Store(true)
+	before = f.requests.Load()
+	for range 2 {
+		if _, err := v.Validate(context.Background(), token); !errors.Is(err, authz.ErrInvalidToken) {
+			t.Fatalf("token accepted while expired keys could not refresh: %v", err)
+		}
+	}
+	if got := f.requests.Load() - before; got != 1 {
+		t.Fatalf("failed post-expiry refresh requests = %d, want 1 during cooldown", got)
 	}
 }
 
@@ -209,6 +244,89 @@ func TestDiscoveryAndJWKSBounds(t *testing.T) {
 	}
 	if _, err := New(context.Background(), f.server.URL+"/tenant", "https://resource.example", Config{HTTPClient: f.server.Client(), AllowedAlgorithms: []string{"RS256"}, MaxResponseBytes: 10}); err == nil {
 		t.Fatal("accepted oversized response")
+	}
+}
+
+func TestConfigurationBoundsAndCustomClientTimeout(t *testing.T) {
+	f := newIssuer(t)
+	f.rotate("one")
+	v := newValidator(t, f, Config{})
+	if v.client.Timeout != defaultFetchTimeout {
+		t.Fatalf("custom client timeout = %v, want %v", v.client.Timeout, defaultFetchTimeout)
+	}
+
+	tests := []Config{
+		{MaxResponseBytes: minResponseBytes - 1},
+		{MaxResponseBytes: maxResponseBytes + 1},
+		{MaxKeys: maxKeyCount + 1},
+		{CacheTTL: minCacheTTL - time.Nanosecond},
+		{CacheTTL: maxCacheTTL + time.Nanosecond},
+		{RefreshCooldown: minRefreshCooldown - time.Nanosecond},
+		{RefreshCooldown: maxRefreshCooldown + time.Nanosecond},
+		{ClockSkew: maxClockSkew + time.Nanosecond},
+	}
+	for _, cfg := range tests {
+		cfg.HTTPClient = f.server.Client()
+		cfg.AllowedAlgorithms = []string{"RS256"}
+		if _, err := New(context.Background(), f.server.URL+"/tenant", "https://resource.example", cfg); err == nil {
+			t.Fatalf("accepted out-of-range config %#v", cfg)
+		}
+	}
+}
+
+func TestFailedRefreshAttemptsAreThrottled(t *testing.T) {
+	f := newIssuer(t)
+	key := f.rotate("known")
+	now := time.Now()
+	v := newValidator(t, f, Config{CacheTTL: time.Minute, RefreshCooldown: time.Second, Now: func() time.Time { return now }})
+	now = now.Add(2 * time.Second)
+	f.outage.Store(true)
+	token := sign(t, key, "unknown", f.server.URL+"/tenant", "https://resource.example/mcp", "alice", time.Now().Add(time.Hour))
+	before := f.requests.Load()
+	for range 2 {
+		if _, err := v.Validate(context.Background(), token); !errors.Is(err, authz.ErrInvalidToken) {
+			t.Fatalf("unknown-key validation error = %v", err)
+		}
+	}
+	if got := f.requests.Load() - before; got != 1 {
+		t.Fatalf("failed refresh requests = %d, want 1 during cooldown", got)
+	}
+}
+
+func TestSameKeyIDRotationRefreshesAndRetries(t *testing.T) {
+	f := newIssuer(t)
+	oldKey := f.rotate("stable")
+	now := time.Now()
+	v := newValidator(t, f, Config{CacheTTL: time.Minute, RefreshCooldown: time.Second, Now: func() time.Time { return now }})
+	oldToken := sign(t, oldKey, "stable", f.server.URL+"/tenant", "https://resource.example/mcp", "alice", time.Now().Add(time.Hour))
+	if _, err := v.Validate(context.Background(), oldToken); err != nil {
+		t.Fatal(err)
+	}
+	newKey := f.rotate("stable")
+	now = now.Add(2 * time.Second)
+	newToken := sign(t, newKey, "stable", f.server.URL+"/tenant", "https://resource.example/mcp", "alice", time.Now().Add(time.Hour))
+	if _, err := v.Validate(context.Background(), newToken); err != nil {
+		t.Fatalf("same-kid rotated token rejected: %v", err)
+	}
+}
+
+func TestMixedJWKSFiltersIrrelevantKeys(t *testing.T) {
+	f := newIssuer(t)
+	key := f.rotate("signing")
+	signing := rsaJWK("signing", &key.PublicKey)
+	delete(signing, "alg")
+	f.mu.Lock()
+	f.extra = []map[string]string{
+		signing,
+		{"kty": "oct", "kid": "symmetric", "use": "sig", "alg": "HS256", "k": "AA"},
+		{"kty": "RSA", "kid": "encryption", "use": "enc", "alg": "RSA-OAEP"},
+	}
+	f.keys = map[string]*rsa.PrivateKey{}
+	f.mu.Unlock()
+	v := newValidator(t, f, Config{})
+	token := sign(t, key, "signing", f.server.URL+"/tenant", "https://resource.example/mcp", "alice", time.Now().Add(time.Hour))
+	if _, err := v.Validate(context.Background(), token); err != nil {
+		t.Fatalf("valid token rejected with mixed JWKS: %v", err)
 	}
 }
 
@@ -260,7 +378,7 @@ func TestParseScopesAndJWKVariants(t *testing.T) {
 	if err != nil || kid != "ec" || key.key == nil {
 		t.Fatalf("EC key = %q, %T, %v", kid, key, err)
 	}
-	for _, raw := range []string{`{`, `{"kty":"oct","kid":"x","alg":"HS256"}`, `{"kty":"RSA","kid":"x","n":"bad","e":"AQAB"}`, `{"kty":"EC","kid":"x","alg":"ES256","crv":"bad","x":"AA","y":"AA"}`} {
+	for _, raw := range []string{`{`, `{"kty":"oct","kid":"x","alg":"HS256"}`, `{"kty":"RSA","kid":"x","n":"bad","e":"AQAB"}`, `{"kty":"RSA","kid":"x","alg":"RS256","n":"` + strings.Repeat("A", 342) + `","e":"Ag"}`, `{"kty":"EC","kid":"x","alg":"ES256","crv":"bad","x":"AA","y":"AA"}`} {
 		if _, _, err := parseJWK(json.RawMessage(raw)); err == nil {
 			t.Errorf("accepted %s", raw)
 		}
@@ -272,7 +390,6 @@ func TestJWKAlgorithmMetadataIsBoundToToken(t *testing.T) {
 		key verificationKey
 		alg string
 	}{
-		{verificationKey{alg: "", kty: "RSA"}, "RS256"},
 		{verificationKey{alg: "RS512", kty: "RSA"}, "RS256"},
 		{verificationKey{alg: "RS256", kty: "EC", crv: "P-256"}, "RS256"},
 		{verificationKey{alg: "ES256", kty: "EC", crv: "P-384"}, "ES256"},
@@ -280,6 +397,57 @@ func TestJWKAlgorithmMetadataIsBoundToToken(t *testing.T) {
 		if err := tc.key.matches(tc.alg); err == nil {
 			t.Fatalf("accepted key %#v for %s", tc.key, tc.alg)
 		}
+	}
+}
+
+func TestJWKKeyOperationsRequireVerify(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		keyOps  []string
+		wantErr bool
+	}{
+		{name: "absent"},
+		{name: "verify", keyOps: []string{"verify"}},
+		{name: "empty", keyOps: []string{}, wantErr: true},
+		{name: "encrypt only", keyOps: []string{"encrypt"}, wantErr: true},
+		{name: "sign only", keyOps: []string{"sign"}, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			jwk := map[string]any{}
+			for name, value := range rsaJWK("operations", &key.PublicKey) {
+				jwk[name] = value
+			}
+			if tc.keyOps != nil {
+				jwk["key_ops"] = tc.keyOps
+			}
+			raw, err := json.Marshal(jwk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, err = parseJWK(raw)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("parseJWK error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestRejectsOversizedRSAModulus(t *testing.T) {
+	n := make([]byte, maxRSAModulusBytes+1)
+	n[0] = 1
+	raw, err := json.Marshal(map[string]string{
+		"kty": "RSA", "kid": "large", "use": "sig", "alg": "RS256",
+		"n": base64.RawURLEncoding.EncodeToString(n), "e": "AQAB",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := parseJWK(raw); err == nil {
+		t.Fatal("accepted oversized RSA modulus")
 	}
 }
 

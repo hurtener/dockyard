@@ -55,6 +55,66 @@ func TestValidateSchemaAcceptsLocalComposition(t *testing.T) {
 	}
 }
 
+func TestValidateSchemaResolvesNestedLocalRefFromRoot(t *testing.T) {
+	raw := []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$defs":{"wrapper":{"$defs":{"input":{"type":"object"}}}},"allOf":[{"$ref":"#/$defs/wrapper/$defs/input"}]}`)
+	if _, err := codegen.ValidateSchema(raw, true); err != nil {
+		t.Fatalf("nested local ref: %v", err)
+	}
+}
+
+func TestValidateSchemaRejectsInvalidJSONPointerEscapes(t *testing.T) {
+	for _, token := range []string{"~", "~2", "name~x"} {
+		raw := []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$defs":{"` + token + `":{"type":"object"}},"$ref":"#/$defs/` + token + `"}`)
+		if _, err := codegen.ValidateSchema(raw, false); !errors.Is(err, codegen.ErrNonconformantSchema) {
+			t.Fatalf("pointer token %q error = %v, want nonconformant schema", token, err)
+		}
+	}
+}
+
+func TestValidateSchemaAcceptsEscapedJSONPointerTokens(t *testing.T) {
+	for _, raw := range []string{
+		`{"$schema":"https://json-schema.org/draft/2020-12/schema","$defs":{"a/b":{"type":"object"}},"$ref":"#/$defs/a~1b"}`,
+		`{"$schema":"https://json-schema.org/draft/2020-12/schema","$defs":{"a~b":{"type":"object"}},"$ref":"#/$defs/a~0b"}`,
+	} {
+		if _, err := codegen.ValidateSchema([]byte(raw), true); err != nil {
+			t.Fatalf("escaped pointer %s: %v", raw, err)
+		}
+	}
+}
+
+func TestValidateSchemaResolvesLocalAnchorFromRoot(t *testing.T) {
+	raw := []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$defs":{"input":{"$anchor":"input","type":"object"}},"$ref":"#input"}`)
+	if _, err := codegen.ValidateSchema(raw, true); err != nil {
+		t.Fatalf("anchor local ref: %v", err)
+	}
+}
+
+func TestValidateSchemaRejectsCyclicLocalAnchorObjectRoot(t *testing.T) {
+	raw := []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$defs":{"loop":{"$anchor":"loop","$ref":"#loop"}},"$ref":"#loop"}`)
+	if _, err := codegen.ValidateSchema(raw, true); !errors.Is(err, codegen.ErrNonconformantSchema) {
+		t.Fatalf("cyclic anchor error = %v", err)
+	}
+}
+
+func TestValidateSchemaRequiresObjectOnlyInputRoot(t *testing.T) {
+	for _, raw := range []string{
+		`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":["null","object"]}`,
+		`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":["object","string"]}`,
+		`{"$schema":"https://json-schema.org/draft/2020-12/schema","anyOf":[{"type":"object"},{"type":"string"}]}`,
+	} {
+		if _, err := codegen.ValidateSchema([]byte(raw), true); !errors.Is(err, codegen.ErrNonconformantSchema) {
+			t.Fatalf("schema %s error = %v", raw, err)
+		}
+	}
+}
+
+func TestValidateSchemaRejectsRecursiveNonObjectRoot(t *testing.T) {
+	raw := []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$defs":{"loop":{"$ref":"#/$defs/loop"}},"$ref":"#/$defs/loop"}`)
+	if _, err := codegen.ValidateSchema(raw, true); !errors.Is(err, codegen.ErrNonconformantSchema) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestValidateSchemaAcceptsFragmentAndAnchorRefs(t *testing.T) {
 	for _, raw := range []string{
 		`{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"#"}`,

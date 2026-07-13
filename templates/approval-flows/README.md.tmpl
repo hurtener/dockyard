@@ -19,8 +19,8 @@ This project was created with
 
    ```sh
    go mod tidy
-   ( cd web && npm install )
    dockyard generate            # regenerate contract schema + TS (no-op if current)
+   ( cd web && npm install && npm run check )
    ```
 
 2. **Run it** — `go run .` serves over stdio (the usual MCP transport); set
@@ -117,4 +117,5 @@ The handlers are pure functions over their typed contracts. Replace
 the `RequestInput` body with a call into your own approval queue
 (Slack, a webhook, a database table) and return the user's decision
 in the same shape — the contract is the integration surface, not the
-handler internals.
+handler internals. The Svelte App imports those generated output types from
+`internal/contracts/contracts.ts`, so contract changes reach the UI type-check.

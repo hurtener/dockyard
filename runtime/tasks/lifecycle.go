@@ -94,11 +94,13 @@ type purgeSweep struct {
 	interval time.Duration
 	log      *slog.Logger
 	now      func() time.Time // injectable clock; nil uses time.Now
+	run      func(context.Context, time.Time) (int, error)
 
-	startOnce sync.Once
-	stopOnce  sync.Once
-	cancel    context.CancelFunc
-	done      chan struct{}
+	mu      sync.Mutex
+	started bool
+	stopped bool
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 // newPurgeSweep constructs a purge sweep over store. A non-positive interval
@@ -114,6 +116,7 @@ func newPurgeSweep(store TaskStore, interval time.Duration, log *slog.Logger) *p
 		store:    store,
 		interval: interval,
 		log:      log,
+		run:      store.PurgeExpired,
 		done:     make(chan struct{}),
 	}
 }
@@ -133,11 +136,15 @@ func (p *purgeSweep) Start(ctx context.Context) {
 	if p == nil {
 		return
 	}
-	p.startOnce.Do(func() {
-		runCtx, cancel := context.WithCancel(ctx)
-		p.cancel = cancel
-		go p.loop(runCtx)
-	})
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.started || p.stopped {
+		return
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	p.started = true
+	p.cancel = cancel
+	go p.loop(runCtx)
 }
 
 // loop runs the sweep until its context is cancelled. It always closes done on
@@ -160,7 +167,7 @@ func (p *purgeSweep) loop(ctx context.Context) {
 // panicked — the sweep is best-effort and must survive a transient store error
 // to run again on the next tick.
 func (p *purgeSweep) runOnce(ctx context.Context) {
-	n, err := p.store.PurgeExpired(ctx, p.nowFn())
+	n, err := p.run(ctx, p.nowFn())
 	if err != nil {
 		if ctx.Err() != nil {
 			return // shutting down — not a real error
@@ -174,19 +181,29 @@ func (p *purgeSweep) runOnce(ctx context.Context) {
 }
 
 // Stop cancels the sweep and blocks until its goroutine has exited. It is
-// idempotent and safe to call even if Start was never called. Stop on a nil
-// sweep is a no-op.
+// idempotent and safe to call even if Start was never called. Once started,
+// every concurrent caller waits for the same sweep goroutine to exit. Stop on
+// a nil sweep is a no-op.
 func (p *purgeSweep) Stop() {
 	if p == nil {
 		return
 	}
-	p.stopOnce.Do(func() {
-		if p.cancel != nil {
-			p.cancel()
-			<-p.done
-		} else {
-			// Start was never called — nothing to join.
+	p.mu.Lock()
+	started := p.started
+	var cancel context.CancelFunc
+	if !p.stopped {
+		p.stopped = true
+		cancel = p.cancel
+		if !started {
 			close(p.done)
 		}
-	})
+	}
+	done := p.done
+	p.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if started {
+		<-done
+	}
 }

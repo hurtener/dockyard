@@ -176,6 +176,9 @@ func TestBuiltin_MaterialiseSampleProject(t *testing.T) {
 	if !strings.Contains(string(files["main.go"]), "example.com/ut-app/internal/contracts") {
 		t.Errorf("main.go did not get the import path substituted:\n%s", files["main.go"])
 	}
+	if !strings.Contains(string(files["web/src/App.svelte"]), "../../internal/contracts/contracts.js") {
+		t.Errorf("App.svelte does not import generated contracts:\n%s", files["web/src/App.svelte"])
+	}
 	// Builtin.go must NOT have been materialised — it is framework glue.
 	if _, ok := files["builtin.go"]; ok {
 		t.Error("builtin.go leaked into the materialised project")

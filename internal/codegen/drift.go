@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -49,8 +50,8 @@ const (
 	kindArray   = "array"
 	kindObject  = "object"
 	// kindUnknown marks a value with no constrained type — a JSON-Schema `true`
-	// schema (e.g. json.RawMessage) or a TS `any`/`unknown`. It compares equal
-	// to every kind, so an unconstrained field never reports false drift.
+	// schema (e.g. json.RawMessage) or a TS `any`/`unknown`. An unconstrained
+	// schema accepts every TS kind, but TS any cannot mask a constrained schema.
 	kindUnknown = "unknown"
 )
 
@@ -76,11 +77,10 @@ const (
 // value-type kind (string / number / boolean / array / object). It does not
 // walk the full type graph — it does not descend into nested objects or array
 // element types — but a same-named property whose top-level kind diverges
-// between the two artifacts is caught as drift, which is exactly the failure
-// mode findings 1–4 of the depth audit produced. A property typed by a named
-// type (an enum or a nested interface) or by an unconstrained schema is treated
-// as kind-compatible and skipped for the type comparison, so a legitimately
-// opaque field never reports false drift.
+// between the two artifacts is caught as drift. Named generated interfaces and
+// aliases are resolved to their declaration kind; `any`/`unknown` cannot mask a
+// constrained schema. An unconstrained schema remains compatible with every TS
+// kind. Base64 schema strings must be explicit TypeScript strings.
 //
 // It expects the default optional style (`field?: T`); generate the TypeScript
 // without WithNullOptional for the artifact passed here. WithNullOptional
@@ -130,7 +130,11 @@ func CrossCheck(schema *jsonschema.Schema, tsTypeName string, ts []byte) error {
 		// Value-type drift: the schema and TypeScript disagree on the property's
 		// kind (D-051). An unclassified or unconstrained kind on either side is
 		// kind-compatible and skipped.
-		if !kindsCompatible(sp.kind, f.kind) {
+		if sp.base64 && f.kind != kindString {
+			problems = append(problems, fmt.Sprintf(
+				"property %q is base64 in the schema but %s in TypeScript",
+				name, describeKind(f.kind)))
+		} else if !kindsCompatible(sp.kind, f.kind) {
 			problems = append(problems, fmt.Sprintf(
 				"property %q has type %s in the schema but %s in TypeScript",
 				name, describeKind(sp.kind), describeKind(f.kind)))
@@ -199,11 +203,13 @@ func schemaIsObject(root, s *jsonschema.Schema, seen map[*jsonschema.Schema]bool
 type schemaProp struct {
 	required bool
 	kind     string
+	base64   bool
 }
 
 // schemaProperties returns the contract's top-level properties keyed by name. A
 // property is required when it appears in the schema's Required list; its kind
-// is the normalised value-type (see schemaKind).
+// is the normalised value-type (see schemaKind). Base64 encoding is retained so
+// byte-slice wire types cannot evade comparison as opaque named TypeScript.
 func schemaProperties(root, s *jsonschema.Schema, seen map[*jsonschema.Schema]bool) map[string]schemaProp {
 	if s == nil || seen[s] {
 		return map[string]schemaProp{}
@@ -229,7 +235,11 @@ func schemaProperties(root, s *jsonschema.Schema, seen map[*jsonschema.Schema]bo
 	}
 	for name, ps := range s.Properties {
 		_, isRequired := required[name]
-		props[name] = schemaProp{required: isRequired, kind: schemaKind(ps)}
+		props[name] = schemaProp{
+			required: isRequired,
+			kind:     schemaKind(root, ps, make(map[*jsonschema.Schema]bool)),
+			base64:   ps != nil && ps.ContentEncoding == "base64",
+		}
 	}
 	return props
 }
@@ -252,9 +262,13 @@ func localRef(root *jsonschema.Schema, ref string) *jsonschema.Schema {
 // a string-enum is kindString. A schema with no type at all is kindUnknown: the
 // unconstrained `true` schema json.RawMessage produces, which is compatible
 // with anything.
-func schemaKind(s *jsonschema.Schema) string {
-	if s == nil {
+func schemaKind(root, s *jsonschema.Schema, seen map[*jsonschema.Schema]bool) string {
+	if s == nil || seen[s] {
 		return kindUnknown
+	}
+	seen[s] = true
+	if target := localRef(root, s.Ref); target != nil {
+		return schemaKind(root, target, seen)
 	}
 	t := s.Type
 	if t == "" {
@@ -277,6 +291,23 @@ func schemaKind(s *jsonschema.Schema) string {
 	case "object":
 		return kindObject
 	default:
+		for _, branches := range [][]*jsonschema.Schema{s.AllOf, s.AnyOf, s.OneOf} {
+			kind := ""
+			for _, branch := range branches {
+				if schemaOnlyNull(branch) {
+					continue
+				}
+				branchKind := schemaKind(root, branch, cloneSchemaPath(seen))
+				if branchKind == kindUnknown || (kind != "" && kind != branchKind) {
+					kind = kindUnknown
+					break
+				}
+				kind = branchKind
+			}
+			if kind != "" {
+				return kind
+			}
+		}
 		// No type keyword. An enum still pins a value type when its members are
 		// homogeneous; otherwise the schema is genuinely unconstrained.
 		if len(s.Enum) > 0 {
@@ -284,6 +315,18 @@ func schemaKind(s *jsonschema.Schema) string {
 		}
 		return kindUnknown
 	}
+}
+
+func schemaOnlyNull(s *jsonschema.Schema) bool {
+	return s != nil && (s.Type == "null" || len(s.Types) == 1 && s.Types[0] == "null")
+}
+
+func cloneSchemaPath(path map[*jsonschema.Schema]bool) map[*jsonschema.Schema]bool {
+	out := make(map[*jsonschema.Schema]bool, len(path))
+	for schema := range path {
+		out[schema] = true
+	}
+	return out
 }
 
 // enumKind returns the value-type kind shared by every member of an enum, or
@@ -315,11 +358,15 @@ func enumKind(members []any) string {
 }
 
 // kindsCompatible reports whether a schema kind and a TypeScript kind agree.
-// kindUnknown — an unconstrained schema or an opaque TS type — is compatible
-// with every kind, so a legitimately opaque field never reports false drift.
+// An unconstrained schema is compatible with every TypeScript kind. The inverse
+// is intentionally false: TypeScript any/unknown cannot hide a constrained
+// schema kind.
 func kindsCompatible(a, b string) bool {
-	if a == "" || b == "" || a == kindUnknown || b == kindUnknown {
+	if a == "" || b == "" || a == kindUnknown {
 		return true
+	}
+	if b == kindUnknown {
+		return false
 	}
 	return a == b
 }
@@ -336,42 +383,45 @@ func describeKind(k string) string {
 // capturing its name.
 var tsInterfaceRe = regexp.MustCompile(`(?m)^\s*export\s+interface\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:extends\s+[^{]+)?\{`)
 
-// tsFieldRe matches one field line inside a TypeScript interface body,
-// capturing the field name, the optional `?` marker, and the type expression
-// up to the trailing semicolon.
-var tsFieldRe = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)(\??)\s*:\s*(.+?);?\s*$`)
+// tsFieldRe matches one field line inside a TypeScript interface body. Tygo
+// quotes property names that are not TypeScript identifiers, including the
+// literal JSON property "-".
+var tsFieldRe = regexp.MustCompile(`^\s*(?:([A-Za-z_][A-Za-z0-9_]*)|'([^']*)'|"([^"]*)")(\??)\s*:\s*(.+?);?\s*$`)
 
 // tsLineCommentRe strips a tygo `/* ... */` annotation (e.g. `number /* int */`)
 // from a TypeScript type expression before it is classified.
 var tsLineCommentRe = regexp.MustCompile(`/\*.*?\*/`)
 
-// tsTypeKind classifies a TypeScript type expression into a coarse value-type
-// kind, matching schemaKind's vocabulary so the two can be compared.
-//
-// It strips tygo's `/* int */` annotations and any `| null` / `| undefined`
-// optionality member, then recognises the boring, generated shapes Dockyard
-// emits: a primitive, a `T[]` array, a `{ [key: ...]: ... }` index object, or a
-// named type. A named type (an enum or a nested interface) and `any`/`unknown`
-// classify as kindUnknown — kind-compatible with anything — because CrossCheck
-// deliberately does not resolve a named TS type back to its declaration.
-func tsTypeKind(expr string) string {
+func tsTypeKindWithSource(expr, source string, seen map[string]bool) string {
 	t := tsLineCommentRe.ReplaceAllString(expr, "")
 	t = strings.TrimSpace(t)
 	t = strings.TrimSuffix(t, ";")
 	t = strings.TrimSpace(t)
+	if strings.HasSuffix(t, "[]") || strings.HasPrefix(t, "Array<") {
+		return kindArray
+	}
 
 	// Drop `| null` / `| undefined` optionality members of a top-level union.
 	if strings.Contains(t, "|") {
 		var kept []string
+		unionKind := ""
 		for _, part := range strings.Split(t, "|") {
 			p := strings.TrimSpace(part)
 			if p == "null" || p == "undefined" || p == "" {
 				continue
 			}
 			kept = append(kept, p)
+			partKind := tsLiteralKind(p, source)
+			if partKind == kindUnknown || (unionKind != "" && unionKind != partKind) {
+				unionKind = kindUnknown
+			} else if unionKind == "" {
+				unionKind = partKind
+			}
 		}
 		if len(kept) == 1 {
 			t = kept[0]
+		} else if unionKind != "" && unionKind != kindUnknown {
+			return unionKind
 		} else {
 			// A genuine multi-member union — not a shape CrossCheck classifies.
 			return kindUnknown
@@ -390,17 +440,45 @@ func tsTypeKind(expr string) string {
 		return kindBoolean
 	case t == "any" || t == "unknown":
 		return kindUnknown
-	case strings.HasSuffix(t, "[]"):
-		return kindArray
-	case strings.HasPrefix(t, "Array<"):
-		return kindArray
 	case strings.HasPrefix(t, "{"):
 		return kindObject
 	default:
-		// A named type — an enum or a nested interface. CrossCheck does not
-		// resolve it, so it is treated as kind-compatible.
+		if source != "" && regexp.MustCompile(`(?m)^\s*export\s+interface\s+`+regexp.QuoteMeta(t)+`\b`).MatchString(source) {
+			return kindObject
+		}
+		if source != "" && !seen[t] {
+			alias := regexp.MustCompile(`(?m)^\s*export\s+type\s+` + regexp.QuoteMeta(t) + `\s*=\s*([^;]+);`).FindStringSubmatch(source)
+			if alias != nil {
+				next := make(map[string]bool, len(seen)+1)
+				for name := range seen {
+					next[name] = true
+				}
+				next[t] = true
+				return tsTypeKindWithSource(alias[1], source, next)
+			}
+		}
 		return kindUnknown
 	}
+}
+
+func tsLiteralKind(expr, source string) string {
+	if strings.HasPrefix(expr, "typeof ") && source != "" {
+		name := strings.TrimSpace(strings.TrimPrefix(expr, "typeof "))
+		constant := regexp.MustCompile(`(?m)^\s*export\s+const\s+` + regexp.QuoteMeta(name) + `\s*=\s*([^;]+);`).FindStringSubmatch(source)
+		if constant != nil {
+			return tsLiteralKind(strings.TrimSpace(constant[1]), "")
+		}
+	}
+	if len(expr) >= 2 && ((expr[0] == '\'' && expr[len(expr)-1] == '\'') || (expr[0] == '"' && expr[len(expr)-1] == '"')) {
+		return kindString
+	}
+	if expr == "true" || expr == "false" {
+		return kindBoolean
+	}
+	if _, err := strconv.ParseFloat(expr, 64); err == nil {
+		return kindNumber
+	}
+	return kindUnknown
 }
 
 // parseTSInterface extracts the fields of the named interface from generated
@@ -423,9 +501,12 @@ func parseTSInterface(ts, name string) ([]tsField, bool) {
 			continue
 		}
 		var fields []tsField
+		depth := braceDelta(lines[i])
 		inComment := false
+		var pending *tsField
+		var pendingType strings.Builder
 		for j := i + 1; j < len(lines); j++ {
-			line := lines[j]
+			line := stripTSLineComment(lines[j])
 			// Inside a block comment: skip until it closes. The braces in a
 			// JSDoc example are comment text, not structure.
 			if inComment {
@@ -443,20 +524,111 @@ func parseTSInterface(ts, name string) ([]tsField, bool) {
 			// Strip any single-line `/* … */` so its braces don't confuse the
 			// close-brace detection.
 			clean := tsLineCommentRe.ReplaceAllString(line, "")
-			if strings.Contains(clean, "}") && !strings.Contains(clean, "{") {
+			if pending != nil {
+				pendingType.WriteByte(' ')
+				pendingType.WriteString(strings.TrimSpace(clean))
+			} else if depth == 1 {
+				fm := tsFieldRe.FindStringSubmatch(clean)
+				if fm != nil {
+					fieldName := fm[1]
+					if fieldName == "" {
+						fieldName = fm[2]
+					}
+					if fieldName == "" {
+						fieldName = fm[3]
+					}
+					field := tsField{
+						name:     fieldName,
+						optional: fm[4] == "?",
+					}
+					if braceDelta(clean) > 0 {
+						pending = &field
+						pendingType.WriteString(fm[5])
+					} else {
+						field.kind = tsTypeKindWithSource(fm[5], ts, make(map[string]bool))
+						fields = append(fields, field)
+					}
+				}
+			}
+			depth += braceDelta(clean)
+			if pending != nil && depth == 1 {
+				pending.kind = tsTypeKindWithSource(pendingType.String(), ts, make(map[string]bool))
+				fields = append(fields, *pending)
+				pending = nil
+				pendingType.Reset()
+			}
+			if depth <= 0 {
 				return fields, true
 			}
-			fm := tsFieldRe.FindStringSubmatch(clean)
-			if fm == nil {
-				continue // blank line, comment, or continuation
-			}
-			fields = append(fields, tsField{
-				name:     fm[1],
-				optional: fm[2] == "?",
-				kind:     tsTypeKind(fm[3]),
-			})
 		}
 		return fields, true // interface ran to EOF without a close brace
 	}
 	return nil, false
+}
+
+// stripTSLineComment removes a TypeScript line comment without treating `//`
+// inside string or template literals as a comment opener.
+func stripTSLineComment(line string) string {
+	var quote byte
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		b := line[i]
+		if quote != 0 {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if b == '\\' {
+				escaped = true
+				continue
+			}
+			if b == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch b {
+		case '\'', '"', '`':
+			quote = b
+		case '/':
+			if i+1 < len(line) && line[i+1] == '/' {
+				return line[:i]
+			}
+		}
+	}
+	return line
+}
+
+// braceDelta counts structural braces in generated TypeScript while ignoring
+// braces inside quoted property names and literal types.
+func braceDelta(line string) int {
+	delta := 0
+	var quote byte
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		b := line[i]
+		if quote != 0 {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if b == '\\' {
+				escaped = true
+				continue
+			}
+			if b == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch b {
+		case '\'', '"', '`':
+			quote = b
+		case '{':
+			delta++
+		case '}':
+			delta--
+		}
+	}
+	return delta
 }

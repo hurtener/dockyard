@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -40,6 +41,39 @@ func TestBootCheckNegotiation(t *testing.T) {
 				return nil, &jsonrpc.Error{Code: jsonrpc.CodeMethodNotFound, Message: "method not found"}
 			},
 			wantInitialize: true,
+		},
+		{
+			name: "advertised legacy-only version falls back to initialize",
+			discoverResult: func() (mcpsdk.Result, error) {
+				return &mcpsdk.DiscoverResult{
+					SupportedVersions: []string{"2025-11-25"},
+					Capabilities:      &mcpsdk.ServerCapabilities{},
+					ServerInfo:        &mcpsdk.Implementation{Name: "legacy", Version: "1"},
+				}, nil
+			},
+			wantInitialize: true,
+		},
+		{
+			name: "unknown future advertised version does not downgrade",
+			discoverResult: func() (mcpsdk.Result, error) {
+				return &mcpsdk.DiscoverResult{
+					SupportedVersions: []string{"2027-01-01"},
+					Capabilities:      &mcpsdk.ServerCapabilities{},
+					ServerInfo:        &mcpsdk.Implementation{Name: "future", Version: "1"},
+				}, nil
+			},
+			wantErr: true,
+		},
+		{
+			name: "malformed advertised version does not downgrade",
+			discoverResult: func() (mcpsdk.Result, error) {
+				return &mcpsdk.DiscoverResult{
+					SupportedVersions: []string{"garbage"},
+					Capabilities:      &mcpsdk.ServerCapabilities{},
+					ServerInfo:        &mcpsdk.Implementation{Name: "malformed", Version: "1"},
+				}, nil
+			},
+			wantErr: true,
 		},
 		{
 			name: "unrelated discovery error does not downgrade",
@@ -177,6 +211,95 @@ func TestBootCheck_FailsForANonServer(t *testing.T) {
 	if !errors.Is(err, ErrBootCheck) {
 		t.Errorf("boot-check failure not wrapping ErrBootCheck: %v", err)
 	}
+}
+
+func TestBootCheckClosesChildAfterHandshakeError(t *testing.T) {
+	cleanupFile := filepath.Join(t.TempDir(), "child-cleaned-up")
+	t.Setenv("DOCKYARD_BOOTCHECK_TEST_CLEANUP", cleanupFile)
+	t.Setenv("DOCKYARD_BOOTCHECK_TEST_HANG", "")
+	bin := buildBootCheckProbe(t)
+
+	if err := bootCheck(context.Background(), bin); err == nil {
+		t.Fatal("boot check accepted unsupported initialize protocol")
+	}
+	if _, err := os.Stat(cleanupFile); err != nil {
+		t.Fatalf("child did not observe connection cleanup: %v", err)
+	}
+}
+
+func TestBootCheckBoundsUncooperativeChildTermination(t *testing.T) {
+	t.Setenv("DOCKYARD_BOOTCHECK_TEST_CLEANUP", "")
+	t.Setenv("DOCKYARD_BOOTCHECK_TEST_HANG", "1")
+	bin := buildBootCheckProbe(t)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- bootCheck(context.Background(), bin)
+	}()
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(bootCheckTimeout):
+		t.Fatalf("uncooperative child cleanup exceeded production boot-check timeout %v", bootCheckTimeout)
+	}
+	if err == nil {
+		t.Fatal("boot check accepted unsupported initialize protocol")
+	}
+}
+
+func buildBootCheckProbe(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	src := `package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"time"
+)
+
+func main() {
+	scanner := bufio.NewScanner(os.Stdin)
+	enc := json.NewEncoder(os.Stdout)
+	for scanner.Scan() {
+		var req struct {
+			ID any ` + "`json:\"id\"`" + `
+			Method string ` + "`json:\"method\"`" + `
+		}
+		if json.Unmarshal(scanner.Bytes(), &req) != nil {
+			continue
+		}
+		var result any
+		switch req.Method {
+		case "server/discover":
+			result = map[string]any{"supportedVersions": []string{"2025-11-25"}, "capabilities": map[string]any{}, "serverInfo": map[string]any{"name": "probe", "version": "1"}}
+		case "initialize":
+			result = map[string]any{"protocolVersion": "unsupported", "capabilities": map[string]any{}, "serverInfo": map[string]any{"name": "probe", "version": "1"}}
+		default:
+			continue
+		}
+		_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+		if req.Method == "initialize" && os.Getenv("DOCKYARD_BOOTCHECK_TEST_HANG") != "" {
+			for { time.Sleep(time.Hour) }
+		}
+	}
+	if path := os.Getenv("DOCKYARD_BOOTCHECK_TEST_CLEANUP"); path != "" {
+		_ = os.WriteFile(path, []byte("closed"), 0600)
+	}
+}
+`
+	srcPath := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(srcPath, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "probe")
+	build := exec.Command("go", "build", "-o", bin, srcPath) //nolint:gosec // test temp paths
+	build.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build boot-check probe: %v\n%s", err, out)
+	}
+	return bin
 }
 
 // TestInstall_FullWithBootCheck exercises the full Install path including the

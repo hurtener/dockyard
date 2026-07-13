@@ -304,6 +304,116 @@ func TestTaskHandle_RequireInput(t *testing.T) {
 	}
 }
 
+type pausedInputTransitionStore struct {
+	TaskStore
+	transitioned chan struct{}
+	release      chan struct{}
+}
+
+func (s *pausedInputTransitionStore) Transition(
+	ctx context.Context, id string, to protocolcodec.TaskStatus, msg string,
+) (TaskRecord, error) {
+	rec, err := s.TaskStore.Transition(ctx, id, to, msg)
+	if err == nil && to == protocolcodec.TaskInputRequired {
+		close(s.transitioned)
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return TaskRecord{}, ctx.Err()
+		}
+	}
+	return rec, err
+}
+
+func TestTaskHandle_RequireInputPublishesPendingBeforeDurableStatus(t *testing.T) {
+	store := &pausedInputTransitionStore{
+		TaskStore: NewInMemoryStore(), transitioned: make(chan struct{}), release: make(chan struct{}),
+	}
+	e, err := NewEngine(store, &Options{
+		Logger: quietLogger(), GenerateID: func() (string, error) { return "input-ready", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed := make(chan InputResponse, 1)
+	if _, err := e.CreateToolTask(context.Background(), CreateToolCallParams{
+		ToolName: "input",
+		Handle: func(ctx context.Context, h TaskHandle) (json.RawMessage, error) {
+			resp, err := h.RequireInput(ctx, InputPrompt{Message: "approve?"})
+			if err == nil {
+				resumed <- resp
+			}
+			return json.RawMessage(`{}`), err
+		},
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	<-store.transitioned
+	rec, err := store.Get(context.Background(), "input-ready")
+	if err != nil || rec.Status != protocolcodec.TaskInputRequired {
+		t.Fatalf("durable status = %q, err = %v", rec.Status, err)
+	}
+	want := InputResponse{Data: []byte(`true`)}
+	if err := e.SupplyInput(context.Background(), "input-ready", want); err != nil {
+		t.Fatalf("SupplyInput while transition return is paused: %v", err)
+	}
+	if err := e.SupplyInput(context.Background(), "input-ready", want); !errors.Is(err, ErrNoPendingInput) {
+		t.Fatalf("second SupplyInput error = %v, want ErrNoPendingInput", err)
+	}
+	close(store.release)
+	select {
+	case got := <-resumed:
+		if string(got.Data) != string(want.Data) {
+			t.Fatalf("resumed input = %s, want %s", got.Data, want.Data)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not resume from input supplied during paused transition")
+	}
+}
+
+type failingInputTransitionStore struct{ TaskStore }
+
+func (s *failingInputTransitionStore) Transition(
+	ctx context.Context, id string, to protocolcodec.TaskStatus, msg string,
+) (TaskRecord, error) {
+	if to == protocolcodec.TaskInputRequired {
+		return TaskRecord{}, errors.New("input transition failed")
+	}
+	return s.TaskStore.Transition(ctx, id, to, msg)
+}
+
+func TestTaskHandle_RequireInputRollsBackPendingOnTransitionFailure(t *testing.T) {
+	store := &failingInputTransitionStore{TaskStore: NewInMemoryStore()}
+	e, err := NewEngine(store, &Options{
+		Logger: quietLogger(), GenerateID: func() (string, error) { return "input-rollback", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	if _, err := e.CreateToolTask(context.Background(), CreateToolCallParams{
+		ToolName: "input",
+		Handle: func(ctx context.Context, h TaskHandle) (json.RawMessage, error) {
+			_, err := h.RequireInput(ctx, InputPrompt{Message: "approve?"})
+			done <- err
+			return nil, err
+		},
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("RequireInput succeeded despite transition failure")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RequireInput did not return after transition failure")
+	}
+	if _, ok := e.PendingInput("input-rollback"); ok {
+		t.Fatal("failed input transition retained pending elicitation")
+	}
+}
+
 // TestSupplyInput_NoPendingElicitation proves SupplyInput on a task with no
 // outstanding elicitation is a typed error, not a panic.
 func TestSupplyInput_NoPendingElicitation(t *testing.T) {

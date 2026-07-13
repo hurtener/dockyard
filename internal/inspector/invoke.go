@@ -136,8 +136,9 @@ func invokeAttachedTool(
 			MultiRoundTrip: &mcpsdk.MultiRoundTripOptions{Disabled: true},
 		},
 	)
+	httpClient := modernFirstHTTPClient(invokeTimeout, nil, true)
 	session, err := client.Connect(ctx,
-		&mcpsdk.StreamableClientTransport{Endpoint: baseURL}, nil)
+		&mcpsdk.StreamableClientTransport{Endpoint: baseURL, HTTPClient: httpClient}, nil)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"dockyard/internal/inspector: connect %q: %w", baseURL, err)

@@ -3,8 +3,10 @@ package inspector
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -106,6 +108,48 @@ func TestAppsFromServer(t *testing.T) {
 			t.Fatal("AppsFromServer against a dead server: want error, got nil")
 		}
 	})
+}
+
+func TestAppsFromServerRejectsNullReadResult(t *testing.T) {
+	t.Parallel()
+	stand := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request: %v", err)
+			return
+		}
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.Unmarshal(body, &request); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "server/discover":
+			result = map[string]any{
+				"supportedVersions": []string{"2026-07-28"},
+				"capabilities":      map[string]any{"resources": map[string]any{}},
+				"serverInfo":        map[string]any{"name": "malformed", "version": "1"},
+			}
+		case "resources/list":
+			result = map[string]any{"resources": []map[string]any{{"uri": "ui://test/app", "name": "test"}}}
+		case "resources/read":
+			result = nil
+		default:
+			t.Errorf("unexpected method %q", request.Method)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer stand.Close()
+
+	if _, err := AppsFromServer(stand.URL)(context.Background()); err == nil {
+		t.Fatal("null result was accepted")
+	}
 }
 
 // TestAppsEndpoint exercises the `/api/apps` HTTP endpoint — the read path the

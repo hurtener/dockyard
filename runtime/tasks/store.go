@@ -110,9 +110,9 @@ type TaskRecord struct {
 // before Phase 14 enforcement has stamped one — so a host always sees the
 // retention the runtime will actually honour.
 func (r TaskRecord) Task() protocolcodec.Task {
-	ttl := r.TTL
+	ttl := cloneInt64(r.TTL)
 	if ttl == nil {
-		ttl = r.RequestedTTL
+		ttl = cloneInt64(r.RequestedTTL)
 	}
 	return protocolcodec.Task{
 		ID:            r.ID,
@@ -121,7 +121,7 @@ func (r TaskRecord) Task() protocolcodec.Task {
 		CreatedAt:     r.CreatedAt,
 		LastUpdatedAt: r.UpdatedAt,
 		TTL:           ttl,
-		PollInterval:  r.PollInterval,
+		PollInterval:  cloneInt64(r.PollInterval),
 	}
 }
 
@@ -161,9 +161,9 @@ type TaskStore interface {
 	// not error; vendored spec, "Task Cancellation" rule 3).
 	Transition(ctx context.Context, id string, to protocolcodec.TaskStatus, msg string) (TaskRecord, error)
 
-	// SetResult records the terminal result of a task. It is called together
-	// with the transition into a terminal status; it does not itself move the
-	// lifecycle.
+	// SetResult records a result without moving the lifecycle. Runtime terminal
+	// paths use Finalize; this lower-level operation remains for store clients
+	// that stage a non-terminal result explicitly.
 	SetResult(ctx context.Context, id string, result TaskResult) error
 
 	// AddInputRequest atomically persists a lifetime-unique request and moves the
@@ -193,12 +193,47 @@ type TaskStore interface {
 	// in-memory record fall out of scope.
 	Delete(ctx context.Context, id string) error
 
-	// PurgeExpired reaps every task whose enforced TTL has elapsed as of now
-	// (TaskRecord.IsExpired) and returns the count removed. It is the storage
-	// half of the background TTL purge sweep (RFC §8.5); the sweep goroutine
-	// lives in lifecycle.go. PurgeExpired is safe to call concurrently with any
-	// other store operation.
+	// PurgeExpired reaps every terminal task whose enforced TTL has elapsed as
+	// of now (TaskRecord.IsExpired) and returns the count removed. Active tasks
+	// remain addressable so the engine can cancel and clean up their workers. It
+	// is the storage half of the background TTL purge sweep (RFC §8.5); the
+	// sweep goroutine lives in lifecycle.go. PurgeExpired is safe to call
+	// concurrently with any other store operation.
 	PurgeExpired(ctx context.Context, now time.Time) (int, error)
+}
+
+// AtomicCreateTaskStore is an optional TaskStore capability. Engines use it
+// when available; legacy TaskStore implementations remain source-compatible
+// and receive a process-wide serialized fallback when their dynamic value is
+// comparable. Non-comparable legacy values are rejected by [NewEngine].
+type AtomicCreateTaskStore interface {
+	CreateWithConcurrencyLimit(ctx context.Context, rec TaskRecord, limit int) error
+}
+
+// AtomicFinalizeTaskStore is an optional TaskStore capability. Engines use it
+// to commit a result and terminal status together. Legacy stores receive a
+// process-wide serialized result-before-status fallback, so engines sharing a
+// comparable store never observe a terminal task without its result.
+type AtomicFinalizeTaskStore interface {
+	Finalize(ctx context.Context, id string, status protocolcodec.TaskStatus, msg string, result TaskResult) (rec TaskRecord, applied bool, err error)
+}
+
+// ExpiredActiveTaskStore is an optional TaskStore capability that returns one
+// finite snapshot of active tasks whose enforced TTL has elapsed. Engines use
+// it to avoid carrying offset cursors across destructive purge operations.
+type ExpiredActiveTaskStore interface {
+	ExpiredActive(ctx context.Context, now time.Time) ([]TaskRecord, error)
+}
+
+// CoordinationIdentityProvider is an optional TaskStore capability for stores
+// whose dynamic value is not comparable or for facades that share one backend.
+// TaskStoreCoordinationIdentity must always return the same non-nil comparable
+// value for stores that share task lifecycle state. Comparable stores that do
+// not implement this capability identify as their own dynamic value.
+//
+// Keeping this capability separate preserves TaskStore source compatibility.
+type CoordinationIdentityProvider interface {
+	TaskStoreCoordinationIdentity() any
 }
 
 // inMemoryStore is the Phase 13 in-memory TaskStore driver. It is sufficient
@@ -212,13 +247,29 @@ type inMemoryStore struct {
 	order []string // insertion order, for stable cursor pagination
 }
 
+func (s *inMemoryStore) TaskStoreCoordinationIdentity() any { return s }
+
 // NewInMemoryStore returns an in-memory [TaskStore]. It is the Phase 13 default
 // driver; Phase 14 adds the durable Store-backed driver behind the same seam.
 func NewInMemoryStore() TaskStore {
 	return &inMemoryStore{tasks: make(map[string]TaskRecord)}
 }
 
-func (s *inMemoryStore) Create(_ context.Context, rec TaskRecord) error {
+func (s *inMemoryStore) Create(ctx context.Context, rec TaskRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.createWithConcurrencyLimit(ctx, rec, 0)
+}
+
+func (s *inMemoryStore) CreateWithConcurrencyLimit(ctx context.Context, rec TaskRecord, limit int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.createWithConcurrencyLimit(ctx, rec, limit)
+}
+
+func (s *inMemoryStore) createWithConcurrencyLimit(ctx context.Context, rec TaskRecord, limit int) error {
 	if rec.ID == "" {
 		return fmt.Errorf("%w: task record has empty ID", ErrInvalidParams)
 	}
@@ -227,17 +278,37 @@ func (s *inMemoryStore) Create(_ context.Context, rec TaskRecord) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if _, exists := s.tasks[rec.ID]; exists {
 		return fmt.Errorf("dockyard/runtime/tasks: task %q already exists", rec.ID)
 	}
-	s.tasks[rec.ID] = rec
+	if limit > 0 {
+		active := 0
+		for _, existing := range s.tasks {
+			if existing.AuthContext == rec.AuthContext && !existing.Status.IsTerminal() {
+				active++
+			}
+		}
+		if active >= limit {
+			return fmt.Errorf("%w: requestor has %d active tasks, the per-requestor cap is %d", ErrConcurrencyCap, active, limit)
+		}
+	}
+	s.tasks[rec.ID] = cloneTaskRecord(rec)
 	s.order = append(s.order, rec.ID)
 	return nil
 }
 
-func (s *inMemoryStore) Get(_ context.Context, id string) (TaskRecord, error) {
+func (s *inMemoryStore) Get(ctx context.Context, id string) (TaskRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return TaskRecord{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return TaskRecord{}, err
+	}
 	rec, ok := s.tasks[id]
 	if !ok {
 		return TaskRecord{}, fmt.Errorf("%w: %q", ErrTaskNotFound, id)
@@ -246,10 +317,16 @@ func (s *inMemoryStore) Get(_ context.Context, id string) (TaskRecord, error) {
 }
 
 func (s *inMemoryStore) Transition(
-	_ context.Context, id string, to protocolcodec.TaskStatus, msg string,
+	ctx context.Context, id string, to protocolcodec.TaskStatus, msg string,
 ) (TaskRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return TaskRecord{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return TaskRecord{}, err
+	}
 	rec, ok := s.tasks[id]
 	if !ok {
 		return TaskRecord{}, fmt.Errorf("%w: %q", ErrTaskNotFound, id)
@@ -266,7 +343,7 @@ func (s *inMemoryStore) Transition(
 			rec.UpdatedAt = time.Now().UTC()
 			s.tasks[id] = rec
 		}
-		return rec, nil
+		return cloneTaskRecord(rec), nil
 	}
 	if !rec.Status.CanTransitionTo(to) {
 		return TaskRecord{}, transitionError(rec.Status, to)
@@ -275,24 +352,69 @@ func (s *inMemoryStore) Transition(
 	rec.StatusMessage = msg
 	rec.UpdatedAt = time.Now().UTC()
 	s.tasks[id] = rec
-	return rec, nil
+	return cloneTaskRecord(rec), nil
 }
 
-func (s *inMemoryStore) SetResult(_ context.Context, id string, result TaskResult) error {
+func (s *inMemoryStore) SetResult(ctx context.Context, id string, result TaskResult) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	rec, ok := s.tasks[id]
 	if !ok {
 		return fmt.Errorf("%w: %q", ErrTaskNotFound, id)
 	}
-	rec.Result = result
+	rec.Result = TaskResult{Payload: append(json.RawMessage(nil), result.Payload...), Err: result.Err}
 	s.tasks[id] = rec
 	return nil
 }
 
-func (s *inMemoryStore) AddInputRequest(_ context.Context, id string, req InputRequest) error {
+func (s *inMemoryStore) Finalize(
+	ctx context.Context, id string, status protocolcodec.TaskStatus, msg string, result TaskResult,
+) (TaskRecord, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return TaskRecord{}, false, err
+	}
+	if !status.IsTerminal() {
+		return TaskRecord{}, false, transitionError("", status)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return TaskRecord{}, false, err
+	}
+	rec, ok := s.tasks[id]
+	if !ok {
+		return TaskRecord{}, false, fmt.Errorf("%w: %q", ErrTaskNotFound, id)
+	}
+	if rec.Status.IsTerminal() {
+		return cloneTaskRecord(rec), false, nil
+	}
+	if !rec.Status.CanTransitionTo(status) {
+		return TaskRecord{}, false, transitionError(rec.Status, status)
+	}
+	rec.Status = status
+	rec.StatusMessage = msg
+	rec.Result = cloneTaskResult(result)
+	rec.InputRequests = nil
+	rec.UpdatedAt = time.Now().UTC()
+	s.tasks[id] = rec
+	return cloneTaskRecord(rec), true, nil
+}
+
+func (s *inMemoryStore) AddInputRequest(ctx context.Context, id string, req InputRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	rec, ok := s.tasks[id]
 	if !ok {
 		return fmt.Errorf("%w: %q", ErrTaskNotFound, id)
@@ -300,14 +422,14 @@ func (s *inMemoryStore) AddInputRequest(_ context.Context, id string, req InputR
 	if rec.Status.IsTerminal() {
 		return transitionError(rec.Status, protocolcodec.TaskInputRequired)
 	}
-	if req.Key == "" || !req.Method.valid() || len(req.Payload) == 0 || !json.Valid(req.Payload) {
-		return fmt.Errorf("%w: invalid input request", ErrInvalidParams)
-	}
 	if _, exists := rec.InputRequests[req.Key]; exists {
 		return fmt.Errorf("%w: %q", ErrDuplicateInputKey, req.Key)
 	}
 	if _, exists := rec.InputResponses[req.Key]; exists {
 		return fmt.Errorf("%w: %q", ErrDuplicateInputKey, req.Key)
+	}
+	if err := validateInputRequest(req); err != nil {
+		return err
 	}
 	if rec.InputRequests == nil {
 		rec.InputRequests = make(map[string]InputRequest)
@@ -319,12 +441,24 @@ func (s *inMemoryStore) AddInputRequest(_ context.Context, id string, req InputR
 	return nil
 }
 
-func (s *inMemoryStore) ApplyInputResponses(_ context.Context, id string, responses map[string]TaskInputResponse) (map[string]TaskInputResponse, TaskRecord, error) {
+func (s *inMemoryStore) ApplyInputResponses(ctx context.Context, id string, responses map[string]TaskInputResponse) (map[string]TaskInputResponse, TaskRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, TaskRecord{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, TaskRecord{}, err
+	}
 	rec, ok := s.tasks[id]
 	if !ok {
 		return nil, TaskRecord{}, fmt.Errorf("%w: %q", ErrTaskNotFound, id)
+	}
+	if rec.Status != protocolcodec.TaskInputRequired {
+		if rec.Status == protocolcodec.TaskWorking {
+			return map[string]TaskInputResponse{}, cloneTaskRecord(rec), nil
+		}
+		return nil, cloneTaskRecord(rec), transitionError(rec.Status, protocolcodec.TaskInputRequired)
 	}
 	accepted := make(map[string]TaskInputResponse)
 	if rec.InputResponses == nil {
@@ -360,7 +494,10 @@ func cloneInputRequest(req InputRequest) InputRequest {
 }
 
 func cloneTaskRecord(rec TaskRecord) TaskRecord {
-	rec.Result.Payload = append(json.RawMessage(nil), rec.Result.Payload...)
+	rec.RequestedTTL = cloneInt64(rec.RequestedTTL)
+	rec.TTL = cloneInt64(rec.TTL)
+	rec.PollInterval = cloneInt64(rec.PollInterval)
+	rec.Result = cloneTaskResult(rec.Result)
 	requests := rec.InputRequests
 	responses := rec.InputResponses
 	rec.InputRequests = make(map[string]InputRequest, len(requests))
@@ -375,16 +512,45 @@ func cloneTaskRecord(rec TaskRecord) TaskRecord {
 	return rec
 }
 
+func cloneTaskResult(result TaskResult) TaskResult {
+	result.Payload = append(json.RawMessage(nil), result.Payload...)
+	return result
+}
+
+func cloneInt64(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func validateInputRequest(req InputRequest) error {
+	if req.Key == "" || !req.Method.valid() || len(req.Payload) == 0 || !json.Valid(req.Payload) {
+		return fmt.Errorf("%w: invalid input request", ErrInvalidParams)
+	}
+	if err := protocolcodec.ValidateModernInputRequest(string(req.Method), req.Payload); err != nil {
+		return fmt.Errorf("%w: invalid input request: %w", ErrInvalidParams, err)
+	}
+	return nil
+}
+
 // defaultPageSize bounds an in-memory tasks/list page when the caller passes
 // no explicit limit.
 const defaultPageSize = 50
 
-func (s *inMemoryStore) List(_ context.Context, cursor string, limit int) ([]TaskRecord, string, error) {
+func (s *inMemoryStore) List(ctx context.Context, cursor string, limit int) ([]TaskRecord, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
 	if limit <= 0 {
 		limit = defaultPageSize
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
 
 	// The cursor is the opaque, 1-past-the-end index into the stable insertion
 	// order. Requestors MUST treat it as opaque (vendored spec, "Task Listing"
@@ -406,7 +572,7 @@ func (s *inMemoryStore) List(_ context.Context, cursor string, limit int) ([]Tas
 	}
 	out := make([]TaskRecord, 0, end-start)
 	for _, id := range s.order[start:end] {
-		out = append(out, s.tasks[id])
+		out = append(out, cloneTaskRecord(s.tasks[id]))
 	}
 	return out, next, nil
 }
@@ -415,19 +581,25 @@ func (s *inMemoryStore) List(_ context.Context, cursor string, limit int) ([]Tas
 // authContext, in stable insertion order. The cursor is a 1-past-the-end index
 // into the *filtered* sequence — opaque to the caller, decoded only here.
 func (s *inMemoryStore) ListByAuthContext(
-	_ context.Context, authContext, cursor string, limit int,
+	ctx context.Context, authContext, cursor string, limit int,
 ) ([]TaskRecord, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
 	if limit <= 0 {
 		limit = defaultPageSize
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
 
 	// Build the auth-scoped view in insertion order.
 	scoped := make([]TaskRecord, 0, len(s.order))
 	for _, id := range s.order {
 		if rec := s.tasks[id]; rec.AuthContext == authContext {
-			scoped = append(scoped, rec)
+			scoped = append(scoped, cloneTaskRecord(rec))
 		}
 	}
 	start := 0
@@ -452,9 +624,15 @@ func (s *inMemoryStore) ListByAuthContext(
 
 // Delete removes a task from the in-memory store. It is idempotent: removing an
 // absent task is a nil-error no-op.
-func (s *inMemoryStore) Delete(_ context.Context, id string) error {
+func (s *inMemoryStore) Delete(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if _, ok := s.tasks[id]; !ok {
 		return nil
 	}
@@ -469,14 +647,20 @@ func (s *inMemoryStore) Delete(_ context.Context, id string) error {
 }
 
 // PurgeExpired reaps every record expired as of now and returns the count.
-func (s *inMemoryStore) PurgeExpired(_ context.Context, now time.Time) (int, error) {
+func (s *inMemoryStore) PurgeExpired(ctx context.Context, now time.Time) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	kept := s.order[:0:0]
 	purged := 0
 	for _, id := range s.order {
 		rec := s.tasks[id]
-		if rec.IsExpired(now) {
+		if rec.Status.IsTerminal() && rec.IsExpired(now) {
 			delete(s.tasks, id)
 			purged++
 			continue
@@ -485,4 +669,23 @@ func (s *inMemoryStore) PurgeExpired(_ context.Context, now time.Time) (int, err
 	}
 	s.order = kept
 	return purged, nil
+}
+
+func (s *inMemoryStore) ExpiredActive(ctx context.Context, now time.Time) ([]TaskRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]TaskRecord, 0)
+	for _, id := range s.order {
+		rec := s.tasks[id]
+		if !rec.Status.IsTerminal() && rec.IsExpired(now) {
+			out = append(out, cloneTaskRecord(rec))
+		}
+	}
+	return out, nil
 }

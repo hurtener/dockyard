@@ -127,7 +127,7 @@ None.
 
 - [x] `make drift-audit` passes
 - [x] `make check-mirror` passes
-- [ ] `make preflight` passes
+- [x] `make preflight` passes
 - [x] `go test -race ./...` and `golangci-lint run` clean
 - [x] All cross-references (`RFC §X.Y`, `brief NN`) resolve
 - [x] Coverage on touched packages ≥ stated target

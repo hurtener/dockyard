@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -122,6 +124,9 @@ func inspectLocalRefs(s *jsonschema.Schema, depth int, seen map[*jsonschema.Sche
 			if !strings.HasPrefix(ref, "#") {
 				return 0, 0, fmt.Errorf("%w: external %s %q is forbidden", ErrNonconformantSchema, keyword, ref)
 			}
+			if !validLocalSchemaRef(ref) {
+				return 0, 0, fmt.Errorf("%w: %s %q contains an invalid RFC 6901 pointer", ErrNonconformantSchema, keyword, ref)
+			}
 			refs++
 		}
 	}
@@ -173,27 +178,42 @@ func consumeParent(stack []scanFrame) {
 }
 
 func resolvedRootIsObject(s *jsonschema.Schema) bool {
-	if s.Type == "object" {
-		return true
+	return resolvedSchemaIsObject(s, s, make(map[*jsonschema.Schema]bool), 0)
+}
+
+func resolvedSchemaIsObject(root, s *jsonschema.Schema, path map[*jsonschema.Schema]bool, depth int) bool {
+	if s == nil || path[s] || depth > maxSchemaDepth {
+		return false
 	}
-	for _, typ := range s.Types {
-		if typ == "object" {
-			return true
+	path[s] = true
+	defer delete(path, s)
+	if s.Type != "" {
+		return s.Type == "object"
+	}
+	if len(s.Types) > 0 {
+		return len(s.Types) == 1 && s.Types[0] == "object"
+	}
+	ref := s.Ref
+	if ref == "" {
+		ref = s.DynamicRef
+	}
+	if ref != "" {
+		target, ok := resolveLocalSchemaRef(root, ref)
+		if !ok {
+			return false
 		}
-	}
-	if strings.HasPrefix(s.Ref, "#/$defs/") {
-		return resolvedRootIsObject(s.Defs[strings.TrimPrefix(s.Ref, "#/$defs/")])
+		return resolvedSchemaIsObject(root, target, path, depth+1)
 	}
 	if len(s.AllOf) > 0 {
 		for _, branch := range s.AllOf {
-			if resolvedRootIsObject(branch) {
+			if resolvedSchemaIsObject(root, branch, path, depth+1) {
 				return true
 			}
 		}
 	}
 	if len(s.AnyOf) > 0 {
 		for _, branch := range s.AnyOf {
-			if !resolvedRootIsObject(branch) {
+			if !resolvedSchemaIsObject(root, branch, path, depth+1) {
 				return false
 			}
 		}
@@ -201,11 +221,181 @@ func resolvedRootIsObject(s *jsonschema.Schema) bool {
 	}
 	if len(s.OneOf) > 0 {
 		for _, branch := range s.OneOf {
-			if !resolvedRootIsObject(branch) {
+			if !resolvedSchemaIsObject(root, branch, path, depth+1) {
 				return false
 			}
 		}
 		return true
 	}
 	return false
+}
+
+func resolveLocalSchemaRef(root *jsonschema.Schema, ref string) (*jsonschema.Schema, bool) {
+	if root == nil || !strings.HasPrefix(ref, "#") {
+		return nil, false
+	}
+	fragment, err := url.PathUnescape(strings.TrimPrefix(ref, "#"))
+	if err != nil {
+		return nil, false
+	}
+	if fragment == "" {
+		return root, true
+	}
+	if !strings.HasPrefix(fragment, "/") {
+		return findSchemaAnchor(root, fragment, make(map[*jsonschema.Schema]bool), 0)
+	}
+	tokens := strings.Split(strings.TrimPrefix(fragment, "/"), "/")
+	for i := range tokens {
+		if !validJSONPointerToken(tokens[i]) {
+			return nil, false
+		}
+		tokens[i] = strings.ReplaceAll(strings.ReplaceAll(tokens[i], "~1", "/"), "~0", "~")
+	}
+	return schemaAtPointer(root, tokens, 0)
+}
+
+func validLocalSchemaRef(ref string) bool {
+	fragment, err := url.PathUnescape(strings.TrimPrefix(ref, "#"))
+	if err != nil || fragment == "" || !strings.HasPrefix(fragment, "/") {
+		return err == nil
+	}
+	for _, token := range strings.Split(strings.TrimPrefix(fragment, "/"), "/") {
+		if !validJSONPointerToken(token) {
+			return false
+		}
+	}
+	return true
+}
+
+func validJSONPointerToken(token string) bool {
+	for i := 0; i < len(token); i++ {
+		if token[i] != '~' {
+			continue
+		}
+		if i+1 >= len(token) || token[i+1] != '0' && token[i+1] != '1' {
+			return false
+		}
+		i++
+	}
+	return true
+}
+
+func schemaAtPointer(current *jsonschema.Schema, tokens []string, depth int) (*jsonschema.Schema, bool) {
+	if current == nil || depth > maxSchemaDepth {
+		return nil, false
+	}
+	if len(tokens) == 0 {
+		return current, true
+	}
+	if len(tokens) == 1 {
+		var next *jsonschema.Schema
+		switch tokens[0] {
+		case "items":
+			next = current.Items
+		case "additionalItems":
+			next = current.AdditionalItems
+		case "contains":
+			next = current.Contains
+		case "unevaluatedItems":
+			next = current.UnevaluatedItems
+		case "additionalProperties":
+			next = current.AdditionalProperties
+		case "propertyNames":
+			next = current.PropertyNames
+		case "unevaluatedProperties":
+			next = current.UnevaluatedProperties
+		case "not":
+			next = current.Not
+		case "if":
+			next = current.If
+		case "then":
+			next = current.Then
+		case "else":
+			next = current.Else
+		case "contentSchema":
+			next = current.ContentSchema
+		default:
+			return nil, false
+		}
+		return schemaAtPointer(next, nil, depth+1)
+	}
+	var next *jsonschema.Schema
+	switch tokens[0] {
+	case "$defs":
+		next = current.Defs[tokens[1]]
+	case "definitions":
+		next = current.Definitions[tokens[1]]
+	case "properties":
+		next = current.Properties[tokens[1]]
+	case "patternProperties":
+		next = current.PatternProperties[tokens[1]]
+	case "dependentSchemas":
+		next = current.DependentSchemas[tokens[1]]
+	case "allOf", "anyOf", "oneOf", "prefixItems":
+		index, err := strconv.Atoi(tokens[1])
+		if err != nil || index < 0 {
+			return nil, false
+		}
+		var schemas []*jsonschema.Schema
+		switch tokens[0] {
+		case "allOf":
+			schemas = current.AllOf
+		case "anyOf":
+			schemas = current.AnyOf
+		case "oneOf":
+			schemas = current.OneOf
+		case "prefixItems":
+			schemas = current.PrefixItems
+		}
+		if index >= len(schemas) {
+			return nil, false
+		}
+		next = schemas[index]
+	default:
+		return nil, false
+	}
+	return schemaAtPointer(next, tokens[2:], depth+1)
+}
+
+func findSchemaAnchor(s *jsonschema.Schema, anchor string, seen map[*jsonschema.Schema]bool, depth int) (*jsonschema.Schema, bool) {
+	if s == nil || seen[s] || depth > maxSchemaDepth {
+		return nil, false
+	}
+	seen[s] = true
+	if s.Anchor == anchor || s.DynamicAnchor == anchor {
+		return s, true
+	}
+	for _, child := range schemaChildren(s) {
+		if target, ok := findSchemaAnchor(child, anchor, seen, depth+1); ok {
+			return target, true
+		}
+	}
+	return nil, false
+}
+
+func schemaChildren(s *jsonschema.Schema) []*jsonschema.Schema {
+	var children []*jsonschema.Schema
+	v := reflect.ValueOf(s).Elem()
+	schemaPtr := reflect.TypeFor[*jsonschema.Schema]()
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Field(i)
+		switch {
+		case field.Type() == schemaPtr && !field.IsNil():
+			children = append(children, field.Interface().(*jsonschema.Schema))
+		case field.Kind() == reflect.Slice && field.Type().Elem() == schemaPtr:
+			for j := 0; j < field.Len(); j++ {
+				if !field.Index(j).IsNil() {
+					children = append(children, field.Index(j).Interface().(*jsonschema.Schema))
+				}
+			}
+		case field.Kind() == reflect.Map && field.Type().Elem() == schemaPtr:
+			for _, key := range field.MapKeys() {
+				value := field.MapIndex(key)
+				if !value.IsNil() {
+					children = append(children, value.Interface().(*jsonschema.Schema))
+				}
+			}
+		}
+	}
+	return children
 }

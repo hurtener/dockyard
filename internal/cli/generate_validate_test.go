@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/hurtener/dockyard/internal/generate"
 )
 
 func TestRoot_HelpListsGenerateAndValidate(t *testing.T) {
@@ -15,6 +18,20 @@ func TestRoot_HelpListsGenerateAndValidate(t *testing.T) {
 		if !strings.Contains(out, verb) {
 			t.Errorf("root help does not list the %q command:\n%s", verb, out)
 		}
+	}
+}
+
+func TestPrintGenerateResultReportsRemovalsAsChanges(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	printGenerateResult(&out, generate.Result{
+		Written: []string{"internal/contracts/contracts.ts"},
+		Removed: []string{"internal/contracts/old_output.schema.json"},
+	})
+	if got := out.String(); !strings.Contains(got, "1 removed") ||
+		!strings.Contains(got, "removed  internal/contracts/old_output.schema.json") ||
+		strings.Contains(got, "no changes") {
+		t.Fatalf("generate output did not report removal:\n%s", got)
 	}
 }
 

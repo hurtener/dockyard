@@ -3,11 +3,17 @@ package inspector
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
+	"mime"
+	"net"
 	"net/http"
 	"strings"
 )
+
+const maxInspectorJSONBody = 1 << 20
 
 // placeholderHTML is served at "/" when no built web/inspector frontend is
 // embedded. It keeps the Go backend usable before `vite build` has run — the Go
@@ -132,9 +138,7 @@ func newMux(opts Options, log *slog.Logger) http.Handler {
 		}
 
 		var req InvokeRequest
-		dec := json.NewDecoder(r.Body)
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&req); err != nil {
+		if err := decodeInspectorJSON(w, r, &req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"error": "invalid tools/invoke body: " + err.Error(),
@@ -187,9 +191,7 @@ func newMux(opts Options, log *slog.Logger) http.Handler {
 		}
 
 		var req ElicitationRequest
-		dec := json.NewDecoder(r.Body)
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&req); err != nil {
+		if err := decodeInspectorJSON(w, r, &req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"error": "invalid tasks/elicitation body: " + err.Error(),
@@ -283,9 +285,7 @@ func newMux(opts Options, log *slog.Logger) http.Handler {
 		}
 
 		var req PromptGetRequest
-		dec := json.NewDecoder(r.Body)
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&req); err != nil {
+		if err := decodeInspectorJSON(w, r, &req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"error": "invalid prompts/get body: " + err.Error(),
@@ -336,7 +336,73 @@ func newMux(opts Options, log *slog.Logger) http.Handler {
 	// The web/inspector frontend (its built dist/ tree), or a placeholder.
 	mux.Handle("/", frontendHandler(opts.Assets, log))
 
-	return mux
+	// The inspector is loopback-bound, but a remote web page can still send a
+	// browser request to loopback. Origin protection preserves the requirement
+	// that mutating-shaped calls are initiated from the inspector UI itself.
+	return antiFramingHeaders(requireLoopbackHost(http.NewCrossOriginProtection().Handler(requireJSONPosts(mux))))
+}
+
+func antiFramingHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		w.Header().Set("X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func requireLoopbackHost(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if parsed, _, err := net.SplitHostPort(host); err == nil {
+			host = parsed
+		} else if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+			host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+		} else if strings.Contains(host, ":") {
+			http.Error(w, "inspector requires a loopback Host", http.StatusForbidden)
+			return
+		}
+		host = strings.TrimSuffix(strings.ToLower(host), ".")
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			http.Error(w, "inspector requires a loopback Host", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func decodeInspectorJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxInspectorJSONBody)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("request body must contain exactly one JSON value")
+		}
+		return fmt.Errorf("request body contains trailing data: %w", err)
+	}
+	return nil
+}
+
+func requireJSONPosts(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			if err != nil || !strings.EqualFold(mediaType, "application/json") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnsupportedMediaType)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"error": "inspector API POST bodies must use Content-Type application/json",
+				})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // loadApps invokes the configured App source, tolerating a nil source. A nil

@@ -3,6 +3,8 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,7 +48,7 @@ func TestPhase35ScaffoldDualHTTPLifecycle(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var stderr bytes.Buffer
+	var stderr synchronizedBuffer
 	cmd := exec.CommandContext(ctx, bin) //nolint:gosec // generated test binary
 	cmd.Dir = res.Dir
 	cmd.Env = append(os.Environ(), "DOCKYARD_TRANSPORT=http", "DOCKYARD_HTTP_ADDR="+addr)
@@ -63,7 +66,14 @@ func TestPhase35ScaffoldDualHTTPLifecycle(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "phase35-test", Version: "1"}, nil)
-		session, err = client.Connect(context.Background(), &mcpsdk.StreamableClientTransport{Endpoint: endpoint}, nil)
+		strictModernClient := &http.Client{
+			Timeout:   5 * time.Second,
+			Transport: strictModernRoundTripper{base: http.DefaultTransport},
+		}
+		session, err = client.Connect(context.Background(), &mcpsdk.StreamableClientTransport{
+			Endpoint:   endpoint,
+			HTTPClient: strictModernClient,
+		}, nil)
 		if err == nil {
 			break
 		}
@@ -93,6 +103,50 @@ func TestPhase35ScaffoldDualHTTPLifecycle(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || resp.Header.Get("Mcp-Session-Id") == "" {
 		t.Fatalf("legacy initialize status/session/body = %d/%q/%s", resp.StatusCode, resp.Header.Get("Mcp-Session-Id"), raw)
 	}
+}
+
+// synchronizedBuffer permits failure diagnostics while exec.Cmd may still be
+// copying the child process's stderr into the buffer.
+type synchronizedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *synchronizedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *synchronizedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// strictModernRoundTripper keeps the real SDK discovery path but rejects its
+// heuristic initialize fallback. A transient startup failure must make the
+// probe retry server/discover, not turn a modern acceptance check into a
+// successful legacy connection.
+type strictModernRoundTripper struct {
+	base http.RoundTripper
+}
+
+func (t strictModernRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Body != nil {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		var envelope struct {
+			Method string `json:"method"`
+		}
+		if json.Unmarshal(body, &envelope) == nil && envelope.Method == "initialize" {
+			return nil, errors.New("phase35 modern probe rejected SDK legacy initialize fallback")
+		}
+	}
+	return t.base.RoundTrip(req)
 }
 
 func phase35RepoRoot(t *testing.T) string {

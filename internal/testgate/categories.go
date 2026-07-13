@@ -69,6 +69,17 @@ func runContract(projectDir string, m *manifest.Manifest) Result {
 	}
 
 	var drift []string
+	if ownershipErr := generate.CheckOwnershipIndex(projectDir, planned); ownershipErr != nil {
+		drift = append(drift, fmt.Sprintf("generated artifact ownership index is stale: %v", ownershipErr))
+	}
+	orphans, orphanErr := generate.FindOrphanedArtifacts(projectDir, planned)
+	if orphanErr != nil {
+		drift = append(drift, fmt.Sprintf("obsolete generated-file scan failed: %v", orphanErr))
+	} else {
+		for _, rel := range orphans {
+			drift = append(drift, fmt.Sprintf("%s is an obsolete generated artifact", rel))
+		}
+	}
 	for _, rel := range sortedKeys(planned) {
 		full := filepath.Join(projectDir, filepath.FromSlash(rel))
 		onDisk, readErr := os.ReadFile(full) //nolint:gosec // path composed from a caller-supplied project dir
@@ -342,8 +353,9 @@ func contractTypeName(t manifest.Tool, side string) string {
 	if side == "output" {
 		ref = t.Output
 	}
-	if i := strings.LastIndex(ref, "."); i >= 0 && i+1 < len(ref) {
-		return ref[i+1:]
+	parsed, err := manifest.ParseContractReference(ref)
+	if err == nil && parsed.Package == generate.ContractsDir {
+		return parsed.TypeName
 	}
 	return ""
 }

@@ -308,6 +308,19 @@ func checkStaleCodegen(rp *reporter, projectDir string, lm loadedManifest) {
 		rp.block(CheckStaleCodegen, "codegen could not run: %v", err)
 		return
 	}
+	if err := generate.CheckOwnershipIndex(projectDir, planned); err != nil {
+		rp.block(CheckStaleCodegen, "generated artifact ownership index is stale: %v", err)
+		return
+	}
+	orphans, err := generate.FindOrphanedArtifacts(projectDir, planned)
+	if err != nil {
+		rp.block(CheckStaleCodegen, "obsolete generated-file scan failed: %v", err)
+		return
+	}
+	for _, rel := range orphans {
+		rp.block(CheckStaleCodegen,
+			"generated file %s is obsolete — run `dockyard generate` to remove it", rel)
+	}
 	for rel, fresh := range planned {
 		full := filepath.Join(projectDir, filepath.FromSlash(rel))
 		onDisk, err := os.ReadFile(full) //nolint:gosec // path composed from a caller-supplied project dir
@@ -401,8 +414,9 @@ func contractTypeName(t manifest.Tool, side string) string {
 	if side == "output" {
 		ref = t.Output
 	}
-	if i := strings.LastIndex(ref, "."); i >= 0 && i+1 < len(ref) {
-		return ref[i+1:]
+	parsed, err := manifest.ParseContractReference(ref)
+	if err == nil && parsed.Package == generate.ContractsDir {
+		return parsed.TypeName
 	}
 	return ""
 }

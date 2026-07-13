@@ -65,6 +65,25 @@ func TestInMemoryStore_GetUnknown(t *testing.T) {
 	}
 }
 
+func TestTaskProjectionClonesScalarPointers(t *testing.T) {
+	t.Parallel()
+	requested, ttl, poll := int64(1), int64(2), int64(3)
+	rec := workingRecord("t")
+	rec.RequestedTTL, rec.TTL, rec.PollInterval = &requested, &ttl, &poll
+	task := rec.Task()
+	*task.TTL = 20
+	*task.PollInterval = 30
+	if *rec.TTL != 2 || *rec.PollInterval != 3 {
+		t.Fatalf("task projection aliases record pointers: %#v", rec)
+	}
+	rec.TTL = nil
+	task = rec.Task()
+	*task.TTL = 10
+	if *rec.RequestedTTL != 1 {
+		t.Fatal("fallback requested TTL pointer was not cloned")
+	}
+}
+
 // TestInMemoryStore_LifecycleEnforcement is the binding lifecycle-transition
 // table: every legal transition succeeds, every illegal one is a typed error.
 func TestInMemoryStore_LifecycleEnforcement(t *testing.T) {

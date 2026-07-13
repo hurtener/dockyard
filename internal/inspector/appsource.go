@@ -2,6 +2,7 @@ package inspector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -78,8 +79,9 @@ func readServerApps(ctx context.Context, baseURL string) ([]AppPreview, error) {
 		&mcpsdk.Implementation{Name: "dockyard-inspector", Version: "0.1.0"},
 		nil,
 	)
+	httpClient := modernFirstHTTPClient(appReadTimeout, nil, true)
 	session, err := client.Connect(ctx,
-		&mcpsdk.StreamableClientTransport{Endpoint: baseURL}, nil)
+		&mcpsdk.StreamableClientTransport{Endpoint: baseURL, HTTPClient: httpClient}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("dockyard/internal/inspector: connect %q: %w", baseURL, err)
 	}
@@ -88,6 +90,9 @@ func readServerApps(ctx context.Context, baseURL string) ([]AppPreview, error) {
 	list, err := session.ListResources(ctx, &mcpsdk.ListResourcesParams{})
 	if err != nil {
 		return nil, fmt.Errorf("dockyard/internal/inspector: resources/list: %w", err)
+	}
+	if list == nil {
+		return nil, errors.New("dockyard/internal/inspector: resources/list returned no result")
 	}
 
 	apps := make([]AppPreview, 0)
@@ -122,6 +127,9 @@ func readResourceHTML(
 	res, err := session.ReadResource(ctx, &mcpsdk.ReadResourceParams{URI: uri})
 	if err != nil {
 		return "", fmt.Errorf("dockyard/internal/inspector: resources/read %q: %w", uri, err)
+	}
+	if res == nil {
+		return "", fmt.Errorf("dockyard/internal/inspector: resources/read %q returned no result", uri)
 	}
 	for _, c := range res.Contents {
 		if c != nil && c.Text != "" {

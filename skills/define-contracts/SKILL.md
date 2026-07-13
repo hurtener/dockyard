@@ -27,18 +27,26 @@ The conventional location is `internal/contracts/`:
 ```text
 internal/
   contracts/
-    contracts.go          # the typed Go structs — the source of truth
-    contracts.gen.json    # GENERATED — JSON Schema, one entry per tool
-web/
-  src/
-    generated/
-      contracts.ts        # GENERATED — TypeScript types for the App
+    contracts.go                 # typed Go structs — source of truth
+    greet_input.schema.json      # GENERATED — per-tool input schema
+    greet_output.schema.json     # GENERATED — per-tool output schema
+    contracts.ts                 # GENERATED — App-facing TypeScript
+.dockyard/
+  generated-artifacts.json       # GENERATED — owned paths + SHA-256 digests
 ```
+
+This location is required for manifest tool contracts, not merely a convention:
+every `tools[].input` and `tools[].output` reference must use
+`internal/contracts.<TypeName>`. That invariant keeps the single generated
+`contracts.ts` complete for every App.
 
 Two rules:
 
-- **Never edit `*.gen.*`** — `dockyard validate` fails on hand-edited
-  generated files (stale-codegen drift, RFC §6.2).
+- **Never edit generated schemas, `contracts.ts`, or the ownership index** —
+  `dockyard validate` fails on hand-edited or incomplete generated state
+  (stale-codegen drift, RFC §6.2).
+  The ownership index is byte-canonical, so unknown fields, record reordering,
+  and formatting-only edits are rejected too.
 - **Always run `dockyard generate` after a contract change** —
   `dockyard build` does it for you; in `dockyard dev` it runs
   automatically on a contract file change.
@@ -73,6 +81,11 @@ The conventions that pay off downstream:
   the model.
 - **Use `omitempty` for optional fields.** Read as "may be absent" by the
   codegen, which marks the field optional in the schema.
+- **Use `,string` only for scalar wire strings.** Booleans, strings, integers,
+  floats, and one unnamed pointer to those scalar types are supported. Pointer
+  fields stay nullable, and `omitempty` also makes them optional. Aggregate,
+  interface, named-pointer, and deeper-pointer uses fail generation because
+  `encoding/json` does not quote them.
 - **Prefer named scalar types for constrained values.** A `ChartType`
   named type with documented allowed values guides the model toward the
   right input; the App's TypeScript gets a typed union.
@@ -102,9 +115,29 @@ What happens:
 
 - For every tool in `dockyard.app.yaml`, the codegen reads the Go input
   and output struct types named in `input:` / `output:` and produces:
-  - The JSON Schema (in the project's contracts package as a generated
-    `.gen.json`).
-  - The TypeScript types (in `web/src/generated/contracts.ts`).
+  - `<tool>_input.schema.json` and `<tool>_output.schema.json` in the
+    project's contracts package.
+  - The combined TypeScript types in `internal/contracts/contracts.ts`.
+  - `.dockyard/generated-artifacts.json`, which records each current
+    generated path and its SHA-256 digest.
+- Backend-only projects keep the same `internal/contracts/contracts.ts` output;
+  UI-bearing projects import that canonical artifact rather than generating a
+  second copy under `web/`.
+- Obsolete generated files are removed conservatively. Dockyard only deletes an
+  indexed path in a recognized generated namespace when its bytes still match
+  the recorded digest and its generated marker is valid. It refuses to delete a
+  modified artifact, follow a symlink, cross into a nested project, or act on an
+  arbitrary indexed project file. Publication is rooted at the project
+  directory, so a concurrent symlink swap cannot redirect a write outside it.
+- Imported types are expanded to their JSON wire shape, including named
+  declarations for recursive structs and the standard-library types supported
+  by the schema engine. Canonical and imported types implementing
+  `json.Marshaler` or `encoding.TextMarshaler` are generation errors unless
+  Dockyard has an explicit wire-shape override; value and pointer receivers are
+  both checked. Expose an explicit contract wire type instead.
+  `math/big.Int`, `math/big.Rat`, and `math/big.Float` are rejected because
+  their JSON shapes are addressability-dependent; use explicit integer or
+  decimal string fields.
 - The output is byte-deterministic: rerun with no source change ⇒ no
   diff (RFC §6.2 — idempotence is part of P1).
 - JSON Schema output declares draft 2020-12. References are local-only;
@@ -114,8 +147,8 @@ What happens:
 If `dockyard generate` fails:
 
 - **"unknown type ref"** — the manifest's `input:` / `output:` field
-  doesn't resolve. Check the Go package path matches your contracts
-  package's import path.
+  doesn't resolve. Use `internal/contracts.<TypeName>` and confirm the exported
+  Go type exists in that package.
 - **"unsupported field type"** — Dockyard's codegen handles the common
   JSON-compatible Go types. Replace `time.Time` with `string` (ISO 8601)
   or `int64`, channels with serializable shapes, etc.
@@ -145,9 +178,12 @@ relevant ones:
 
 - **Stale codegen** — the generated JSON Schema or TypeScript no longer
   matches the Go contract. Run `dockyard generate` to fix.
+- **Stale ownership index** — a current generated path or digest is absent or
+  stale, or an obsolete indexed artifact remains. Run `dockyard generate`; do
+  not repair the index by hand.
 - **`CrossCheck`** (D-113) — the JSON Schema and TypeScript that
   `dockyard generate` would produce *right now* match what's on disk.
-  Catches a developer who edited `*.gen.*` by hand. `dockyard build`
+  Catches a developer who edited a generated artifact by hand. `dockyard build`
   defends by regenerating before building.
 - **Hand-edited generated files** — a generated file modified by hand is
   rejected; the standard fix is to revert and re-author the underlying Go
@@ -180,7 +216,8 @@ lies (brief 04 §2.6). Dockyard catches that drift at `dockyard validate`
 
 ## Common pitfalls
 
-- **Editing a `*.gen.*` file.** Don't. Edit the Go struct and
+- **Editing a generated schema, `contracts.ts`, or the ownership index.** Don't.
+  Edit the Go struct and
   regenerate.
 - **Forgetting `omitempty` on an optional field.** The schema then
   requires the field, and a host that omits it gets a validation error

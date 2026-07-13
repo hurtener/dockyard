@@ -69,7 +69,10 @@ Vite is the Svelte build tool in 2026. Integration facts:
 
 - **`dev` mode:** Vite dev server runs on its own port with HMR; the Go server proxies UI requests to it (or the inspector iframe points at the Vite URL). Generated `vite.config.ts` sets `base: './'` so embedded assets resolve with relative paths.
 - **`build` mode:** `vite build` → static `web/dist` → consumed by `//go:embed`.
-- The braindump's `web/src/generated/contracts.ts` is a *Vite source input*, so codegen must run **before** `vite build` and **before/while** the Vite dev server is running.
+- The generated `internal/contracts/contracts.ts` is imported as a *Vite source
+  input* by UI-bearing projects, so codegen must run **before** `vite build` and
+  **before/while** the Vite dev server is running. Backend-only projects retain
+  the same canonical output path without requiring a `web/` tree (D-198).
 
 ### 2.8 The no-CGo constraint and persistence
 
@@ -89,7 +92,7 @@ The naive pipeline `Go → JSON Schema → TS` is attractive (one schema, two co
                     ┌─ google/jsonschema-go .For() ──► contracts.schema.json  (MCP wire contract)
 internal/contracts  │
   *.go  (SoT)  ──────┤
-                    └─ tygo ───────────────────────────► web/src/generated/contracts.ts (UI types)
+                    └─ tygo ───────────────────────────► internal/contracts/contracts.ts (UI types)
 ```
 
 Go structs are the SoT. Schema and TS are generated *independently from Go*, each by a pure-Go tool. `dockyard validate` then **cross-checks** schema vs. TS for drift (compile-time TS check + a schema-shape assertion). No Node dependency in the codegen path.
@@ -101,11 +104,11 @@ Go structs are the SoT. Schema and TS are generated *independently from Go*, eac
 ```go
 // dockyard generate (sketch)
 schema, err := jsonschema.For[contracts.ShowRevenueOutput](nil) // google/jsonschema-go
-// → write internal/contracts/generated.schema.json
+// → write internal/contracts/show_revenue_output.schema.json
 
 cfg := &tygo.Config{Packages: []*tygo.PackageConfig{{
     Path:       "github.com/acme/revenue-dashboard/internal/contracts",
-    OutputPath: "web/src/generated/contracts.ts",
+    OutputPath: "internal/contracts/contracts.ts",
     TypeMappings: map[string]string{"time.Time": "string"},
 }}}
 gen := tygo.New(cfg); err = gen.Generate()

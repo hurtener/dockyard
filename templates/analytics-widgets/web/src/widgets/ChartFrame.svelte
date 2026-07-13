@@ -15,12 +15,10 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import * as echarts from 'echarts';
-
-  type Series = { name: string; values: number[] };
-  type ChartData = { series: Series[]; categories?: string[] };
+  import type { ChartData, ChartType } from '../../../internal/contracts/contracts.js';
 
   interface Props {
-    type: string;
+    type: ChartType;
     data: ChartData;
     options?: Record<string, unknown>;
     theme: 'light' | 'dark';

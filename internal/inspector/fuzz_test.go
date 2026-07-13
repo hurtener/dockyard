@@ -96,6 +96,7 @@ func FuzzInspectorMux(f *testing.F) {
 					}
 				}()
 				req := httptest.NewRequest(ep.method, ep.path, bytes.NewReader(body))
+				req.Host = "127.0.0.1"
 				if ep.method == http.MethodPost {
 					req.Header.Set("Content-Type", "application/json")
 				}

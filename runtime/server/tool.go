@@ -335,6 +335,11 @@ func addToolWithSchemasCore[In, Out any](
 			var zero Out
 			return nil, zero, err
 		}
+		if result.CreatedTask != nil && (len(result.InputRequests) > 0 || result.RequestState != "") {
+			err := errors.New("dockyard/runtime/server: ToolOutput cannot combine core MRTR continuation with CreatedTask")
+			var zero Out
+			return nil, zero, err
+		}
 		// Populate Content explicitly so the model-facing text is the
 		// handler's Text — the SDK only auto-fills Content with the JSON of
 		// the output when Content is left unset (RFC §6.3).

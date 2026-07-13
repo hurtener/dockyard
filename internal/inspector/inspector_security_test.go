@@ -1,8 +1,14 @@
 package inspector
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -118,4 +124,134 @@ func looksLikeLoopback(addr string) bool {
 	return strings.HasPrefix(addr, "127.") ||
 		strings.HasPrefix(addr, "[::1]") ||
 		strings.HasPrefix(addr, "::1")
+}
+
+func TestInspectorAPIRejectsCrossOriginAndNonJSONPosts(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	mux := newMux(Options{Invoker: func(context.Context, InvokeRequest) (*InvokeResponse, error) {
+		calls.Add(1)
+		return &InvokeResponse{}, nil
+	}}, slog.New(slog.DiscardHandler))
+
+	tests := []struct {
+		name        string
+		origin      string
+		contentType string
+		wantStatus  int
+	}{
+		{name: "cross-origin simple request", origin: "https://attacker.example", contentType: "text/plain", wantStatus: http.StatusForbidden},
+		{name: "same-origin non-json request", contentType: "text/plain", wantStatus: http.StatusUnsupportedMediaType},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/tools/invoke",
+				bytes.NewBufferString(`{"tool":"dangerous","arguments":{}}`))
+			req.Header.Set("Content-Type", tt.contentType)
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
+			res := httptest.NewRecorder()
+			mux.ServeHTTP(res, req)
+			if res.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", res.Code, tt.wantStatus, res.Body.String())
+			}
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("invoker called %d times for rejected requests", calls.Load())
+	}
+}
+
+func TestInspectorRejectsNonLoopbackHostBeforeOriginCheck(t *testing.T) {
+	t.Parallel()
+	mux := newMux(Options{}, slog.New(slog.DiscardHandler))
+	for _, tc := range []struct {
+		host       string
+		origin     string
+		wantStatus int
+	}{
+		{host: "127.0.0.1:8080", wantStatus: http.StatusOK},
+		{host: "[::1]:8080", wantStatus: http.StatusOK},
+		{host: "[::1]", wantStatus: http.StatusOK},
+		{host: "localhost:8080", wantStatus: http.StatusOK},
+		{host: "LOCALHOST.:8080", wantStatus: http.StatusOK},
+		{host: "attacker.example:8080", origin: "http://attacker.example:8080", wantStatus: http.StatusForbidden},
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/info", nil)
+			req.Host = tc.host
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			res := httptest.NewRecorder()
+			mux.ServeHTTP(res, req)
+			if res.Code != tc.wantStatus {
+				t.Fatalf("Host %q status = %d, want %d", tc.host, res.Code, tc.wantStatus)
+			}
+		})
+	}
+}
+
+func TestInspectorResponsesCannotBeFramed(t *testing.T) {
+	t.Parallel()
+	mux := newMux(Options{}, slog.New(slog.DiscardHandler))
+	for _, host := range []string{"127.0.0.1:8080", "attacker.example:8080"} {
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/info", nil)
+		req.Host = host
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, req)
+		if got := res.Header().Get("Content-Security-Policy"); got != "frame-ancestors 'none'" {
+			t.Errorf("Host %q CSP = %q", host, got)
+		}
+		if got := res.Header().Get("X-Frame-Options"); got != "DENY" {
+			t.Errorf("Host %q X-Frame-Options = %q", host, got)
+		}
+	}
+}
+
+func TestInspectorJSONPostsRejectTrailingAndOversizedBodies(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	mux := newMux(Options{
+		Invoker: func(context.Context, InvokeRequest) (*InvokeResponse, error) {
+			calls.Add(1)
+			return &InvokeResponse{}, nil
+		},
+		Elicitor: func(context.Context, ElicitationRequest) (*ElicitationResponse, error) {
+			calls.Add(1)
+			return &ElicitationResponse{}, nil
+		},
+		PromptInvoker: func(context.Context, PromptGetRequest) (*PromptGetResponse, error) {
+			calls.Add(1)
+			return &PromptGetResponse{}, nil
+		},
+	}, slog.New(slog.DiscardHandler))
+
+	large := strings.Repeat("x", maxInspectorJSONBody+1)
+	for _, tc := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "invoke trailing", path: "/api/tools/invoke", body: `{"tool":"echo","arguments":{}} {}`},
+		{name: "elicitation trailing", path: "/api/tasks/elicitation", body: `{"protocol":"2026-07-28","taskId":"t","inputResponses":{}} {}`},
+		{name: "prompt trailing", path: "/api/prompts/get", body: `{"name":"hello","arguments":{}} {}`},
+		{name: "invoke oversized", path: "/api/tools/invoke", body: `{"tool":"` + large + `"}`},
+		{name: "elicitation oversized", path: "/api/tasks/elicitation", body: `{"protocol":"2026-07-28","taskId":"` + large + `","inputResponses":{}}`},
+		{name: "prompt oversized", path: "/api/prompts/get", body: `{"name":"` + large + `"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1"+tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			res := httptest.NewRecorder()
+			mux.ServeHTTP(res, req)
+			if res.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", res.Code, http.StatusBadRequest, res.Body.String())
+			}
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("mutating callback called %d times for rejected bodies", calls.Load())
+	}
 }

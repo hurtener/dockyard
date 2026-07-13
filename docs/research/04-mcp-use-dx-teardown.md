@@ -119,7 +119,7 @@ Dockyard ships **one statically-linked CGo-free binary** (`dockyard`). No `npx`,
 dockyard new <name> --template <t>   # scaffold; -t analytical-card | approval-flow | inspector (V1)
 dockyard dev                         # MCP server + Svelte dev server + local host simulator
                                      #   + schema watcher + contract typegen, all one process
-dockyard generate                    # regenerate JSON Schema + web/src/generated/contracts.ts
+dockyard generate                    # regenerate schemas + internal/contracts/contracts.ts
                                      #   from Go contract structs (also runs inside `dev`)
 dockyard validate                    # manifest, schemas, tool→UI mappings, MIME, host-compat,
                                      #   stale-typegen, required UI states — exit non-zero on fail

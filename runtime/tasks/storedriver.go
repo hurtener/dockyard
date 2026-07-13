@@ -96,9 +96,9 @@ func rowFromRecord(r TaskRecord) taskRow {
 		StatusMessage:  r.StatusMessage,
 		CreatedAt:      r.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:      r.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		RequestedTTL:   r.RequestedTTL,
-		TTL:            r.TTL,
-		PollInterval:   r.PollInterval,
+		RequestedTTL:   cloneInt64(r.RequestedTTL),
+		TTL:            cloneInt64(r.TTL),
+		PollInterval:   cloneInt64(r.PollInterval),
 		Method:         r.Method,
 		ToolName:       r.ToolName,
 		AuthContext:    r.AuthContext,
@@ -161,6 +161,10 @@ type durableStore struct {
 	st store.Store
 }
 
+// TaskStoreCoordinationIdentity makes independently constructed task-store
+// facades over the same Store backend share process-local lifecycle routing.
+func (d *durableStore) TaskStoreCoordinationIdentity() any { return d.st }
+
 // schemaMarkerKey is the reserved key holding the schema-version marker; it is
 // never a task ID (a task ID is "task_" + 32 hex chars — see CryptoID).
 const schemaMarkerKey = "__schema__"
@@ -182,6 +186,10 @@ func NewStore(s store.Store) (TaskStore, error) {
 }
 
 func (d *durableStore) Create(ctx context.Context, rec TaskRecord) error {
+	return d.CreateWithConcurrencyLimit(ctx, rec, 0)
+}
+
+func (d *durableStore) CreateWithConcurrencyLimit(ctx context.Context, rec TaskRecord, limit int) error {
 	if rec.ID == "" {
 		return fmt.Errorf("%w: task record has empty ID", ErrInvalidParams)
 	}
@@ -200,6 +208,21 @@ func (d *durableStore) Create(ctx context.Context, rec TaskRecord) error {
 			return fmt.Errorf("dockyard/runtime/tasks: task %q already exists", rec.ID)
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return err
+		}
+		if limit > 0 {
+			recs, err := scanRecords(tx)
+			if err != nil {
+				return err
+			}
+			active := 0
+			for _, existing := range recs {
+				if existing.AuthContext == rec.AuthContext && !existing.Status.IsTerminal() {
+					active++
+				}
+			}
+			if active >= limit {
+				return fmt.Errorf("%w: requestor has %d active tasks, the per-requestor cap is %d", ErrConcurrencyCap, active, limit)
+			}
 		}
 		return tx.Put(taskStoreNamespace, rec.ID, row)
 	})
@@ -298,10 +321,46 @@ func (d *durableStore) SetResult(ctx context.Context, id string, result TaskResu
 	})
 }
 
-func (d *durableStore) AddInputRequest(ctx context.Context, id string, req InputRequest) error {
-	if req.Key == "" || !req.Method.valid() || len(req.Payload) == 0 || !json.Valid(req.Payload) {
-		return fmt.Errorf("%w: invalid input request", ErrInvalidParams)
+func (d *durableStore) Finalize(
+	ctx context.Context, id string, status protocolcodec.TaskStatus, msg string, result TaskResult,
+) (TaskRecord, bool, error) {
+	if !status.IsTerminal() {
+		return TaskRecord{}, false, transitionError("", status)
 	}
+	var out TaskRecord
+	applied := false
+	err := d.st.Update(ctx, func(tx store.Tx) error {
+		rec, err := readRow(tx, id)
+		if err != nil {
+			return err
+		}
+		if rec.Status.IsTerminal() {
+			out = cloneTaskRecord(rec)
+			return nil
+		}
+		if !rec.Status.CanTransitionTo(status) {
+			return transitionError(rec.Status, status)
+		}
+		rec.Status = status
+		rec.StatusMessage = msg
+		rec.Result = cloneTaskResult(result)
+		rec.InputRequests = nil
+		rec.UpdatedAt = time.Now().UTC()
+		row, err := json.Marshal(rowFromRecord(rec))
+		if err != nil {
+			return fmt.Errorf("dockyard/runtime/tasks: encode task row: %w", err)
+		}
+		if err := tx.Put(taskStoreNamespace, id, row); err != nil {
+			return err
+		}
+		out = cloneTaskRecord(rec)
+		applied = true
+		return nil
+	})
+	return out, applied, err
+}
+
+func (d *durableStore) AddInputRequest(ctx context.Context, id string, req InputRequest) error {
 	return d.st.Update(ctx, func(tx store.Tx) error {
 		rec, err := readRow(tx, id)
 		if err != nil {
@@ -315,6 +374,9 @@ func (d *durableStore) AddInputRequest(ctx context.Context, id string, req Input
 		}
 		if _, ok := rec.InputResponses[req.Key]; ok {
 			return fmt.Errorf("%w: %q", ErrDuplicateInputKey, req.Key)
+		}
+		if err := validateInputRequest(req); err != nil {
+			return err
 		}
 		if rec.InputRequests == nil {
 			rec.InputRequests = make(map[string]InputRequest)
@@ -337,6 +399,13 @@ func (d *durableStore) ApplyInputResponses(ctx context.Context, id string, respo
 		rec, err := readRow(tx, id)
 		if err != nil {
 			return err
+		}
+		if rec.Status != protocolcodec.TaskInputRequired {
+			out = cloneTaskRecord(rec)
+			if rec.Status == protocolcodec.TaskWorking {
+				return nil
+			}
+			return transitionError(rec.Status, protocolcodec.TaskInputRequired)
 		}
 		if rec.InputResponses == nil {
 			rec.InputResponses = make(map[string]TaskInputResponse)
@@ -480,7 +549,7 @@ func (d *durableStore) PurgeExpired(ctx context.Context, now time.Time) (int, er
 		}
 		purged = 0
 		for _, rec := range recs {
-			if rec.IsExpired(now) {
+			if rec.Status.IsTerminal() && rec.IsExpired(now) {
 				if err := tx.Delete(taskStoreNamespace, rec.ID); err != nil {
 					return err
 				}
@@ -493,4 +562,22 @@ func (d *durableStore) PurgeExpired(ctx context.Context, now time.Time) (int, er
 		return 0, err
 	}
 	return purged, nil
+}
+
+func (d *durableStore) ExpiredActive(ctx context.Context, now time.Time) ([]TaskRecord, error) {
+	var expired []TaskRecord
+	err := d.st.View(ctx, func(tx store.Tx) error {
+		recs, err := scanRecords(tx)
+		if err != nil {
+			return err
+		}
+		expired = make([]TaskRecord, 0)
+		for _, rec := range recs {
+			if !rec.Status.IsTerminal() && rec.IsExpired(now) {
+				expired = append(expired, cloneTaskRecord(rec))
+			}
+		}
+		return nil
+	})
+	return expired, err
 }

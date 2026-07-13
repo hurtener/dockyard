@@ -2,12 +2,16 @@ package tasks
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/hurtener/dockyard/internal/protocolcodec"
+	"github.com/hurtener/dockyard/runtime/obs"
+	storeinmem "github.com/hurtener/dockyard/runtime/store/inmem"
 )
 
 // TestLifecycle_EnforcedTTL is the TTL-clamping table: a requested TTL above
@@ -161,7 +165,7 @@ func TestPurgeSweep_ReapsExpiredTasks(t *testing.T) {
 	store := NewInMemoryStore()
 	now := time.Now().UTC()
 
-	// Seed an already-expired task and a live one directly.
+	// Seed an already-expired terminal task and a live one directly.
 	expired := TaskRecord{
 		ID: "expired", Status: protocolcodec.TaskWorking,
 		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
@@ -169,6 +173,9 @@ func TestPurgeSweep_ReapsExpiredTasks(t *testing.T) {
 	}
 	if err := store.Create(context.Background(), expired); err != nil {
 		t.Fatalf("Create expired: %v", err)
+	}
+	if _, _, err := store.(AtomicFinalizeTaskStore).Finalize(context.Background(), expired.ID, protocolcodec.TaskCompleted, "done", TaskResult{Payload: []byte(`{}`)}); err != nil {
+		t.Fatalf("Finalize expired: %v", err)
 	}
 	live := TaskRecord{
 		ID: "live", Status: protocolcodec.TaskWorking,
@@ -214,6 +221,7 @@ func TestPurgeSweep_StopIsCleanAndIdempotent(t *testing.T) {
 	s1 := newPurgeSweep(NewInMemoryStore(), time.Millisecond, quietLogger())
 	s1.Stop()
 	s1.Stop()
+	s1.Start(context.Background()) // stopped sweeps cannot be restarted
 
 	// Stop after Start, twice.
 	s2 := newPurgeSweep(NewInMemoryStore(), time.Millisecond, quietLogger())
@@ -225,6 +233,593 @@ func TestPurgeSweep_StopIsCleanAndIdempotent(t *testing.T) {
 	var nilSweep *purgeSweep
 	nilSweep.Start(context.Background())
 	nilSweep.Stop()
+}
+
+type blockingPurgeStore struct {
+	TaskStore
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingPurgeStore) PurgeExpired(context.Context, time.Time) (int, error) {
+	s.once.Do(func() { close(s.entered) })
+	<-s.release
+	return 0, nil
+}
+
+func TestPurgeSweep_ConcurrentStopCallersJoinShutdown(t *testing.T) {
+	store := &blockingPurgeStore{
+		TaskStore: NewInMemoryStore(),
+		entered:   make(chan struct{}),
+		release:   make(chan struct{}),
+	}
+	sweep := newPurgeSweep(store, time.Millisecond, quietLogger())
+	sweep.Start(context.Background())
+	<-store.entered
+
+	returned := make(chan int, 2)
+	go func() {
+		sweep.Stop()
+		returned <- 1
+	}()
+
+	// Ensure the first caller initiated shutdown before the second enters Stop.
+	for {
+		sweep.mu.Lock()
+		stopped := sweep.stopped
+		sweep.mu.Unlock()
+		if stopped {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	go func() {
+		sweep.Stop()
+		returned <- 2
+	}()
+
+	select {
+	case caller := <-returned:
+		t.Fatalf("Stop caller %d returned while PurgeExpired was blocked", caller)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(store.release)
+	for range 2 {
+		select {
+		case <-returned:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Stop caller did not return after PurgeExpired completed")
+		}
+	}
+}
+
+func TestEnginePurgeExpiresActiveInputTaskAndReleasesCap(t *testing.T) {
+	store := NewInMemoryStore()
+	e, err := NewEngine(store, &Options{
+		Logger:                quietLogger(),
+		RequestorIdentifiable: true,
+		Lifecycle:             Lifecycle{MaxConcurrentPerRequestor: 1},
+		GenerateID: func() (string, error) {
+			return "expired-active", nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputDone := make(chan error, 1)
+	ttl := int64(1)
+	created, err := e.CreateToolTask(context.Background(), CreateToolCallParams{
+		ToolName: "input", AuthContext: "alice", TaskMeta: protocolcodec.TaskMeta{TTL: &ttl},
+		Handle: func(_ context.Context, h TaskHandle) (json.RawMessage, error) {
+			err := h.RequestInput(context.Background(), InputRequest{
+				Key: "roots", Method: InputMethodRoots, Payload: json.RawMessage(`{"method":"roots/list","params":{}}`),
+			})
+			inputDone <- err
+			return nil, err
+		},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, store, created.ID, protocolcodec.TaskInputRequired)
+	if _, err := e.purgeExpired(context.Background(), time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Get(context.Background(), created.ID); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expired active task still stored: %v", err)
+	}
+	select {
+	case err := <-inputDone:
+		if err == nil {
+			t.Fatal("expired input waiter resumed successfully")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expired task did not cancel its background-context input waiter")
+	}
+	e.life.MaxConcurrentPerRequestor = 1
+	e.genID = func() (string, error) { return "after-expiry", nil }
+	release := make(chan struct{})
+	defer close(release)
+	if _, err := e.CreateForToolCall(context.Background(), CreateToolCallParams{
+		ToolName: "next", AuthContext: "alice", Run: blockingRun(release, []byte(`{}`), nil),
+	}); err != nil {
+		t.Fatalf("expired task retained concurrency slot: %v", err)
+	}
+}
+
+func TestEnginePurgeSnapshotCannotStarveUnderSustainedCreation(t *testing.T) {
+	store := NewInMemoryStore()
+	now := time.Now().UTC()
+	const expiredCount = 500
+	for i := range expiredCount {
+		rec := workingRecord(fmt.Sprintf("expired-%04d", i))
+		rec.ExpiresAt = now.Add(-time.Minute)
+		if err := store.Create(context.Background(), rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e, err := NewEngine(store, &Options{Logger: quietLogger()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	created := make(chan struct{})
+	go func() {
+		defer close(created)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = store.Create(context.Background(), workingRecord(fmt.Sprintf("live-%08d", i)))
+			}
+		}
+	}()
+	if _, err := e.purgeExpired(context.Background(), now); err != nil {
+		close(stop)
+		<-created
+		t.Fatal(err)
+	}
+	close(stop)
+	<-created
+	for i := range expiredCount {
+		if _, err := store.Get(context.Background(), fmt.Sprintf("expired-%04d", i)); !errors.Is(err, ErrTaskNotFound) {
+			t.Fatalf("expired task %d survived snapshot purge: %v", i, err)
+		}
+	}
+}
+
+func TestEnginePurgeEmitsExpirationTerminalEventExactlyOnce(t *testing.T) {
+	store := NewInMemoryStore()
+	emitter := &captureEmitter{}
+	e, err := NewEngine(store, &Options{Logger: quietLogger(), Obs: emitter, GenerateID: func() (string, error) {
+		return "expires-once", nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ttl := int64(1)
+	started := make(chan struct{})
+	if _, err := e.CreateToolTask(context.Background(), CreateToolCallParams{
+		ToolName: "expire", TaskMeta: protocolcodec.TaskMeta{TTL: &ttl},
+		Run: func(ctx context.Context) (json.RawMessage, error) {
+			close(started)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	now := time.Now().Add(time.Hour)
+	errCh := make(chan error, 8)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := e.purgeExpired(context.Background(), now)
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	ends := emitter.byKindPhase(obs.KindTaskProgress, obs.PhaseEnd)
+	if len(ends) != 1 {
+		t.Fatalf("expiration terminal events = %d, want 1", len(ends))
+	}
+	var payload obs.TaskProgressPayload
+	if err := json.Unmarshal(ends[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.TaskID != "expires-once" || payload.Status != string(protocolcodec.TaskCancelled) || payload.Message != "The task expired." {
+		t.Fatalf("expiration payload = %#v", payload)
+	}
+}
+
+func TestNonOwnerPurgeRoutesExpiredTaskCleanupToOwner(t *testing.T) {
+	store := NewInMemoryStore()
+	ownerEvents := &captureEmitter{}
+	sweeperEvents := &captureEmitter{}
+	owner, err := NewEngine(store, &Options{
+		Logger: quietLogger(), Obs: ownerEvents, ServerID: "owner",
+		GenerateID: func() (string, error) { return "shared-expired", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sweeper, err := NewEngine(store, &Options{Logger: quietLogger(), Obs: sweeperEvents, ServerID: "sweeper"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handlerDone := make(chan error, 1)
+	ttl := int64(1)
+	created, err := owner.CreateToolTask(context.Background(), CreateToolCallParams{
+		ToolName: "shared", TaskMeta: protocolcodec.TaskMeta{TTL: &ttl},
+		Handle: func(_ context.Context, h TaskHandle) (json.RawMessage, error) {
+			err := h.RequestInput(context.Background(), InputRequest{
+				Key: "roots", Method: InputMethodRoots,
+				Payload: json.RawMessage(`{"method":"roots/list","params":{}}`),
+			})
+			handlerDone <- err
+			return nil, err
+		},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, store, created.ID, protocolcodec.TaskInputRequired)
+
+	resultDone := make(chan error, 1)
+	resultParams := mustTaskIDParams(t, created.ID)
+	go func() {
+		_, err := owner.Dispatch(context.Background(), MethodResult, resultParams)
+		resultDone <- err
+	}()
+	waitForEngineWaiter(t, owner, created.ID)
+
+	if _, err := sweeper.purgeExpired(context.Background(), time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	owner.mu.Lock()
+	localStateRemaining := len(owner.waiters[created.ID]) + len(owner.inputWaiters[created.ID])
+	if owner.cancels[created.ID] != nil {
+		localStateRemaining++
+	}
+	if _, ok := owner.spans[created.ID]; ok {
+		localStateRemaining++
+	}
+	owner.mu.Unlock()
+	if localStateRemaining != 0 {
+		t.Fatalf("non-owner purge returned before owner cleanup; remaining entries = %d", localStateRemaining)
+	}
+	select {
+	case err := <-handlerDone:
+		if err == nil {
+			t.Fatal("expired input waiter resumed successfully")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("non-owner sweep did not cancel the owner's input waiter")
+	}
+	select {
+	case <-resultDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("non-owner sweep did not wake the owner's result waiter")
+	}
+
+	starts := ownerEvents.byKindPhase(obs.KindTaskProgress, obs.PhaseStart)
+	ends := ownerEvents.byKindPhase(obs.KindTaskProgress, obs.PhaseEnd)
+	if len(starts) != 1 || len(ends) != 1 || starts[0].TraceID != ends[0].TraceID {
+		t.Fatalf("owner lifecycle events = starts %#v, ends %#v", starts, ends)
+	}
+	if got := sweeperEvents.byKindPhase(obs.KindTaskProgress, obs.PhaseEnd); len(got) != 0 {
+		t.Fatalf("non-owner emitted terminal events: %#v", got)
+	}
+	if taskOwnerFor(store, created.ID) != nil {
+		t.Fatal("terminal task retained an ownership registry entry")
+	}
+	if _, err := store.Get(context.Background(), created.ID); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expired task still stored: %v", err)
+	}
+}
+
+func TestDurableStoreWrappersShareTaskOwnerForExpiry(t *testing.T) {
+	backing := storeinmem.New()
+	t.Cleanup(func() { _ = backing.Close() })
+	if err := backing.Migrate(context.Background(), Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	ownerStore, err := NewStore(backing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sweeperStore, err := NewStore(backing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := NewEngine(ownerStore, &Options{
+		Logger: quietLogger(), GenerateID: func() (string, error) { return "wrapped-shared", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sweeper, err := NewEngine(sweeperStore, &Options{Logger: quietLogger()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	ttl := int64(1)
+	if _, err := owner.CreateToolTask(context.Background(), CreateToolCallParams{
+		ToolName: "shared", TaskMeta: protocolcodec.TaskMeta{TTL: &ttl},
+		Run: func(ctx context.Context) (json.RawMessage, error) {
+			close(started)
+			<-ctx.Done()
+			close(cancelled)
+			return nil, ctx.Err()
+		},
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if _, err := sweeper.purgeExpired(context.Background(), time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expiry through a second durable wrapper did not cancel the owning worker")
+	}
+	if _, err := ownerStore.Get(context.Background(), "wrapped-shared"); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expired task remains stored: %v", err)
+	}
+	if taskOwnerFor(ownerStore, "wrapped-shared") != nil || taskOwnerFor(sweeperStore, "wrapped-shared") != nil {
+		t.Fatal("shared durable wrappers retained an ownership registry entry")
+	}
+}
+
+func TestSharedStoreConcurrentExpiryHasOneOwnerCleanup(t *testing.T) {
+	store := NewInMemoryStore()
+	ownerEvents := &captureEmitter{}
+	otherEvents := &captureEmitter{}
+	owner, err := NewEngine(store, &Options{
+		Logger: quietLogger(), Obs: ownerEvents,
+		GenerateID: func() (string, error) { return "shared-race", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := NewEngine(store, &Options{Logger: quietLogger(), Obs: otherEvents})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ttl := int64(1)
+	started := make(chan struct{})
+	handlerDone := make(chan struct{})
+	if _, err := owner.CreateToolTask(context.Background(), CreateToolCallParams{
+		ToolName: "race", TaskMeta: protocolcodec.TaskMeta{TTL: &ttl},
+		Run: func(ctx context.Context) (json.RawMessage, error) {
+			close(started)
+			<-ctx.Done()
+			close(handlerDone)
+			return nil, ctx.Err()
+		},
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+
+	now := time.Now().Add(time.Hour)
+	startSweep := make(chan struct{})
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for i := range 16 {
+		engine := owner
+		if i%2 == 1 {
+			engine = other
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-startSweep
+			_, err := engine.purgeExpired(context.Background(), now)
+			errs <- err
+		}()
+	}
+	close(startSweep)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case <-handlerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shared-store expiry did not cancel the owning handler")
+	}
+	if got := len(ownerEvents.byKindPhase(obs.KindTaskProgress, obs.PhaseEnd)); got != 1 {
+		t.Fatalf("owner terminal event count = %d, want 1", got)
+	}
+	if got := len(otherEvents.byKindPhase(obs.KindTaskProgress, obs.PhaseEnd)); got != 0 {
+		t.Fatalf("non-owner terminal event count = %d, want 0", got)
+	}
+	if taskOwnerFor(store, "shared-race") != nil {
+		t.Fatal("raced expiry retained an ownership registry entry")
+	}
+}
+
+func TestExpiredOrphanWithoutLocalOwnerIsSafelyReaped(t *testing.T) {
+	store := NewInMemoryStore()
+	rec := workingRecord("orphan")
+	rec.ExpiresAt = time.Now().Add(-time.Minute)
+	if err := store.Create(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+	emitter := &captureEmitter{}
+	sweeper, err := NewEngine(store, &Options{Logger: quietLogger(), Obs: emitter})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sweeper.purgeExpired(context.Background(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Get(context.Background(), rec.ID); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("orphan was not reaped: %v", err)
+	}
+	if got := len(emitter.byKindPhase(obs.KindTaskProgress, obs.PhaseEnd)); got != 1 {
+		t.Fatalf("orphan terminal event count = %d, want 1", got)
+	}
+}
+
+type blockedAtomicCreateStore struct {
+	TaskStore
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockedAtomicCreateStore) CreateWithConcurrencyLimit(ctx context.Context, rec TaskRecord, limit int) error {
+	close(s.entered)
+	select {
+	case <-s.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return s.TaskStore.(AtomicCreateTaskStore).CreateWithConcurrencyLimit(ctx, rec, limit)
+}
+
+func TestExpiryWaitsForOwnershipRegistrationBeforeReapingOrphan(t *testing.T) {
+	base := NewInMemoryStore()
+	orphan := workingRecord("creation-race")
+	orphan.ExpiresAt = time.Now().Add(-time.Minute)
+	if err := base.Create(context.Background(), orphan); err != nil {
+		t.Fatal(err)
+	}
+	store := &blockedAtomicCreateStore{
+		TaskStore: base, entered: make(chan struct{}), release: make(chan struct{}),
+	}
+	creatorEvents := &captureEmitter{}
+	sweeperEvents := &captureEmitter{}
+	creator, err := NewEngine(store, &Options{
+		Logger: quietLogger(), Obs: creatorEvents,
+		GenerateID: func() (string, error) { return orphan.ID, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sweeper, err := NewEngine(store, &Options{Logger: quietLogger(), Obs: sweeperEvents})
+	if err != nil {
+		t.Fatal(err)
+	}
+	createDone := make(chan error, 1)
+	go func() {
+		_, err := creator.CreateToolTask(context.Background(), CreateToolCallParams{
+			ToolName: "duplicate", Run: instantRun(json.RawMessage(`{}`), nil),
+		}, true)
+		createDone <- err
+	}()
+	<-store.entered
+
+	purgeCtx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	if _, err := sweeper.purgeExpired(purgeCtx, time.Now()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("purge passed an unresolved ownership reservation: %v", err)
+	}
+	if _, err := base.Get(context.Background(), orphan.ID); err != nil {
+		t.Fatalf("purge deleted orphan before ownership resolved: %v", err)
+	}
+	close(store.release)
+	if err := <-createDone; err == nil {
+		t.Fatal("duplicate creation unexpectedly succeeded")
+	}
+	if _, err := sweeper.purgeExpired(context.Background(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.Get(context.Background(), orphan.ID); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("orphan was not reaped after failed creation: %v", err)
+	}
+	if got := len(creatorEvents.byKindPhase(obs.KindTaskProgress, obs.PhaseEnd)); got != 0 {
+		t.Fatalf("failed creator emitted orphan terminal event: %d", got)
+	}
+	if got := len(sweeperEvents.byKindPhase(obs.KindTaskProgress, obs.PhaseEnd)); got != 1 {
+		t.Fatalf("sweeper orphan terminal event count = %d, want 1", got)
+	}
+}
+
+func TestTaskOwnershipRegistryUnregistersOnTerminalAndAdmissionDelete(t *testing.T) {
+	store := NewInMemoryStore()
+	ids := []string{"completed-owner", "deleted-owner"}
+	next := 0
+	e, err := NewEngine(store, &Options{
+		Logger: quietLogger(),
+		GenerateID: func() (string, error) {
+			id := ids[next]
+			next++
+			return id, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.CreateToolTask(context.Background(), CreateToolCallParams{
+		ToolName: "complete", Run: instantRun(json.RawMessage(`{}`), nil),
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, store, "completed-owner", protocolcodec.TaskCompleted)
+	waitForOwnerUnregistered(t, store, "completed-owner")
+
+	ctx, admission := WithDeferredAdmission(context.Background())
+	if _, err := e.CreateToolTask(ctx, CreateToolCallParams{
+		ToolName: "delete", Run: instantRun(json.RawMessage(`{}`), nil),
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := admission.Abort(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Get(context.Background(), "deleted-owner"); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("aborted task was not deleted: %v", err)
+	}
+	waitForOwnerUnregistered(t, store, "deleted-owner")
+}
+
+func waitForEngineWaiter(t *testing.T, e *Engine, id string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		e.mu.Lock()
+		waiting := len(e.waiters[id]) > 0
+		e.mu.Unlock()
+		if waiting {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("result waiter was not registered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func waitForOwnerUnregistered(t *testing.T, store TaskStore, id string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for taskOwnerFor(store, id) != nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("task %q retained an ownership registry entry", id)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // TestPurgeSweep_HonoursContextCancellation proves the sweep goroutine exits

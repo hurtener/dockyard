@@ -15,6 +15,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/hurtener/dockyard/internal/inspector"
 	"github.com/hurtener/dockyard/runtime/server"
 	"github.com/hurtener/dockyard/runtime/tasks"
 	"github.com/hurtener/dockyard/runtime/tool"
@@ -101,6 +102,33 @@ func TestPhase33_ApprovalFlowModernSuccessAndInvalidUpdate(t *testing.T) {
 	}
 	if structured["state"] != "approved" || structured["reason"] != "ship it" || structured["approved"] != true {
 		t.Fatalf("completed structuredContent = %#v", structured)
+	}
+}
+
+func TestPhase33_InspectorCompletesWaitingModernTask(t *testing.T) {
+	t.Parallel()
+	_, ts := newPhase33ApprovalServer(t, nil)
+	callApproval(t, ts, "Approve through inspector")
+	waitModernTask(t, ts, "approval-task", "", "input_required")
+
+	resp, err := inspector.ElicitationFromServer(ts.URL)(context.Background(), inspector.ElicitationRequest{
+		Protocol: "2026-07-28",
+		TaskID:   "approval-task",
+		InputResponses: map[string]json.RawMessage{
+			"approval-decision": json.RawMessage(`{"action":"accept","content":{"approved":true,"reason":"inspector approved"}}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("inspector task update: %v", err)
+	}
+	if resp == nil || !resp.Delivered {
+		t.Fatalf("inspector task update response = %#v", resp)
+	}
+
+	completed := waitModernTask(t, ts, "approval-task", "", "completed")
+	structured, ok := resultObject(t, completed, "result")["structuredContent"].(map[string]any)
+	if !ok || structured["state"] != "approved" || structured["reason"] != "inspector approved" {
+		t.Fatalf("completed inspector result = %#v", completed)
 	}
 }
 

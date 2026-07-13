@@ -82,6 +82,30 @@ func TestTSFileName(t *testing.T) {
 	}
 }
 
+func TestPlanRejectsNoncanonicalContractPackage(t *testing.T) {
+	t.Parallel()
+	m := testManifest(t)
+	m.Tools[0].Input = "internal/other.GreetInput"
+	_, err := Plan(Options{ProjectDir: t.TempDir(), Manifest: m})
+	if !errors.Is(err, ErrGenerate) || !strings.Contains(err.Error(), `canonical package "internal/contracts"`) {
+		t.Fatalf("Plan error = %v, want canonical package rejection", err)
+	}
+}
+
+func TestGeneratedArtifactPathAndMarkerProfile(t *testing.T) {
+	t.Parallel()
+	if isGeneratedArtifactPath("README.md") || isGeneratedArtifactPath("internal/contracts/manual.json") {
+		t.Fatal("arbitrary project paths must not be accepted as generated artifacts")
+	}
+	if !isGeneratedArtifactPath(SchemaFileName("greet", "output")) || !isGeneratedArtifactPath(TSFileName()) {
+		t.Fatal("canonical schema and TypeScript paths must be accepted")
+	}
+	withoutMarker := []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}`)
+	if err := validateGeneratedMarker(SchemaFileName("old", "output"), withoutMarker); err == nil {
+		t.Fatal("schema without Dockyard's generated marker must not be removable")
+	}
+}
+
 func TestResolveContractImports(t *testing.T) {
 	t.Parallel()
 	m := testManifest(t)

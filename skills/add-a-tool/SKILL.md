@@ -54,8 +54,9 @@ Conventions that pay off later:
   comment into the JSON Schema's `description`.
 - Use `json:"name,omitempty"` for optional fields. The codegen reads
   `omitempty` to mark the field optional in the schema.
-- Keep contracts in `internal/contracts/` so they're not part of your
-  public API.
+- Keep contracts in `internal/contracts/`. This is the required manifest source
+  package, ensuring generated JSON Schema and `contracts.ts` cover the same tool
+  types without exposing them as public API.
 
 ## 2. Write the handler
 
@@ -190,7 +191,8 @@ tools:
 
 The `input` / `output` fields are Go type references; the format is
 `<package-path>.<TypeName>`. `internal/contracts.SummariseInput` resolves
-against the project module.
+against the project module. Dockyard requires the package path to be
+`internal/contracts`; another package fails manifest validation.
 
 ## 5. Regenerate and validate
 

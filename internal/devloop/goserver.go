@@ -20,9 +20,8 @@ import (
 // scaffolded server's transport to HTTP on a deterministic address when the
 // inspector auto-attaches (v1.1 Wave A) — so the inspector has a known
 // MCP base URL to connect to without the developer having to set the
-// env-vars by hand. A developer who already set DOCKYARD_TRANSPORT /
-// DOCKYARD_HTTP_ADDR in their shell wins via the later-wins os/exec.Cmd
-// environment ordering — the dev loop's pins are a default, not an override.
+// env-vars by hand. The orchestrator omits either default when the developer
+// already set that variable, so these entries never override explicit input.
 func goServerCommand(projectDir string, override []string, extraEnv []string) command {
 	env := append(os.Environ(), "CGO_ENABLED=0")
 	env = append(env, extraEnv...)

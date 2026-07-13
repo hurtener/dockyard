@@ -10,6 +10,11 @@ import (
 	"github.com/hurtener/dockyard/internal/codegen"
 )
 
+// ContractsPackage is the canonical project-relative Go package containing all
+// tool input and output contracts. Keeping every manifest reference at this
+// boundary lets one generated contracts.ts cover every tool contract.
+const ContractsPackage = "internal/contracts"
+
 // ContractReference is a parsed tools[].input / tools[].output value: the Go
 // type a tool's contract resolves to (RFC §6.1, contract-first). Its wire form
 // is "<package path>.<TypeName>", e.g. "internal/contracts.ShowCustomerHealthInput".
@@ -48,8 +53,13 @@ func validateContractRef(ref string) error {
 	if ref == "" {
 		return errors.New("required (a Go type reference, \"<package/path>.TypeName\")")
 	}
-	if _, err := ParseContractReference(ref); err != nil {
+	parsed, err := ParseContractReference(ref)
+	if err != nil {
 		return err
+	}
+	if parsed.Package != ContractsPackage {
+		return fmt.Errorf("contract types must be declared in the canonical %q package (got %q)",
+			ContractsPackage, parsed.Package)
 	}
 	return nil
 }
@@ -92,6 +102,12 @@ func (m *Manifest) ResolveContracts(r ContractResolver) (map[string]ToolContract
 	}
 	out := make(map[string]ToolContracts, len(m.Tools))
 	for _, t := range m.Tools {
+		if err := validateContractRef(t.Input); err != nil {
+			return nil, fmt.Errorf("tool %q input %q: %w", t.Name, t.Input, err)
+		}
+		if err := validateContractRef(t.Output); err != nil {
+			return nil, fmt.Errorf("tool %q output %q: %w", t.Name, t.Output, err)
+		}
 		in, err := r.Resolve(t.Input)
 		if err != nil {
 			return nil, fmt.Errorf("tool %q input %q: %w", t.Name, t.Input, err)

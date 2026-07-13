@@ -46,6 +46,7 @@ run_focused_test "recursive generation and local refs resolve safely" ./internal
 run_focused_test "schema validation is bounded and rejects external refs" ./internal/codegen '^(TestValidateSchemaRejectsWrongDialectAndExternalRefs|TestValidateSchemaBoundsDepth)$'
 run_focused_test "structured output carries arbitrary JSON values and explicit null" ./runtime/server '^(TestStructuredOutputSupportsPrimitiveAndExplicitNull|TestStructuredPresentTypedNilKinds)$'
 run_focused_test "modern resource errors and list/templates/read cache metadata conform" ./runtime/server '^(TestCachePolicyValidation|TestModernResourceSemanticsRealHTTP)$'
+run_focused_test "modern discovery and result discriminators conform on the production wire" ./runtime/server '^(TestModernDiscoveryRawWireConforms|TestModernResultTypePreservesInputRequired|TestModernToolsCallReturnsFlatCreateTaskResultOverSDKHTTP)$'
 run_focused_test "legacy resource errors remain versioned and omit cache metadata" ./runtime/server '^TestLegacyResourceResponseOmitsCacheAndUsesLegacyMissingCode$'
 run_focused_test "generate emits recursive, enum, and scalar 2020-12 contracts" ./internal/generate '^TestPlan_EnumsRecursiveAndScalarOutput$'
 run_focused_test "validate blocks stale and externally referenced generated schemas" ./internal/validate '^(TestRun_StaleCodegenIsBlocker|TestCheckSchemas_RejectsExternalReference)$'

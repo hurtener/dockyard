@@ -16,6 +16,32 @@ type CacheMetadata struct {
 	Scope string
 }
 
+// EncodeResultType applies the core result discriminator required by the
+// selected protocol version. Modern results default to complete only when the
+// producer omitted resultType; explicit task, input_required, complete, and
+// extension-defined values are preserved. Legacy results remain unchanged.
+func EncodeResultType(version ProtocolVersion, raw json.RawMessage) (json.RawMessage, error) {
+	if version != VersionMCP20260728 {
+		return raw, nil
+	}
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("protocolcodec: response result: %w", err)
+	}
+	if result == nil {
+		return nil, fmt.Errorf("protocolcodec: response result must be an object")
+	}
+	if _, present := result["resultType"]; present {
+		return raw, nil
+	}
+	resultType, err := json.Marshal("complete")
+	if err != nil {
+		return nil, err
+	}
+	result["resultType"] = resultType
+	return json.Marshal(result)
+}
+
 // EncodeCacheMetadata applies the selected version's top-level cache shape to
 // an already encoded result. Legacy versions remove the fields; modern requires
 // both fields. The returned JSON is fresh and safe for concurrent callers.

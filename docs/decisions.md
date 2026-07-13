@@ -6766,3 +6766,29 @@ resource metadata. `Config.RequiredScopes` is a separate global policy, and ever
 protected MCP operation requires every entry. Operation-specific scope callbacks
 are not part of the initial API; deployments that need different policies use
 separate protected endpoints. Challenges enumerate the complete required set.
+
+---
+
+## D-198 — Generated TypeScript is co-located with Go contracts for every project shape
+
+**Date:** 2026-07-13
+**Status:** Settled (Phase 34 adversarial review remediation).
+**Where it lives:** RFC §4.3 and §6.2, `internal/codegen`,
+`internal/generate`, generated projects, and contract documentation.
+
+**Why.** Making the output path conditional on a `web/` tree gives backend-only
+projects a different generated-artifact set, complicates deterministic ownership,
+and makes adding or removing a UI move a contract artifact. The typed Go package
+is the stable source boundary; generated schemas, enum metadata, and TypeScript
+all derive from that boundary whether or not an App currently consumes them.
+
+**The decision.** `dockyard generate` always writes the combined TypeScript
+artifact to `internal/contracts/contracts.ts`. Backend-only projects retain it as
+part of their complete contract output and require no Node or web directory.
+UI-bearing projects import that canonical artifact into their Vite/Svelte source
+graph; Dockyard does not generate a second copy under `web/`. The ownership index,
+stale checks, and schema/TypeScript cross-check therefore use one invariant path
+for every project shape. Every manifest tool input/output reference must name a
+type in the canonical `internal/contracts` Go package; noncanonical package
+references fail manifest validation and generation rather than silently omitting
+their types from `contracts.ts`.

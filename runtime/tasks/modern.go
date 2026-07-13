@@ -7,7 +7,6 @@ import (
 	"log/slog"
 
 	"github.com/hurtener/dockyard/internal/protocolcodec"
-	"github.com/hurtener/dockyard/runtime/obs"
 )
 
 // MethodUpdate exists only in the modern Tasks lifecycle. The legacy Dispatch
@@ -124,11 +123,15 @@ func (e *Engine) DispatchModern(ctx context.Context, authContext, method string,
 				return ModernResult{}, fmt.Errorf("%w: invalid input response %q", ErrInvalidParams, key)
 			}
 		}
+		runtime, err := e.taskRuntimeFor(ctx, req.TaskID)
+		if err != nil {
+			return ModernResult{}, err
+		}
 		accepted, _, err := e.store.ApplyInputResponses(ctx, req.TaskID, req.InputResponses)
 		if err != nil {
 			return ModernResult{}, err
 		}
-		e.deliverModernInputs(req.TaskID, accepted)
+		runtime.deliverModernInputs(req.TaskID, accepted)
 		return ModernResult{}, nil
 	case MethodCancel:
 		if err := e.cancelModern(ctx, rec); err != nil {
@@ -168,20 +171,14 @@ func (e *Engine) cancelModern(ctx context.Context, rec TaskRecord) error {
 	if rec.Status.IsTerminal() {
 		return fmt.Errorf("%w: cannot cancel task %q already in terminal status %q", ErrAlreadyTerminal, rec.ID, rec.Status)
 	}
-	_ = e.store.SetResult(ctx, rec.ID, TaskResult{Err: "task cancelled"})
-	if _, err := e.store.Transition(ctx, rec.ID, protocolcodec.TaskCancelled, "The task was cancelled by request."); err != nil {
+	final, applied, err := e.cancelTask(ctx, rec.ID,
+		"The task was cancelled by request.", TaskResult{Err: "task cancelled"}, taskOwnerForIdentity(e.identity, rec.ID))
+	if err != nil {
 		return err
 	}
-	e.mu.Lock()
-	cancel := e.cancels[rec.ID]
-	e.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	if !applied {
+		return fmt.Errorf("%w: cannot cancel task %q already in terminal status %q", ErrAlreadyTerminal, rec.ID, final.Status)
 	}
-	e.rec.TaskEvent(ctx, e.taskSpan(rec.ID).Child(), obs.PhaseEnd, obs.TaskProgressPayload{
-		TaskID: rec.ID, Status: string(protocolcodec.TaskCancelled), Message: "The task was cancelled by request.",
-	}, nil)
-	e.wake(rec.ID)
 	return nil
 }
 

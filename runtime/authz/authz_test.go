@@ -72,7 +72,18 @@ func TestMetadataURLPreservesQueryAndEscapedPath(t *testing.T) {
 
 func TestConfigRejectsUnsafeValues(t *testing.T) {
 	base := Config{Driver: "x", Resource: "https://resource.example/mcp", Issuer: "https://issuer.example", Scopes: []string{"read"}, ContinuationKey: make([]byte, 32)}
-	tests := []Config{{Resource: base.Resource, Issuer: base.Issuer}, {Driver: "x", Resource: "http://resource", Issuer: base.Issuer, ContinuationKey: base.ContinuationKey}, {Driver: "x", Resource: base.Resource, Issuer: base.Issuer + "?tenant=x", ContinuationKey: base.ContinuationKey}, {Driver: "x", Resource: base.Resource, Issuer: base.Issuer, Scopes: []string{"offline_access"}, ContinuationKey: base.ContinuationKey}}
+	tests := []Config{
+		{Resource: base.Resource, Issuer: base.Issuer},
+		{Driver: "x", Resource: "http://resource", Issuer: base.Issuer, ContinuationKey: base.ContinuationKey},
+		{Driver: "x", Resource: base.Resource, Issuer: base.Issuer + "?tenant=x", ContinuationKey: base.ContinuationKey},
+		{Driver: "x", Resource: base.Resource, Issuer: base.Issuer, Scopes: []string{"offline_access"}, ContinuationKey: base.ContinuationKey},
+		{Driver: "x", Resource: base.Resource, Issuer: base.Issuer, Scopes: []string{"read"}, RequiredScopes: []string{"write"}, ContinuationKey: base.ContinuationKey},
+	}
+	for _, scope := range []string{"", "two scopes", "quote\"", `back\slash`, "control\x00", "caf\u00e9"} {
+		cfg := base
+		cfg.Scopes = []string{scope}
+		tests = append(tests, cfg)
+	}
 	for _, cfg := range tests {
 		if cfg.Validate() == nil {
 			t.Fatalf("accepted %#v", cfg)

@@ -90,6 +90,9 @@ func TestTest_RunsAgainstCleanProject(t *testing.T) {
 	if out, err := tidy.CombinedOutput(); err != nil {
 		t.Fatalf("go mod tidy: %v\n%s", err, out)
 	}
+	if output, _, runErr := run(t, "generate", "--dir", res.Dir); runErr != nil {
+		t.Fatalf("dockyard generate on scaffolded project failed: %v\n%s", runErr, output)
+	}
 
 	// --skip-go-test keeps the CLI test fast; the contract, golden, spec, and
 	// capability gates still run — enough to exercise the success path and the

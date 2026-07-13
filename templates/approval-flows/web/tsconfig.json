@@ -10,5 +10,5 @@
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": false
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte"]
+  "include": ["src/**/*.ts", "src/**/*.svelte", "../internal/contracts/contracts.ts"]
 }

@@ -123,7 +123,7 @@ func TestModernCancelSecurityContextAndBranches(t *testing.T) {
 		t.Fatal("registered task cancellation was not invoked")
 	}
 	got, _ := store.Get(base, rec.ID)
-	if got.Status != protocolcodec.TaskCancelled || got.Result.Err == "" {
+	if got.Status != protocolcodec.TaskCancelled {
 		t.Fatalf("cancelled record = %#v", got)
 	}
 	if _, err := e.DispatchModern(base, "alice", MethodCancel, ModernRequest{TaskID: rec.ID}); !errors.Is(err, ErrAlreadyTerminal) {
@@ -185,5 +185,35 @@ func TestDurableInputRequestsAndResponses(t *testing.T) {
 	}
 	if _, _, err := store.ApplyInputResponses(ctx, "missing", nil); !errors.Is(err, ErrTaskNotFound) {
 		t.Fatalf("missing task response error = %v", err)
+	}
+}
+
+func TestInMemoryStoreOwnsInputState(t *testing.T) {
+	ctx := context.Background()
+	store := NewInMemoryStore()
+	rec := workingRecord("owned-input")
+	rec.Result.Payload = json.RawMessage(`{"ok":true}`)
+	rec.InputRequests = map[string]InputRequest{
+		"roots": {Key: "roots", Method: InputMethodRoots, Payload: json.RawMessage(`{"method":"roots/list","params":{}}`)},
+	}
+	if err := store.Create(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	rec.Result.Payload[0] = 'x'
+	delete(rec.InputRequests, "roots")
+
+	got, err := store.Get(ctx, rec.ID)
+	if err != nil || string(got.Result.Payload) != `{"ok":true}` || len(got.InputRequests) != 1 {
+		t.Fatalf("stored record changed through create input: %#v, %v", got, err)
+	}
+	delete(got.InputRequests, "roots")
+	page, _, err := store.List(ctx, "", 1)
+	if err != nil || len(page) != 1 || len(page[0].InputRequests) != 1 {
+		t.Fatalf("stored record changed through get result: %#v, %v", page, err)
+	}
+	delete(page[0].InputRequests, "roots")
+	again, _ := store.Get(ctx, rec.ID)
+	if len(again.InputRequests) != 1 {
+		t.Fatal("stored record changed through list result")
 	}
 }
