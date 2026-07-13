@@ -8,8 +8,9 @@ Three verbs ship the packaging surface
 - **`dockyard run`** — build + run on a transport (stdio | http). The
   "I want to see it now" verb.
 - **`dockyard install <host>`** — write the host's MCP config so the
-  host launches your built server; verify it boots with a real MCP
-  `initialize` handshake. Supported hosts: `claude`, `cursor`.
+  host launches your built server; verify it boots with modern MCP
+  `server/discover`, with an explicit legacy `initialize` fallback.
+  Supported hosts: `claude`, `cursor`.
 
 ## `dockyard build`
 
@@ -44,6 +45,10 @@ dockyard run --transport http --addr 0.0.0.0:9000
 binary on the selected transport. Ctrl-C tears the child down cleanly
 — no orphan process.
 
+The generated HTTP server exposes one dual-lifecycle endpoint. Modern
+`2026-07-28` clients use stateless `server/discover`; legacy `2025-11-25`
+clients use the session-based `initialize` lifecycle.
+
 ## `dockyard install`
 
 ```bash
@@ -57,7 +62,10 @@ dockyard install claude --config /custom/path/to/mcp.json
   server as a local stdio subprocess. The prior config is backed up to
   a timestamped sidecar; unrelated MCP-server entries are preserved.
 - **Verifies the server boots** by spawning it and driving a real MCP
-  `initialize` handshake.
+  modern-first negotiation. The check attempts `server/discover` and falls back
+  to legacy `initialize` only when the peer returns a recognized compatibility
+  signal; transport, authorization, and unrelated server failures never
+  downgrade silently.
 
 `dockyard install` writes a host config — it is **not** an MCP client
 (P4, [RFC §1](/reference/rfc)).

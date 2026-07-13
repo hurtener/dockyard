@@ -124,7 +124,7 @@ func newPromptsTestServer(t *testing.T) string {
 		t.Fatalf("AddPrompt explain_error: %v", err)
 	}
 
-	httpHandler, err := srv.HTTPHandler(&server.HTTPOptions{Security: server.DefaultHTTPSecurity()})
+	httpHandler, err := srv.HTTPHandler(&server.HTTPOptions{ProtocolMode: server.Dual, Security: server.DefaultHTTPSecurity()})
 	if err != nil {
 		t.Fatalf("HTTPHandler: %v", err)
 	}

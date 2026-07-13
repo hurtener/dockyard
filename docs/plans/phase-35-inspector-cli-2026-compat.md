@@ -49,17 +49,17 @@ None.
 
 ## Acceptance criteria
 
-- [ ] `dockyard install` boot check succeeds against a modern server/discover
+- [x] `dockyard install` boot check succeeds against a modern server/discover
       server and a legacy-compatible server, with no initialize-only assumption.
-- [ ] Inspector invoke, prompt, App-resource, and MRTR test paths speak the
+- [x] Inspector invoke, prompt, App-resource, and MRTR test paths speak the
       correct protocol revision and remain localhost-only.
-- [ ] `dockyard new`, templates, examples, `dockyard run`, and `dockyard dev`
+- [x] `dockyard new`, templates, examples, `dockyard run`, and `dockyard dev`
       default to the documented dual HTTP behavior.
-- [ ] `dockyard test` reports conformance for both supported protocol versions
+- [x] `dockyard test` reports conformance for both supported protocol versions
       against vendored fixtures without contacting a live host.
-- [ ] All affected published docs and skills distinguish base MCP discovery from
+- [x] All affected published docs and skills distinguish base MCP discovery from
       the separate `ui/initialize` iframe dialect.
-- [ ] Existing operator flows have loading, empty, error, and ready states after
+- [x] Existing operator flows have loading, empty, error, and ready states after
       any inspector UI change.
 
 ## Files added or changed
@@ -84,6 +84,23 @@ None.
   modern discovery or an explicit legacy fallback before implementation.
 - The design owner approves the browser/live-verification script and confirms the
   inspector remains test-only, localhost-bound, and credential-free.
+
+Approved call-path matrix (D-194):
+
+| Path | Modern path | Legacy path | Downgrade rule |
+| ---- | ----------- | ----------- | -------------- |
+| install boot check | SDK `server/discover` | fresh SDK `initialize` lifecycle | recognized compatibility response only |
+| inspector tools, prompts, Apps resources | SDK discovery, then request-scoped metadata and `Mcp-Protocol-Version` | SDK-managed legacy lifecycle | recognized compatibility response only |
+| inspector modern Tasks | raw `tasks/get`, `tasks/update`, or `tasks/cancel` with version, method, and task routing headers | versioned legacy codec method | caller selects the declared task protocol; no heuristic fallback |
+| generated-project test clients | SDK discovery plus explicit modern headers | raw legacy initialize/session fixture | test-selected revision; no heuristic fallback |
+| `dockyard test` | embedded `2026-07-28` discovery fixture | embedded `2025-11-25` initialize fixture | both run independently and both must pass |
+
+Modern SDK requests carry protocol version, client identity, and capabilities in
+request `_meta`, plus `Mcp-Protocol-Version: 2026-07-28`. Raw Tasks requests also
+carry `Mcp-Method` and the applicable task ID in `Mcp-Name`. Transport,
+authorization, malformed-response, unknown-future-version, and unrelated server
+errors never trigger legacy fallback. Apps `2026-01-26` `ui/initialize` remains a
+separate iframe dialect.
 
 ## Test plan
 
@@ -121,20 +138,20 @@ None.
 
 ## Glossary additions
 
-- N/A — compatibility vocabulary is established in earlier phases.
+- Explicit legacy fallback — added to `docs/glossary.md` and settled by D-194.
 
 ## Pre-merge checklist
 
-- [ ] `make drift-audit` passes
-- [ ] `make check-mirror` passes
-- [ ] `make preflight` passes
-- [ ] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
-- [ ] `make docs` passes
-- [ ] `go test -race ./...` and `golangci-lint run` clean
-- [ ] All cross-references (`RFC §X.Y`, `brief NN`) resolve
-- [ ] Coverage on touched packages ≥ stated target
-- [ ] New CLI command / manifest field / public API has a smoke check in this PR
-- [ ] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
-- [ ] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
-- [ ] New vocabulary added to `docs/glossary.md`
-- [ ] New / changed architectural decision filed in `docs/decisions.md`
+- [x] `make drift-audit` passes
+- [x] `make check-mirror` passes
+- [x] `make preflight` passes
+- [x] `npx markdownlint-cli2 "**/*.md" "!**/node_modules"` passes
+- [x] `make docs` passes
+- [x] `go test -race ./...` and `golangci-lint run` clean
+- [x] All cross-references (`RFC §X.Y`, `brief NN`) resolve
+- [x] Coverage on touched packages ≥ stated target
+- [x] New CLI command / manifest field / public API has a smoke check in this PR
+- [x] Reusable-artifact change ⇒ concurrent-reuse test under `-race`
+- [x] Cross-subsystem seam opened/consumed ⇒ integration test (AGENTS.md §17)
+- [x] New vocabulary added to `docs/glossary.md`
+- [x] New / changed architectural decision filed in `docs/decisions.md`

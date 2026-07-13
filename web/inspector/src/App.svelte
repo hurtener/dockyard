@@ -311,6 +311,9 @@
     return typeof id === 'string' ? id : '';
   }
 
+  let taskInputState = $state<'idle' | 'loading' | 'error' | 'ready'>('idle');
+  let taskInputError = $state('');
+
   /**
    * Forwards an App's elicitation-response notification (Phase 25 /
    * D-134) to the inspector backend's `POST /api/tasks/elicitation`
@@ -321,14 +324,22 @@
    * `tool-result` pushes and the Tasks panel — there is no synchronous
    * round-trip on this channel).
    */
-  function onElicitationResponse(params: ElicitationResponseParams): void {
-    postElicitationResponse(
-      { taskId: params.taskId, data: params.data, declined: params.declined },
-      base,
-    ).catch((err) => {
-      // eslint-disable-next-line no-console
-      console.warn('[inspector] elicitation-response delivery failed', err);
-    });
+  async function onElicitationResponse(params: ElicitationResponseParams): Promise<void> {
+    taskInputState = 'loading';
+    taskInputError = '';
+    try {
+      await postElicitationResponse({
+        taskId: params.taskId,
+        protocol: '2025-11-25',
+        inputResponses: {
+          response: params.declined ? { declined: true } : (params.data ?? null),
+        },
+      }, base);
+      taskInputState = 'ready';
+    } catch (err) {
+      taskInputState = 'error';
+      taskInputError = err instanceof Error ? err.message : 'Task input delivery failed';
+    }
   }
 
   onMount(async () => {
@@ -469,6 +480,13 @@
   {/snippet}
 
   <div class="preview-region" data-state={appsState} data-testid="preview-state">
+    {#if taskInputState === 'loading'}
+      <LoadingState message="Delivering task input…" />
+    {:else if taskInputState === 'error'}
+      <ErrorState title="Task input failed" description={taskInputError} />
+    {:else if taskInputState === 'ready'}
+      <StatusChip label="task input delivered" tone="ok" dot />
+    {/if}
     {#if previewHtml !== ''}
       <AppFrame
         html={previewHtml}
@@ -477,9 +495,9 @@
         hostContext={emulatedHostContext}
         hostCapabilities={emulatedHostCapabilities}
         fixtureResult={invokeResult ?? activeFixture}
-        pushToolResult={invokeResult?.structuredContent ?? activeFixture?.structuredContent}
+        pushToolResult={invokeResult ? invokeResult.structuredContent : activeFixture?.structuredContent}
         onElicitationResponse={onElicitationResponse}
-        taskIdMeta={extractTaskId(invokeResult?.structuredContent ?? activeFixture?.structuredContent)}
+        taskIdMeta={extractTaskId(invokeResult ? invokeResult.structuredContent : activeFixture?.structuredContent)}
         pushTaskProgress={currentTaskProgress}
       />
     {:else if appsState === 'loading'}

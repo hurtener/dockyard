@@ -20,7 +20,7 @@ import (
 //
 // `dockyard install claude|cursor` writes the MCP host's config so the host
 // launches this Dockyard server as a local stdio subprocess, then verifies the
-// server boots with a real MCP initialize handshake. The write is
+// server boots with modern MCP discovery or a recognized legacy fallback. The write is
 // non-destructive — the prior config is backed up and unrelated host entries
 // are preserved. install writes a HOST config; it is not an MCP client (P4).
 func newInstallCmd() *cobra.Command {
@@ -37,8 +37,9 @@ func newInstallCmd() *cobra.Command {
 
 'dockyard install claude' (or 'cursor') writes the host's MCP config file so
 the host launches this Dockyard server as a local stdio subprocess, then
-verifies the server boots by spawning it and driving a real MCP initialize
-handshake.
+verifies the server boots by spawning it and connecting with modern
+server/discover negotiation. A legacy initialize handshake is used only when
+the server explicitly signals that fallback.
 
 The write is non-destructive: the prior config is backed up to a timestamped
 sidecar and every unrelated MCP-server entry is preserved. Pass --binary to
@@ -122,7 +123,7 @@ func printInstallResult(w io.Writer, res installpkg.Result) {
 		fmt.Fprintf(w, "  backup  %s\n", res.BackupPath) //nolint:errcheck // CLI stdout write
 	}
 	if res.BootOK {
-		fmt.Fprint(w, "  boot    OK — server completed the MCP initialize handshake\n") //nolint:errcheck // CLI stdout write
+		fmt.Fprint(w, "  boot    OK — server completed MCP discovery or recognized legacy fallback\n") //nolint:errcheck // CLI stdout write
 	} else {
 		fmt.Fprint(w, "  boot    FAILED — config written, but the server did not boot cleanly\n") //nolint:errcheck // CLI stdout write
 	}

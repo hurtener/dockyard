@@ -7,10 +7,90 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"testing"
+
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/hurtener/dockyard/internal/scaffold"
 )
+
+func TestBootCheckNegotiation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name           string
+		discoverResult func() (mcpsdk.Result, error)
+		wantErr        bool
+		wantInitialize bool
+	}{
+		{
+			name: "server discover succeeds without initialize",
+			discoverResult: func() (mcpsdk.Result, error) {
+				return &mcpsdk.DiscoverResult{
+					SupportedVersions: []string{"2026-07-28"},
+					Capabilities:      &mcpsdk.ServerCapabilities{},
+					ServerInfo:        &mcpsdk.Implementation{Name: "modern", Version: "1"},
+				}, nil
+			},
+		},
+		{
+			name: "recognized method-not-found falls back to initialize",
+			discoverResult: func() (mcpsdk.Result, error) {
+				return nil, &jsonrpc.Error{Code: jsonrpc.CodeMethodNotFound, Message: "method not found"}
+			},
+			wantInitialize: true,
+		},
+		{
+			name: "unrelated discovery error does not downgrade",
+			discoverResult: func() (mcpsdk.Result, error) {
+				return nil, &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "discovery backend unavailable"}
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var discoverCalls, initializeCalls atomic.Int32
+			srv := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "test", Version: "1"}, nil)
+			srv.AddReceivingMiddleware(func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
+				return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
+					switch method {
+					case "server/discover":
+						discoverCalls.Add(1)
+						return tt.discoverResult()
+					case "initialize":
+						initializeCalls.Add(1)
+					}
+					return next(ctx, method, req)
+				}
+			})
+			clientTransport, serverTransport := mcpsdk.NewInMemoryTransports()
+			serverSession, err := srv.Connect(context.Background(), serverTransport, nil)
+			if err != nil {
+				t.Fatalf("server Connect: %v", err)
+			}
+			t.Cleanup(func() { _ = serverSession.Close() })
+
+			client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "bootcheck", Version: "1"}, nil)
+			session, err := client.Connect(context.Background(), &modernFirstTransport{base: clientTransport}, nil)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Client.Connect error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if session != nil {
+				_ = session.Close()
+			}
+			if discoverCalls.Load() != 1 {
+				t.Errorf("server/discover calls = %d, want 1", discoverCalls.Load())
+			}
+			if got := initializeCalls.Load() > 0; got != tt.wantInitialize {
+				t.Errorf("initialize called = %v, want %v", got, tt.wantInitialize)
+			}
+		})
+	}
+}
 
 // repoRoot returns the Dockyard repository root — two directories up from this
 // test file (internal/installpkg/<file>).
@@ -64,7 +144,7 @@ func buildRealServer(t *testing.T, name string) (projectDir, binaryPath string) 
 }
 
 // TestBootCheck_PassesForARealServer verifies the boot check completes a real
-// MCP initialize handshake against a freshly built Dockyard server.
+// modern MCP discovery against a freshly built Dockyard server.
 func TestBootCheck_PassesForARealServer(t *testing.T) {
 	t.Parallel()
 	_, binaryPath := buildRealServer(t, "bc-ok")

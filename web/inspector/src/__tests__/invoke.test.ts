@@ -8,7 +8,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, fireEvent, waitFor } from '@testing-library/svelte';
 import ToolsPanel from '../lib/ToolsPanel.svelte';
-import { invokeTool } from '../lib/api.js';
+import { invokeTool, postElicitationResponse } from '../lib/api.js';
 import type { ToolContract } from '../lib/contracts.js';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -64,6 +64,40 @@ describe('invokeTool', () => {
     );
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toEqual({ err: 1 });
+  });
+
+  it('preserves arbitrary structured content and MRTR continuation fields', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({
+      structuredContent: ['arbitrary', 7],
+      inputRequests: { approval: { method: 'elicitation/create' } },
+      requestState: 'opaque-state',
+    }));
+    const result = await invokeTool(
+      { tool: 'approve', arguments: {}, inputResponses: { approval: true }, requestState: 'opaque-state' },
+      '', fetchImpl as unknown as typeof fetch,
+    );
+    expect(result.structuredContent).toEqual(['arbitrary', 7]);
+    expect(result.inputRequests).toEqual({ approval: { method: 'elicitation/create' } });
+    expect(result.requestState).toBe('opaque-state');
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body as string)).toMatchObject({
+      inputResponses: { approval: true }, requestState: 'opaque-state',
+    });
+  });
+});
+
+describe('task input delivery', () => {
+  it('sends modern protocol and keyed inputResponses', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ taskId: 'task-1', delivered: true }));
+    await postElicitationResponse({
+      taskId: 'task-1',
+      protocol: '2026-07-28',
+      inputResponses: { approval: { action: 'accept', content: { approved: true } } },
+    }, '', fetchImpl as unknown as typeof fetch);
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body as string)).toEqual({
+      taskId: 'task-1',
+      protocol: '2026-07-28',
+      inputResponses: { approval: { action: 'accept', content: { approved: true } } },
+    });
   });
 });
 
@@ -167,5 +201,24 @@ describe('ToolsPanel — invoke flow (D-131)', () => {
     await fireEvent.submit(container.querySelector('form')!);
     await waitFor(() => expect(getByTestId('invoke-error-region')).toBeTruthy());
     expect(getByTestId('invoke-error-region').textContent).toMatch(/server unreachable/);
+  });
+
+  it('renders MRTR input and retries with inputResponses and requestState', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ inputRequests: { approval: { prompt: 'Approve?' } }, requestState: 'state-1' }))
+      .mockResolvedValueOnce(jsonResponse({ structuredContent: 'approved' }));
+    const { getByText, getByTestId, container } = render(ToolsPanel, {
+      props: { contracts: [contract], panelState: 'ready', fetchImpl: fetchImpl as unknown as typeof fetch },
+    });
+    await fireEvent.click(getByText('greet'));
+    await fireEvent.input(getByTestId('invoke-greeting'), { target: { value: 'operator' } });
+    await fireEvent.submit(container.querySelector('form')!);
+    await waitFor(() => expect(getByTestId('mrtr-ready')).toBeTruthy());
+    await fireEvent.input(getByTestId('mrtr-response-approval'), { target: { value: '{"approved":true}' } });
+    await fireEvent.click(getByTestId('mrtr-retry'));
+    await waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body as string)).toMatchObject({
+      inputResponses: { approval: { approved: true } }, requestState: 'state-1',
+    });
   });
 });

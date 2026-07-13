@@ -191,11 +191,13 @@ func schemaObject(s *jsonschema.Schema) bool {
 // is informational and does not fail the run.
 func runSpecCompliance(projectDir string) Result {
 	res := Result{Category: CategorySpecCompliance, Gating: true}
+	coreDetail, corePassed := renderCoreConformance(runCoreConformance(coreConformanceFixtures))
 
 	report, err := validate.Run(validate.Options{ProjectDir: projectDir})
 	if err != nil {
 		res.Passed = false
-		res.Detail = fmt.Sprintf("the validation engine could not run: %v", err)
+		res.Detail = fmt.Sprintf("offline core conformance:\n%s\nproject validation could not run: %v",
+			indent(coreDetail), err)
 		return res
 	}
 
@@ -215,15 +217,19 @@ func runSpecCompliance(projectDir string) Result {
 	if len(blockers) > 0 {
 		sort.Strings(blockers)
 		res.Passed = false
-		res.Detail = "spec-compliance violation (checked against the vendored MCP specs):\n" +
-			indent(strings.Join(blockers, "\n"))
+		res.Detail = "offline core conformance:\n" + indent(coreDetail) +
+			"\nproject spec-compliance violation:\n" + indent(strings.Join(blockers, "\n"))
 		return res
 	}
-	res.Passed = true
+	res.Passed = corePassed
+	res.Detail = "offline core conformance:\n" + indent(coreDetail)
+	if !corePassed {
+		return res
+	}
 	if len(warnings) > 0 {
-		res.Detail = fmt.Sprintf("conforms to the vendored MCP specs (%d warning(s))", len(warnings))
+		res.Detail += fmt.Sprintf("\nproject manifest conforms (%d warning(s))", len(warnings))
 	} else {
-		res.Detail = "conforms to the vendored MCP specs"
+		res.Detail += "\nproject manifest conforms"
 	}
 	return res
 }

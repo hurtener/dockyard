@@ -83,7 +83,7 @@ Categories (per the verb's `--help`):
 | `go-test`         | the project's own `go test ./...`                             |
 | `contract`        | the generated JSON Schema + TS still match the Go contracts   |
 | `golden`          | the fixture / golden snapshots are present and coherent       |
-| `spec-compliance` | the Apps/Tasks shapes conform to the vendored MCP specs       |
+| `spec-compliance` | offline `2025-11-25` + `2026-07-28` core fixture conformance  |
 | `capability`      | the project degrades gracefully across host capability sets    |
 
 A regression in any **gating** category exits non-zero. Warnings (e.g. a
@@ -93,6 +93,11 @@ fail the run.
 `--skip-go-test` is the "the slow tests already ran in another CI step"
 escape hatch — it keeps the contract / spec / capability gates running so
 the framework's invariants are still enforced.
+
+The conformance detail must show legacy `2025-11-25` `initialize` and modern
+`2026-07-28` `server/discover` separately. It uses embedded vendored fixtures
+and never contacts a live host. Apps `2026-01-26` `ui/initialize` is a distinct
+iframe dialect, not base MCP discovery.
 
 ## Reading the report
 

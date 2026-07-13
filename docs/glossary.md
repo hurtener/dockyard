@@ -110,6 +110,12 @@ peers and request metadata plus `server/discover` for `2026-07-28`. Dockyard
 reads it at run time and adapts; it never hardcodes a per-host capability matrix.
 RFC §7.5, §19.1. D-011, D-190.
 
+**Explicit legacy fallback** — a client first sends a complete modern
+`2026-07-28` `server/discover` request, then starts a distinct `2025-11-25`
+`initialize` lifecycle only after a recognized compatibility response. A
+transport, authorization, malformed-response, or unrelated server failure does
+not trigger downgrade. D-194.
+
 **Cache policy** — typed server guidance attached to a list or resource response:
 how long a client may reuse it and whether it may share it across principals. The
 server derives it from its resource semantics; raw wire fields remain versioned

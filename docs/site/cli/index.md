@@ -69,7 +69,8 @@ project with an embedded fsnotify watcher — no external dev tool — and:
     inspector URL is printed to stdout once it is reachable.
 
 By default the dev loop pins the supervised Go server to HTTP on
-127.0.0.1:8080 so the inspector has a known MCP base URL to attach to.
+127.0.0.1:8080 so the inspector has a known MCP base URL to attach to. HTTP
+accepts the modern server/discover lifecycle and legacy initialize fallback.
 A developer who already exported DOCKYARD_TRANSPORT / DOCKYARD_HTTP_ADDR
 in their shell wins — the dev-loop pins are defaults, not overrides.
 
@@ -156,8 +157,9 @@ Register a built Dockyard server with an MCP host (RFC §14).
 
 'dockyard install claude' (or 'cursor') writes the host's MCP config file so
 the host launches this Dockyard server as a local stdio subprocess, then
-verifies the server boots by spawning it and driving a real MCP initialize
-handshake.
+verifies the server boots by spawning it and connecting with modern
+server/discover negotiation. A legacy initialize handshake is used only when
+the server explicitly signals that fallback.
 
 The write is non-destructive: the prior config is backed up to a timestamped
 sidecar and every unrelated MCP-server entry is preserved. Pass --binary to
@@ -213,7 +215,8 @@ same pipeline 'dockyard build' runs — and then runs the produced server on the
 transport selected by --transport:
 
   - stdio  the local single-user subprocess transport (the default);
-  - http   the streamable-HTTP transport, listening on --addr.
+  - http   the streamable-HTTP transport, listening on --addr; it accepts the
+           modern server/discover lifecycle and legacy initialize fallback.
 
 The project's server owns its transport wiring; 'dockyard run' drives it and
 never reimplements a transport. Press Ctrl-C to stop: the server child is torn

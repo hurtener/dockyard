@@ -1,0 +1,3 @@
+core 2025-11-25 [PASS]: initialize fixture conforms
+core 2026-07-28 [PASS]: server/discover fixture conforms
+Apps 2026-01-26 ui/initialize is a separate iframe dialect, not base MCP discovery

@@ -131,7 +131,7 @@ func serve(ctx context.Context, srv *server.Server, obsSink *obs.SSESink, logger
 }
 
 func serveHTTP(ctx context.Context, srv *server.Server, obsSink *obs.SSESink, logger *slog.Logger) error {
-	handler, err := srv.HTTPHandler(nil)
+	handler, err := srv.HTTPHandler(&server.HTTPOptions{ProtocolMode: server.Dual})
 	if err != nil {
 		return err
 	}

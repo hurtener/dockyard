@@ -33,7 +33,7 @@ func newAppTestServer(t *testing.T, withApp bool) string {
 			t.Fatalf("apps.Register: %v", err)
 		}
 	}
-	handler, err := srv.HTTPHandler(&server.HTTPOptions{Security: server.DefaultHTTPSecurity()})
+	handler, err := srv.HTTPHandler(&server.HTTPOptions{ProtocolMode: server.Dual, Security: server.DefaultHTTPSecurity()})
 	if err != nil {
 		t.Fatalf("HTTPHandler: %v", err)
 	}
