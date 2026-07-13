@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/hurtener/dockyard/internal/protocolcodec"
-	"github.com/hurtener/dockyard/runtime/obs"
 )
 
 // Dispatch routes one tasks/* JSON-RPC request and returns its result JSON.
@@ -97,13 +96,19 @@ func (e *Engine) handleResult(ctx context.Context, params json.RawMessage) (json
 	// a task that finishes between the first Get and the registration cannot
 	// be missed (the engine closes the waiter channel on every finish).
 	for !rec.Status.IsTerminal() {
-		ch := e.waitChan(p.ID)
+		runtime, runtimeErr := e.taskRuntimeFor(ctx, p.ID)
+		if runtimeErr != nil {
+			return nil, runtimeErr
+		}
+		ch := runtime.waitChan(p.ID)
 		// Re-read: the task may have finished between Get and waitChan.
 		rec, err = e.store.Get(ctx, p.ID)
 		if err != nil {
+			runtime.removeWaiter(p.ID, ch)
 			return nil, err
 		}
 		if rec.Status.IsTerminal() {
+			runtime.removeWaiter(p.ID, ch)
 			break
 		}
 		select {
@@ -115,6 +120,7 @@ func (e *Engine) handleResult(ctx context.Context, params json.RawMessage) (json
 		case <-ctx.Done():
 			// The requestor disconnected or cancelled the RPC; this is not a
 			// task error — the task keeps running and may be polled again.
+			runtime.removeWaiter(p.ID, ch)
 			return nil, fmt.Errorf("%w: tasks/result wait cancelled: %w", ErrInvalidParams, ctx.Err())
 		}
 	}
@@ -148,43 +154,14 @@ func (e *Engine) handleCancel(ctx context.Context, params json.RawMessage) (json
 			ErrAlreadyTerminal, p.ID, rec.Status)
 	}
 
-	// Record the cancelled outcome and flip the status to `cancelled` BEFORE
-	// signalling the handler's context. Cancelling the run context first would
-	// race the handler's cooperative unwind: a handler that observes ctx.Done()
-	// promptly can return and drive finish() to `failed` before this transition
-	// runs, leaving tasks/cancel with an illegal `failed → cancelled` move (the
-	// race the Wave 5 checkpoint surfaced — D-072). Transitioning first makes
-	// the store terminal-`cancelled` immediately; the handler's later finish()
-	// then sees an already-terminal task and is a cooperative no-op.
-	//
-	// The result is written before the transition so a tasks/result waiter,
-	// which unblocks the instant it sees a terminal status, always finds the
-	// payload already present.
-	_ = e.store.SetResult(ctx, p.ID, TaskResult{Err: "task cancelled"})
-	rec, err = e.store.Transition(ctx, p.ID, protocolcodec.TaskCancelled,
-		"The task was cancelled by request.")
+	rec, applied, err := e.cancelTask(ctx, p.ID,
+		"The task was cancelled by request.", TaskResult{Err: "task cancelled"}, taskOwnerForIdentity(e.identity, p.ID))
 	if err != nil {
 		return nil, err
 	}
-
-	// Now signal the running handler's context (cooperative cancellation) so a
-	// handler that checks ctx promptly stops and unwinds.
-	e.mu.Lock()
-	cancel := e.cancels[p.ID]
-	e.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	if !applied {
+		return nil, fmt.Errorf("%w: cannot cancel task %q already in terminal status %q", ErrAlreadyTerminal, p.ID, rec.Status)
 	}
-
-	// Emit the obs/v1 task.progress terminal event for the cancellation (P2) —
-	// tasks/cancel is a terminal path the run goroutine's finish does not cover.
-	e.rec.TaskEvent(ctx, e.taskSpan(p.ID).Child(), obs.PhaseEnd, obs.TaskProgressPayload{
-		TaskID:  p.ID,
-		Status:  string(protocolcodec.TaskCancelled),
-		Message: "The task was cancelled by request.",
-	}, nil)
-
-	e.wake(p.ID)
 
 	return e.codec.EncodeGetTaskResult(rec.Task())
 }

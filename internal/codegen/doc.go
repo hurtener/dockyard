@@ -38,17 +38,18 @@
 //     flattens them — tygo would otherwise emit a named nested property),
 //     matching Go's own encoding/json field promotion.
 //
-// # Recursion — a documented V1 limitation
+// # Recursive contracts
 //
-// A recursive (self-referential) contract — a type that, directly or
-// transitively, contains itself — is not supported in V1 (D-052). JSON Schema
-// expresses cycles with $ref/$defs, but github.com/google/jsonschema-go does
-// not emit $defs for recursive Go types: it hard-fails inside its reflection
-// walk and exposes no hook to break the cycle or post-process it into a $ref.
-// SchemaForType detects the cycle up front and returns ErrRecursiveContract — a
-// specific, actionable error citing this limitation — rather than leaking the
-// engine's vague internal "cycle detected" string. The TypeScript generator
-// (tygo) handles recursion natively, so only the schema half is limited.
+// Recursive (self-referential) contracts are supported. SchemaForType detects
+// direct and transitive cycles and emits a deterministic JSON Schema 2020-12
+// graph using local $defs/$ref references. Generation bounds type-graph depth
+// and node count, and validation accepts only bounded local references; it never
+// dereferences an external $ref or $dynamicRef.
+//
+// ErrRecursiveContract remains exported for source compatibility with callers
+// compiled against the former recursion limitation. Recursive contracts no
+// longer return it; failures such as exceeding the generation bounds return an
+// error wrapping ErrInvalidContract.
 //
 // # TypeScript (Phase 05)
 //

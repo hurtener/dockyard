@@ -34,10 +34,10 @@ examples/backend-tools-only/
     └── handlers_test.go
 ```
 
-Generated JSON Schema + TypeScript live under
-`internal/contracts/_generated/` after you run `dockyard generate` — the
-example does not check generated artifacts in (consistent with the
-templates).
+Generated JSON Schema and TypeScript live beside the Go source in
+`internal/contracts/`, with ownership metadata in
+`.dockyard/generated-artifacts.json`. Generated artifacts are checked in so a
+clone carries the exact contract surface that `dockyard validate` verifies.
 
 ## Try it
 

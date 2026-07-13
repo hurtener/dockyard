@@ -111,7 +111,7 @@ func TestResolveContracts_RealResolver(t *testing.T) {
 
 func TestResolveContracts_Unresolved(t *testing.T) {
 	m := &Manifest{
-		Tools: []Tool{{Name: "t", Input: "pkg.Missing", Output: "pkg.AlsoMissing"}},
+		Tools: []Tool{{Name: "t", Input: "internal/contracts.Missing", Output: "internal/contracts.AlsoMissing"}},
 	}
 	r := NewRegistryResolver()
 	_, err := m.ResolveContracts(r)
@@ -124,7 +124,7 @@ func TestResolveContracts_Unresolved(t *testing.T) {
 }
 
 func TestResolveContracts_NilResolver(t *testing.T) {
-	m := &Manifest{Tools: []Tool{{Name: "t", Input: "p.In", Output: "p.Out"}}}
+	m := &Manifest{Tools: []Tool{{Name: "t", Input: "internal/contracts.In", Output: "internal/contracts.Out"}}}
 	if _, err := m.ResolveContracts(nil); err == nil {
 		t.Fatal("ResolveContracts(nil): want error, got nil")
 	}

@@ -20,6 +20,11 @@ import (
 // stdio handshakes in well under a second.
 const bootCheckTimeout = 15 * time.Second
 
+// bootCheckTerminateDuration bounds each graceful/terminate wait performed by
+// CommandTransport.Close. An install probe is disposable and must not add the
+// SDK's multi-second production defaults to an already expired boot check.
+const bootCheckTerminateDuration = 500 * time.Millisecond
+
 // bootCheck verifies the host config launches a working server: it spawns the
 // built server binary exactly as the host config does — as a local stdio
 // subprocess, connects with modern server/discover negotiation (falling back
@@ -42,8 +47,15 @@ func bootCheck(ctx context.Context, binaryPath string) error {
 	// The server is spawned exactly as the host config launches it: the bare
 	// command, communicating over stdio. CommandTransport owns the child's
 	// lifecycle — closing the session terminates the process.
-	cmd := exec.Command(binaryPath) //nolint:gosec // binaryPath is a Dockyard-built artifact the caller selected
-	transport := &modernFirstTransport{base: &mcpsdk.CommandTransport{Command: cmd}}
+	cmd := exec.CommandContext(ctx, binaryPath) //nolint:gosec // binaryPath is a Dockyard-built artifact the caller selected
+	transport := &modernFirstTransport{base: &mcpsdk.CommandTransport{
+		Command:           cmd,
+		TerminateDuration: bootCheckTerminateDuration,
+	}}
+	// Client.Connect does not close its transport on every post-connect
+	// handshake error. Keep independent ownership so no such path can orphan the
+	// throwaway subprocess.
+	defer func() { _ = transport.Close() }()
 
 	client := mcpsdk.NewClient(
 		&mcpsdk.Implementation{Name: "dockyard-install-bootcheck", Version: "0.0.0"}, nil)
@@ -66,6 +78,8 @@ func bootCheck(ctx context.Context, binaryPath string) error {
 // server/discover errors. Remove this adapter once the SDK narrows that policy.
 type modernFirstTransport struct {
 	base mcpsdk.Transport
+	mu   sync.Mutex
+	conn mcpsdk.Connection
 }
 
 func (t *modernFirstTransport) Connect(ctx context.Context) (mcpsdk.Connection, error) {
@@ -73,7 +87,20 @@ func (t *modernFirstTransport) Connect(ctx context.Context) (mcpsdk.Connection, 
 	if err != nil {
 		return nil, err
 	}
+	t.mu.Lock()
+	t.conn = conn
+	t.mu.Unlock()
 	return &modernFirstConnection{Connection: conn}, nil
+}
+
+func (t *modernFirstTransport) Close() error {
+	t.mu.Lock()
+	conn := t.conn
+	t.mu.Unlock()
+	if conn == nil {
+		return nil
+	}
+	return conn.Close()
 }
 
 type modernFirstConnection struct {
@@ -139,10 +166,24 @@ func recognizedLegacyFallback(resp *jsonrpc.Response) bool {
 	if json.Unmarshal(resp.Result, &result) != nil {
 		return false
 	}
+	if len(result.SupportedVersions) == 0 {
+		return false
+	}
+	containsSupportedLegacy := false
 	for _, version := range result.SupportedVersions {
-		if version == "2026-07-28" {
+		if !recognizedLegacyVersion(version) {
 			return false
 		}
+		containsSupportedLegacy = containsSupportedLegacy || version == "2025-11-25"
 	}
-	return len(result.SupportedVersions) > 0
+	return containsSupportedLegacy
+}
+
+func recognizedLegacyVersion(version string) bool {
+	switch version {
+	case "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05":
+		return true
+	default:
+		return false
+	}
 }

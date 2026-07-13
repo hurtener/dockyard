@@ -70,6 +70,69 @@ func loadProjectManifest(t *testing.T, projectDir string) *manifest.Manifest {
 	return m
 }
 
+func TestRunContractIgnoresUnownedMatchingSchema(t *testing.T) {
+	projectDir := scaffoldRealProject(t, "testgate-unowned")
+	unowned := filepath.Join(projectDir, filepath.FromSlash(generate.SchemaFileName("manual", "output")))
+	if err := os.WriteFile(unowned, []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := runContract(projectDir, loadProjectManifest(t, projectDir))
+	if !result.Passed {
+		t.Fatalf("runContract result = %#v", result)
+	}
+}
+
+func TestRunContractRejectsMissingOwnershipIndex(t *testing.T) {
+	projectDir := scaffoldRealProject(t, "testgate-missing-owner")
+	if err := os.Remove(filepath.Join(projectDir, ".dockyard", "generated-artifacts.json")); err != nil {
+		t.Fatal(err)
+	}
+	result := runContract(projectDir, loadProjectManifest(t, projectDir))
+	if result.Passed || !strings.Contains(result.Detail, "ownership index is missing") {
+		t.Fatalf("runContract result = %#v", result)
+	}
+}
+
+func TestRunContractRejectsIncompleteOwnershipIndex(t *testing.T) {
+	projectDir := scaffoldRealProject(t, "testgate-incomplete-owner")
+	index := filepath.Join(projectDir, ".dockyard", "generated-artifacts.json")
+	if err := os.WriteFile(index, []byte("{\n  \"version\": 1,\n  \"artifacts\": []\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := runContract(projectDir, loadProjectManifest(t, projectDir))
+	if result.Passed || !strings.Contains(result.Detail, "missing current artifact") {
+		t.Fatalf("runContract result = %#v", result)
+	}
+}
+
+func TestRunContractRejectsExtraNestedOwnershipRecord(t *testing.T) {
+	projectDir := scaffoldRealProject(t, "testgate-extra-owner")
+	nested := filepath.Join(projectDir, "examples", "nested")
+	if err := os.MkdirAll(nested, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, manifest.DefaultFilename), []byte("name: nested\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	index := filepath.Join(projectDir, ".dockyard", "generated-artifacts.json")
+	raw, err := os.ReadFile(index) //nolint:gosec // index is inside the test's scaffolded temporary project.
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := "    {\n" +
+		`      "path": "examples/nested/internal/contracts/dockyard_enums.generated.go",` + "\n" +
+		`      "sha256": "` + strings.Repeat("0", 64) + `"` + "\n" +
+		"    },\n"
+	raw = []byte(strings.Replace(string(raw), `"artifacts": [`+"\n", `"artifacts": [`+"\n"+extra, 1))
+	if err := os.WriteFile(index, raw, 0o600); err != nil { //nolint:gosec // index is inside the test's scaffolded temporary project.
+		t.Fatal(err)
+	}
+	result := runContract(projectDir, loadProjectManifest(t, projectDir))
+	if result.Passed || !strings.Contains(result.Detail, "obsolete artifact") {
+		t.Fatalf("runContract result = %#v", result)
+	}
+}
+
 // TestRun_CleanProjectPassesEveryCategory runs the full gate against a real,
 // freshly-scaffolded project and asserts every category passes.
 func TestRun_CleanProjectPassesEveryCategory(t *testing.T) {
@@ -136,6 +199,25 @@ func TestRunGolden_RejectsNonconformantSchema(t *testing.T) {
 	result := runGolden(dir, m)
 	if result.Passed || !strings.Contains(result.Detail, "external $ref") {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRunContractRejectsOtherContractPackage(t *testing.T) {
+	projectDir := scaffoldRealProject(t, "testgate-other-contract-package")
+	otherDir := filepath.Join(projectDir, "internal", "other")
+	if err := os.MkdirAll(otherDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "contracts.go"), []byte("package other\ntype Input struct { Value string `json:\"value\"` }\ntype Output struct { Result string `json:\"result\"` }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := loadProjectManifest(t, projectDir)
+	m.Tools = append(m.Tools, manifest.Tool{
+		Name: "other", Description: "other", Input: "internal/other.Input", Output: "internal/other.Output", TaskSupport: manifest.TaskSupportForbidden,
+	})
+	result := runContract(projectDir, m)
+	if result.Passed || !strings.Contains(result.Detail, `canonical package "internal/contracts"`) {
+		t.Fatalf("noncanonical contract package result = %#v", result)
 	}
 }
 

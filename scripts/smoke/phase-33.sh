@@ -14,5 +14,6 @@ if [ -f runtime/tasks/modern_test.go ]; then ok "modern Tasks lifecycle tests ex
 if [ -f runtime/server/modern_tasks_test.go ]; then ok "modern Tasks HTTP integration test exists"; else fail "modern Tasks HTTP integration test missing"; fi
 if grep -q 'tasks/update' docs/site/getting-started/approval-flows.md && grep -q 'requestState' docs/site/getting-started/approval-flows.md; then ok "approval docs distinguish task update and core MRTR"; else fail "approval docs do not distinguish task update and core MRTR"; fi
 if grep -q 'Modern task input always uses `tasks/update`' skills/test-with-the-inspector/SKILL.md; then ok "inspector skill documents modern task input"; else fail "inspector skill modern task input guidance missing"; fi
+if grep -q 'type CoordinationIdentityProvider interface' runtime/tasks/store.go && grep -q 'CoordinationIdentityProvider' docs/site/getting-started/index.md; then ok "TaskStore coordination identity API is implemented and documented"; else fail "TaskStore coordination identity API or docs missing"; fi
 
 smoke_summary

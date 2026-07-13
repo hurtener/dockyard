@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,6 +79,30 @@ func TestRun_CleanProjectHasNoBlockers(t *testing.T) {
 	}
 }
 
+func TestStaleCodegenRejectsOtherContractPackage(t *testing.T) {
+	projectDir := scaffoldAndGenerate(t, "validate-other-contract-package")
+	otherDir := filepath.Join(projectDir, "internal", "other")
+	if err := os.MkdirAll(otherDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "contracts.go"), []byte("package other\ntype Input struct { Value string `json:\"value\"` }\ntype Output struct { Result string `json:\"result\"` }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := manifest.LoadFile(filepath.Join(projectDir, manifest.DefaultFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Tools = append(m.Tools, manifest.Tool{
+		Name: "other", Description: "other", Input: "internal/other.Input", Output: "internal/other.Output", TaskSupport: manifest.TaskSupportForbidden,
+	})
+	rp := &reporter{}
+	lm := loadedManifest{m: m}
+	checkStaleCodegen(rp, projectDir, lm)
+	if len(rp.diagnostics) != 1 || !strings.Contains(rp.diagnostics[0].Message, `canonical package "internal/contracts"`) {
+		t.Fatalf("noncanonical contract package diagnostics = %v", rp.diagnostics)
+	}
+}
+
 // TestRun_StaleCodegenIsBlocker mutates a contract after generation and asserts
 // the stale-codegen check fires — the P1 enforcement, in-package.
 func TestRun_StaleCodegenIsBlocker(t *testing.T) {
@@ -100,6 +125,117 @@ func TestRun_StaleCodegenIsBlocker(t *testing.T) {
 	}
 	if !hasDiagnostic(report, CheckStaleCodegen, Blocker) {
 		t.Fatalf("stale generated output must be a CheckStaleCodegen Blocker; got %v", report.Diagnostics)
+	}
+}
+
+func TestRun_CustomContractJSONEncodingIsBlocker(t *testing.T) {
+	projectDir := scaffoldAndGenerate(t, "val-custom-encoding-unit")
+	contractsPath := filepath.Join(projectDir, "internal", "contracts", "contracts.go")
+	f, err := os.OpenFile(contractsPath, os.O_APPEND|os.O_WRONLY, 0) //nolint:gosec // test temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, writeErr := f.WriteString("\nfunc (*GreetOutput) MarshalText() ([]byte, error) { return nil, nil }\n")
+	if closeErr := f.Close(); writeErr != nil || closeErr != nil {
+		t.Fatalf("append custom encoder: %v / %v", writeErr, closeErr)
+	}
+	report, err := Run(Options{ProjectDir: projectDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasDiagnostic(report, CheckStaleCodegen, Blocker) {
+		t.Fatalf("custom contract encoding must block validation: %v", report.Diagnostics)
+	}
+	found := false
+	for _, diagnostic := range report.Blockers() {
+		found = found || diagnostic.Check == CheckStaleCodegen && strings.Contains(diagnostic.Message, "custom JSON encoding")
+	}
+	if !found {
+		t.Fatalf("custom encoding diagnostic missing: %v", report.Diagnostics)
+	}
+}
+
+func TestRun_UnownedSchemaIsNotTreatedAsGenerated(t *testing.T) {
+	projectDir := scaffoldAndGenerate(t, "val-unowned-unit")
+	unowned := filepath.Join(projectDir, filepath.FromSlash(generate.SchemaFileName("manual", "input")))
+	if err := os.WriteFile(unowned, []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(Options{ProjectDir: projectDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasDiagnostic(report, CheckStaleCodegen, Blocker) {
+		t.Fatalf("an unowned matching schema must not be treated as generated: %v", report.Diagnostics)
+	}
+}
+
+func TestRun_MissingOwnershipIndexIsBlocker(t *testing.T) {
+	projectDir := scaffoldAndGenerate(t, "val-missing-owner-unit")
+	if err := os.Remove(filepath.Join(projectDir, ".dockyard", "generated-artifacts.json")); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(Options{ProjectDir: projectDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasDiagnostic(report, CheckStaleCodegen, Blocker) {
+		t.Fatalf("missing generated ownership index must be stale: %v", report.Diagnostics)
+	}
+}
+
+func TestRun_IncompleteOwnershipIndexIsBlocker(t *testing.T) {
+	projectDir := scaffoldAndGenerate(t, "val-incomplete-owner-unit")
+	index := filepath.Join(projectDir, ".dockyard", "generated-artifacts.json")
+	if err := os.WriteFile(index, []byte("{\n  \"version\": 1,\n  \"artifacts\": []\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(Options{ProjectDir: projectDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasDiagnostic(report, CheckStaleCodegen, Blocker) {
+		t.Fatalf("incomplete generated ownership index must be stale: %v", report.Diagnostics)
+	}
+}
+
+func TestRun_NoncanonicalOwnershipIndexIsBlocker(t *testing.T) {
+	projectDir := scaffoldAndGenerate(t, "val-noncanonical-owner-unit")
+	index := filepath.Join(projectDir, ".dockyard", "generated-artifacts.json")
+	raw, err := os.ReadFile(index) //nolint:gosec // index is inside the test's scaffolded temporary project.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(index, bytes.ReplaceAll(raw, []byte("  "), []byte("    ")), 0o600); err != nil { //nolint:gosec // index is inside the test's scaffolded temporary project.
+		t.Fatal(err)
+	}
+	report, err := Run(Options{ProjectDir: projectDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasDiagnostic(report, CheckStaleCodegen, Blocker) {
+		t.Fatalf("noncanonical generated ownership index must be stale: %v", report.Diagnostics)
+	}
+}
+
+func TestRun_ExtraMissingOwnershipRecordIsBlocker(t *testing.T) {
+	projectDir := scaffoldAndGenerate(t, "val-extra-owner-unit")
+	index := filepath.Join(projectDir, ".dockyard", "generated-artifacts.json")
+	raw, err := os.ReadFile(index) //nolint:gosec // index is inside the test's scaffolded temporary project.
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := `{"path":"internal/contracts/obsolete_output.schema.json","sha256":"` + strings.Repeat("0", 64) + `"},`
+	raw = []byte(strings.Replace(string(raw), `"artifacts": [`, `"artifacts": [`+extra, 1))
+	if err := os.WriteFile(index, raw, 0o600); err != nil { //nolint:gosec // index is inside the test's scaffolded temporary project.
+		t.Fatal(err)
+	}
+	report, err := Run(Options{ProjectDir: projectDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasDiagnostic(report, CheckStaleCodegen, Blocker) {
+		t.Fatalf("extra missing ownership record must be stale: %v", report.Diagnostics)
 	}
 }
 

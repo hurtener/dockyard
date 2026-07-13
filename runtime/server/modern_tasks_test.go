@@ -21,7 +21,8 @@ func TestStatelessDiscoveryAndModernTaskMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apps capability: %v", err)
 	}
-	engine, err := tasks.NewEngine(tasks.NewInMemoryStore(), &tasks.Options{
+	store := tasks.NewInMemoryStore()
+	engine, err := tasks.NewEngine(store, &tasks.Options{
 		GenerateID:    func() (string, error) { return "modern-task", nil },
 		AdvertiseList: true, RequestorIdentifiable: true,
 	})
@@ -56,6 +57,12 @@ func TestStatelessDiscoveryAndModernTaskMethods(t *testing.T) {
 	got := modernPost(t, ts, "tasks/get", "modern-task", `{"taskId":"modern-task"}`)
 	if !strings.Contains(got, "modern-task") {
 		t.Fatalf("tasks/get response = %s", got)
+	}
+	if err := store.AddInputRequest(context.Background(), "modern-task", tasks.InputRequest{
+		Key: "roots", Method: tasks.InputMethodRoots,
+		Payload: json.RawMessage(`{"method":"roots/list","params":{}}`),
+	}); err != nil {
+		t.Fatalf("AddInputRequest: %v", err)
 	}
 	response := modernPost(t, ts, "tasks/update", "modern-task", `{"taskId":"modern-task","inputResponses":{}}`)
 	if !strings.Contains(response, `"resultType":"complete"`) {

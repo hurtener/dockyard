@@ -23,6 +23,72 @@ deliberately deferred to V2.
 
 (No entries yet — the next release surface will land here.)
 
+## [1.9.0] - 2026-07-13
+
+### Added
+
+- **MCP `2026-07-28` support alongside the existing `2025-11-25`
+  lifecycle.** One HTTP endpoint now dispatches explicitly by protocol version,
+  supports stateless `server/discover`, carries request-scoped client metadata
+  and capabilities, and preserves the legacy initialize/session flow without
+  body sniffing or silent fallback.
+- **Modern Tasks and multi-round-trip input.** Dockyard now advertises and serves
+  `tasks/get`, `tasks/update`, and `tasks/cancel` through the modern extension,
+  keeps legacy Tasks isolated behind its versioned codec, and supports both core
+  request-state retries and durable mid-task input without conflating their
+  lifecycles.
+- **OAuth 2.1 protected-resource support for HTTP servers.** Applications can
+  opt into RFC 9728 metadata, Bearer challenges, required scopes, JWT validation,
+  trusted RFC 8414 discovery, bounded JWKS rotation, and verified-principal
+  propagation into tools, Tasks, and authenticated continuations. Dockyard
+  remains a resource server; OAuth client flows and credentials remain outside
+  its scope.
+- **JSON Schema 2020-12 contract generation.** Generated contracts now support
+  bounded local `$defs`/`$ref` recursion, composition, arbitrary structured
+  output values, explicit JSON `null`, typed cache metadata, and modern
+  resource-not-found semantics.
+
+### Changed
+
+- **Generated contract ownership is explicit and safe.** `dockyard generate`
+  records canonical artifact paths and hashes in
+  `.dockyard/generated-artifacts.json`, removes only verified obsolete output,
+  and uses root-confined staged writes, rollback, and symlink-safe cleanup.
+  `validate` and `test` reject stale, edited, missing, or noncanonical artifacts.
+- **Generated TypeScript is canonical at
+  `internal/contracts/contracts.ts`.** Backend-only and UI-bearing projects now
+  share one stable artifact layout. Template Apps import those generated types
+  instead of maintaining handwritten structured-output copies.
+- **Inspector, install checks, scaffolds, examples, and quality gates now use
+  strict modern-first negotiation.** Legacy fallback occurs only for recognized
+  compatibility responses; malformed, unauthorized, future-version, and
+  unrelated failures never downgrade.
+
+### Fixed
+
+- Hardened concurrent Tasks admission, cancellation, expiration, result waiting,
+  input delivery, per-requestor limits, and shared-store ownership across
+  independently routed engines. Atomic-capable stores use their native
+  operations; existing `TaskStore` implementations remain source-compatible
+  through validated coordination fallbacks.
+- Closed schema/TypeScript parity gaps for recursive and embedded fields, byte
+  aliases, imported types, `encoding/json` tags, `json:",string"`, ignored
+  fields, custom marshalers, and pointer scalar contracts. Unsupported
+  addressability-dependent encoders now fail generation instead of producing a
+  misleading wire contract.
+- Modern successful responses now include the required
+  `resultType: "complete"` discriminator while preserving task and
+  `input_required` result variants and legacy response shapes.
+- Bounded all MCP and inspector request bodies, added inspector Host, Origin,
+  Content-Type, anti-framing, and strict JSON-RPC response checks, and made
+  subprocess/session cleanup deterministic under failure and race-test load.
+- Corrected JWT/JWKS refresh throttling, same-key-ID rotation, key metadata,
+  algorithm/key bounds, scope grammar, principal invariants, and policy snapshot
+  ownership.
+- Added strict stateless transport leak regressions. Repeated full-handler and
+  bare-SDK comparisons release every temporary server reader after request and
+  server teardown; the previous leak allowance was removed.
+
 ## [1.8.0] - 2026-06-30
 
 ### Added
@@ -897,7 +963,9 @@ Vite, [tygo](https://github.com/gzuidhof/tygo),
 [modernc.org/sqlite](https://gitlab.com/cznic/sqlite), and
 [VitePress](https://vitepress.dev). Apache-2.0 licensed.
 
-[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.7.3...HEAD
+[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/hurtener/dockyard/compare/v1.8.0...v1.9.0
+[1.8.0]: https://github.com/hurtener/dockyard/releases/tag/v1.8.0
 [1.7.3]: https://github.com/hurtener/dockyard/releases/tag/v1.7.3
 [1.7.2]: https://github.com/hurtener/dockyard/releases/tag/v1.7.2
 [1.7.1]: https://github.com/hurtener/dockyard/releases/tag/v1.7.1

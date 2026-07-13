@@ -118,10 +118,9 @@ type AuditSpan struct {
 }
 `
 
-// shapesTSSource exercises a recursive (self-referential) contract — tygo
-// handles recursion natively in TypeScript even though the JSON Schema
-// generator cannot (finding 5 / D-052). It pairs the recursion-limit decision
-// with proof that the TS half is unaffected.
+// shapesTSSource exercises a recursive (self-referential) contract. It pairs
+// the TypeScript declaration golden with the JSON Schema generator's local
+// $defs/$ref representation of the same contract shape.
 const shapesTSSource = `// AuditNode is a recursive contract: a node referencing more nodes.
 type AuditNode struct {
 	Name     string       ` + "`json:\"name\"`" + `

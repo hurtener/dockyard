@@ -28,8 +28,12 @@ import (
 func TestPhase36OAuthResourceServerEndToEnd(t *testing.T) {
 	t.Parallel()
 	as := newPhase36AuthorizationServer(t)
+	clock := time.Now()
+	var clockNanos atomic.Int64
+	clockNanos.Store(clock.UnixNano())
 	resource := "https://api.example.test/tenant/mcp"
-	engine, err := tasks.NewEngine(tasks.NewInMemoryStore(), &tasks.Options{
+	taskStore := tasks.NewInMemoryStore()
+	engine, err := tasks.NewEngine(taskStore, &tasks.Options{
 		GenerateID:            func() (string, error) { return fmt.Sprintf("oauth-task-%d", as.taskIDs.Add(1)), nil },
 		RequestorIdentifiable: true,
 		AdvertiseList:         true,
@@ -79,7 +83,10 @@ func TestPhase36OAuthResourceServerEndToEnd(t *testing.T) {
 	}
 	h, err := srv.HTTPHandler(&server.HTTPOptions{ProtocolMode: server.Dual, Security: server.DefaultHTTPSecurity(), Authorization: &authz.Config{
 		Driver: jwtjwks.DriverName, Resource: resource, Issuer: as.issuer(), Scopes: []string{"mcp:read", "mcp:write", "mcp:admin"}, RequiredScopes: []string{"mcp:read", "mcp:write"},
-		ContinuationKey: []byte("phase-36-integration-continuation-key"), DriverConfig: jwtjwks.Config{AllowedAlgorithms: []string{"RS256"}, HTTPClient: as.server.Client(), CacheTTL: time.Hour, RefreshCooldown: time.Nanosecond},
+		ContinuationKey: []byte("phase-36-integration-continuation-key"), DriverConfig: jwtjwks.Config{
+			AllowedAlgorithms: []string{"RS256"}, HTTPClient: as.server.Client(), CacheTTL: time.Hour,
+			RefreshCooldown: time.Second, Now: func() time.Time { return time.Unix(0, clockNanos.Load()) },
+		},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -160,6 +167,7 @@ func TestPhase36OAuthResourceServerEndToEnd(t *testing.T) {
 	// An unknown kid causes one bounded refresh and accepts the rotated real key.
 	before := as.jwksRequests.Load()
 	rotated := as.rotate(t, "rotated")
+	clockNanos.Store(clock.Add(2 * time.Second).UnixNano())
 	rotatedToken := as.token(t, rotated, "rotated", "RS256", as.issuer(), resource, "alice", "mcp:read mcp:write", time.Now().Add(time.Hour))
 	phase36ExpectSubject(t, phase36RPC(t, mcp, rotatedToken, true, "tools/call", map[string]any{"name": "protected", "arguments": map[string]any{"action": "echo"}}, ""), "alice")
 	if delta := as.jwksRequests.Load() - before; delta != 1 {
@@ -180,6 +188,12 @@ func TestPhase36OAuthResourceServerEndToEnd(t *testing.T) {
 	}
 	if got := phase36JSON(t, phase36RPC(t, mcp, rotatedToken, true, "tasks/get", map[string]any{"taskId": taskID}, "")); got["error"] != nil {
 		t.Fatalf("alice tasks/get failed: %#v", got)
+	}
+	if err := taskStore.AddInputRequest(context.Background(), taskID, tasks.InputRequest{
+		Key: "roots", Method: tasks.InputMethodRoots,
+		Payload: json.RawMessage(`{"method":"roots/list","params":{}}`),
+	}); err != nil {
+		t.Fatalf("add pending task input: %v", err)
 	}
 	if got := phase36JSON(t, phase36RPC(t, mcp, rotatedToken, true, "tasks/update", map[string]any{"taskId": taskID, "inputResponses": map[string]any{}}, "")); got["error"] != nil {
 		t.Fatalf("alice tasks/update failed: %#v", got)

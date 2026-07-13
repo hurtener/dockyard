@@ -3,7 +3,7 @@
 ## Summary
 
 Phase 05 completes the Design A codegen pipeline (RFC §6.2): it generates the
-TypeScript half of a tool contract — `web/src/generated/contracts.ts` — from the
+TypeScript half of a tool contract — `internal/contracts/contracts.ts` — from the
 same Go contract structs that Phase 04 turns into JSON Schema, using the pure-Go
 AST generator `github.com/gzuidhof/tygo`. It also ships the **drift cross-check**:
 a library function — the seam Phase 18's `dockyard validate` will call — that
@@ -16,7 +16,8 @@ when generated output on disk is stale versus its Go source.
   independently from Go, each by a pure-Go tool, and `dockyard validate`
   cross-verifies schema vs. TS and hard-fails on drift or stale output.
 - RFC §6.1 — the Go contract struct is the single source of truth (P1).
-- RFC §4.3 — the generated project layout names `web/src/generated/contracts.ts`.
+- RFC §4.3 — the generated project layout names
+  `internal/contracts/contracts.ts`.
 
 ## Briefs informing this phase
 
@@ -74,7 +75,7 @@ None. Phase 05 implements Design A as the RFC and brief 06 settle it.
 ## Acceptance criteria
 
 - [x] A Go contract struct generates correct, compilable TypeScript
-      (`web/src/generated/contracts.ts`-shaped output) via `tygo`.
+      (`internal/contracts/contracts.ts`-shaped output) via `tygo`.
 - [x] Generated TypeScript is deterministic (identical input → byte-identical
       output) and carries the `Code generated … DO NOT EDIT.` header.
 - [x] The drift cross-check detects a schema↔TS desync (a property present in one
@@ -141,7 +142,8 @@ var ErrStaleGenerated = errors.New(...)
 
 - **Unit:** `TypeScriptForSource` on scalars, nested structs, slices, maps,
   pointers, enums, optional fields; determinism (same input twice → identical
-  bytes); header present; `WithNullOptional` shape. `TypeScriptForDir` on a
+  bytes); header present; `WithNullOptional` shape; promoted-field comments;
+  imported anonymous structs; generated-Go exclusion. `TypeScriptForDir` on a
   multi-file fixture directory. `CrossCheck` — passing case and each desync class
   (missing property, extra property, optionality mismatch, non-object schema,
   missing TS interface). `CheckStale` — identical vs. drifted bytes.
@@ -193,8 +195,9 @@ var ErrStaleGenerated = errors.New(...)
   (anonymous) struct field as a *named property*, but the JSON Schema — and Go's
   own `encoding/json` — inline the embedded struct's fields. `typeDeclSource` now
   flattens embedded struct fields at the AST level before tygo runs, so the
-  TypeScript matches the schema. An embedded type from another package is left
-  for tygo (its fields are not visible to the flattener).
+  TypeScript matches the schema. Imported anonymous structs are expanded into
+  synthetic named declarations first, then pass through the same flattening and
+  dominance rules; promoted source comments remain field JSDoc.
 - **R3 — RFC §18 Q-6.** The `google/jsonschema-go` version is kept in lockstep
   with the SDK (D-030); unchanged by this phase.
 
@@ -204,9 +207,12 @@ var ErrStaleGenerated = errors.New(...)
   generated JSON Schema and the generated TypeScript for a contract desync, or
   when generated output is stale versus its Go source. Phase 18's `dockyard
   validate` calls it. RFC §6.2. D-034.
-- **generated TypeScript** — `web/src/generated/contracts.ts`: the TypeScript
+- **generated TypeScript** — `internal/contracts/contracts.ts`: the TypeScript
   types generated from the Go contract structs by `tygo`; the UI-facing half of
-  the Design A pipeline. Never hand-authored. RFC §6.2. D-032.
+  the Design A pipeline. Backend-only projects generate it at the same canonical
+  path, and Apps import it from there. Manifest tool contracts are required to
+  use the `internal/contracts` package so this artifact is complete. Never
+  hand-authored. RFC §6.2. D-032, D-198.
 - **stale generated output** — a generated artifact whose on-disk content no
   longer matches a fresh regeneration from its Go source. A build blocker, never
   a warning. RFC §6.2. D-034.

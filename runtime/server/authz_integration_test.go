@@ -35,6 +35,8 @@ func (serverAuthValidator) Validate(_ context.Context, token string) (authz.Prin
 		return authz.Principal{Issuer: "https://issuer.example", Subject: "alice", Resource: "https://resource.example/mcp", Scopes: []string{"read", "write"}}, nil
 	case "narrow":
 		return authz.Principal{Issuer: "https://issuer.example", Subject: "alice", Resource: "https://resource.example/mcp", Scopes: []string{"read"}}, nil
+	case "wrong-resource":
+		return authz.Principal{Issuer: "https://issuer.example", Subject: "alice", Resource: "https://other.example/mcp", Scopes: []string{"read", "write"}}, nil
 	default:
 		return authz.Principal{}, authz.ErrInvalidToken
 	}
@@ -124,6 +126,34 @@ func TestHTTPAuthorizationMetadataChallengesAndPrincipal(t *testing.T) {
 	}
 }
 
+func TestHTTPAuthorizationMetadataRequiresExactQuery(t *testing.T) {
+	t.Parallel()
+	s, err := New(Info{Name: "auth-query", Version: "1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := authHTTPOptions()
+	opts.Authorization.Resource = "https://resource.example/mcp?tenant=alice"
+	h, err := s.HTTPHandler(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		url  string
+		want int
+	}{
+		{"https://resource.example/.well-known/oauth-protected-resource/mcp?tenant=alice", http.StatusOK},
+		{"https://resource.example/.well-known/oauth-protected-resource/mcp", http.StatusUnauthorized},
+		{"https://resource.example/.well-known/oauth-protected-resource/mcp?tenant=bob", http.StatusUnauthorized},
+	} {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, tc.url, nil))
+		if rr.Code != tc.want {
+			t.Errorf("GET %s status = %d, want %d", tc.url, rr.Code, tc.want)
+		}
+	}
+}
+
 func TestAuthenticatedContinuationRejectsCrossPrincipalAndTampering(t *testing.T) {
 	p := newContinuationProtector([]byte("0123456789abcdef0123456789abcdef"))
 	alice := authz.Principal{Issuer: "i", Subject: "alice", Resource: "r"}
@@ -168,6 +198,26 @@ func TestAuthorizationHandlerConcurrentReuse(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestAuthorizationHandlerSnapshotsPolicyAndChecksPrincipal(t *testing.T) {
+	s, _ := New(Info{Name: "auth", Version: "1"}, nil)
+	opts := authHTTPOptions()
+	h, err := s.HTTPHandler(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.Authorization.RequiredScopes[0] = "admin"
+
+	for token, want := range map[string]int{"alice": http.StatusBadRequest, "wrong-resource": http.StatusUnauthorized} {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "https://resource.example/mcp", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		h.ServeHTTP(rr, req)
+		if rr.Code != want {
+			t.Errorf("token %q status = %d, want %d", token, rr.Code, want)
+		}
+	}
 }
 
 func TestVerifiedTaskIdentityOverridesLegacyCallback(t *testing.T) {

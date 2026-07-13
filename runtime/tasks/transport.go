@@ -12,6 +12,8 @@ import (
 	"sync"
 )
 
+const maxLegacyTaskRequestBytes = 4 << 20
+
 // This file is the Tasks transport mount (RFC §8.2 — "a shim, by necessity").
 //
 // Phase 13 found that the go-sdk routes receiving methods through a fixed
@@ -149,9 +151,15 @@ func (m *Mount) HTTPMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxLegacyTaskRequestBytes)
 		body, err := io.ReadAll(r.Body)
 		_ = r.Body.Close()
 		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				http.Error(w, "legacy MCP request body exceeds 4 MiB", http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "read request body", http.StatusBadRequest)
 			return
 		}

@@ -18,8 +18,7 @@
  */
 
 import type { StyleVariables } from 'dockyard-bridge';
-
-export type ThemeMode = 'light' | 'dark' | 'auto';
+import type { ThemeMode } from '../../internal/contracts/contracts.js';
 
 /**
  * Resolves the effective theme for one rendered widget.

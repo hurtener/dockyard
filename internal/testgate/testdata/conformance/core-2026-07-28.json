@@ -7,22 +7,26 @@
     "id": 1,
     "method": "server/discover",
     "params": {
-      "protocolVersion": "2026-07-28",
-      "capabilities": {},
-      "clientInfo": {"name": "offline-conformance", "version": "1.0.0"}
+      "_meta": {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientInfo": {"name": "offline-conformance", "version": "1.0.0"}
+      }
     }
   },
   "response": {
     "jsonrpc": "2.0",
     "id": 1,
     "result": {
-      "protocolVersion": "2026-07-28",
+      "resultType": "complete",
+      "supportedVersions": ["2026-07-28"],
       "capabilities": {"tools": {}},
-      "serverInfo": {"name": "fixture-server", "version": "1.0.0"}
+      "serverInfo": {"name": "fixture-server", "version": "1.0.0"},
+      "ttlMs": 3600000,
+      "cacheScope": "public"
     }
   },
   "expect": {
-    "result.protocolVersion": "2026-07-28",
     "result.serverInfo.name": "fixture-server"
   }
 }

@@ -9,19 +9,10 @@
 -->
 <script lang="ts">
   import { MetricCard, Sparkline, StatusChip } from 'dockyard-ui';
-
-  type MetricPayload = {
-    kind: 'metric_card';
-    label: string;
-    value: unknown;
-    unit?: string;
-    delta?: { value: string; tone: 'ok' | 'warn' | 'error' } | null;
-    series?: number[];
-    breakdowns?: Array<{ label: string; value: unknown; share?: number }>;
-  };
+  import type { CreateMetricCardOutput } from '../../../internal/contracts/contracts.js';
 
   interface Props {
-    payload: MetricPayload;
+    payload: CreateMetricCardOutput;
   }
   let { payload }: Props = $props();
 

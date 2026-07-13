@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/hurtener/dockyard/internal/generate"
 )
 
 func TestGoServerCommandDefault(t *testing.T) {
@@ -30,6 +32,16 @@ func TestGoServerCommandDefault(t *testing.T) {
 	}
 }
 
+func TestGenerationHasChangesIncludesRemovals(t *testing.T) {
+	t.Parallel()
+	if !generationHasChanges(generate.Result{Removed: []string{"old.schema.json"}}) {
+		t.Fatal("a removed generated artifact must be reported as a codegen change")
+	}
+	if generationHasChanges(generate.Result{}) {
+		t.Fatal("an empty generation result must not be reported as changed")
+	}
+}
+
 func TestGoServerCommandOverride(t *testing.T) {
 	t.Parallel()
 	c := goServerCommand("/tmp/proj", []string{"/bin/echo", "hi"}, nil)
@@ -41,9 +53,8 @@ func TestGoServerCommandOverride(t *testing.T) {
 // TestGoServerCommandExtraEnv exercises the v1.1-wave-A extension: the
 // dev loop appends inspector auto-attach env pins (DOCKYARD_TRANSPORT,
 // DOCKYARD_HTTP_ADDR) to the child environment when the inspector is
-// enabled. The pins land AFTER the inherited environment so a developer's
-// own setting (`DOCKYARD_TRANSPORT=stdio dockyard dev`) wins via the
-// later-entry-wins rule os/exec follows.
+// enabled. The orchestrator passes these only for variables not already set by
+// the developer.
 func TestGoServerCommandExtraEnv(t *testing.T) {
 	t.Parallel()
 	extras := []string{"DOCKYARD_TRANSPORT=http", "DOCKYARD_HTTP_ADDR=127.0.0.1:9999"}
@@ -62,6 +73,21 @@ func TestGoServerCommandExtraEnv(t *testing.T) {
 	}
 	if !sawAddr {
 		t.Error("go-server env missing DOCKYARD_HTTP_ADDR extra")
+	}
+}
+
+func TestGoServerExtraEnvPreservesExplicitSettings(t *testing.T) {
+	t.Setenv("DOCKYARD_TRANSPORT", "stdio")
+	t.Setenv("DOCKYARD_HTTP_ADDR", "127.0.0.1:9444")
+	o := &orchestrator{}
+	if got := o.goServerExtraEnv("127.0.0.1:8080"); len(got) != 0 {
+		t.Fatalf("goServerExtraEnv = %v, want no overrides for explicit settings", got)
+	}
+	if got := o.serverHTTPAddr(); got != "127.0.0.1:9444" {
+		t.Fatalf("serverHTTPAddr = %q, want explicit environment address", got)
+	}
+	if got := inspectorServerURL(o.serverHTTPAddr()); got != "" {
+		t.Fatalf("inspectorServerURL = %q, want detached inspector for explicit stdio", got)
 	}
 }
 

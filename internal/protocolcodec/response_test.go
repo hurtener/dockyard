@@ -37,6 +37,73 @@ func TestEncodeCacheMetadataConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
+func TestEncodeResultTypeVersioned(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		version ProtocolVersion
+		input   string
+		want    string
+		present bool
+	}{
+		{name: "modern absent", version: VersionMCP20260728, input: `{"value":1}`, want: "complete", present: true},
+		{name: "modern complete", version: VersionMCP20260728, input: `{"resultType":"complete"}`, want: "complete", present: true},
+		{name: "modern input required", version: VersionMCP20260728, input: `{"resultType":"input_required"}`, want: "input_required", present: true},
+		{name: "modern task", version: VersionMCP20260728, input: `{"resultType":"task"}`, want: "task", present: true},
+		{name: "legacy absent", version: VersionMCP20251125, input: `{"value":1}`, present: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			raw, err := EncodeResultType(tc.version, json.RawMessage(tc.input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &result); err != nil {
+				t.Fatal(err)
+			}
+			gotRaw, present := result["resultType"]
+			if present != tc.present {
+				t.Fatalf("resultType presence = %v, want %v: %s", present, tc.present, raw)
+			}
+			if present {
+				var got string
+				if err := json.Unmarshal(gotRaw, &got); err != nil {
+					t.Fatal(err)
+				}
+				if got != tc.want {
+					t.Fatalf("resultType = %q, want %q: %s", got, tc.want, raw)
+				}
+			}
+		})
+	}
+}
+
+func TestEncodeResultTypeConcurrent(t *testing.T) {
+	t.Parallel()
+	const workers = 32
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := EncodeResultType(VersionMCP20260728, json.RawMessage(`{"value":1}`)); err != nil {
+				t.Errorf("EncodeResultType: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestEncodeResultTypeRejectsNonObject(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []json.RawMessage{json.RawMessage(`null`), json.RawMessage(`[]`)} {
+		if _, err := EncodeResultType(VersionMCP20260728, raw); err == nil {
+			t.Fatalf("EncodeResultType accepted %s", raw)
+		}
+	}
+}
+
 func TestResourceNotFoundCode(t *testing.T) {
 	t.Parallel()
 	if got := ResourceNotFoundCode(VersionMCP20260728); got != -32602 {

@@ -239,7 +239,7 @@ A minimal dispatcher:
     CreateChartOutput,
     CreateTableOutput,
     CreateMetricCardOutput,
-  } from './generated/contracts';
+  } from '../../internal/contracts/contracts.js';
 
   let result: CreateChartOutput | CreateTableOutput | CreateMetricCardOutput | undefined;
 
@@ -259,8 +259,10 @@ A minimal dispatcher:
 {/if}
 ```
 
-The `Kind` discriminator on each output is the dispatcher's switch — the
-`analytics-widgets` template uses this exact pattern.
+From `web/src/App.svelte`, generated contracts use the canonical relative import
+`../../internal/contracts/contracts.js`. The `Kind` discriminator on each output
+is the dispatcher's switch; the `analytics-widgets` template uses this exact
+pattern.
 
 ### Rendering live task progress
 

@@ -190,7 +190,10 @@ func TestPhase07_ConcurrentHTTPSessions(t *testing.T) {
 	baseline := stableGoroutineCount()
 
 	s := buildServer(t)
-	h, err := s.HTTPHandler(&server.HTTPOptions{Security: server.DefaultHTTPSecurity()})
+	h, err := s.HTTPHandler(&server.HTTPOptions{
+		ProtocolMode: server.Stateless20260728,
+		Security:     server.DefaultHTTPSecurity(),
+	})
 	if err != nil {
 		t.Fatalf("HTTPHandler: %v", err)
 	}
@@ -235,9 +238,5 @@ func TestPhase07_ConcurrentHTTPSessions(t *testing.T) {
 	// per-connection goroutines have fully unwound.
 	ts.CloseClientConnections()
 	ts.Close()
-	// The 2026-07-28 SDK RC retains one server Read goroutine per stateless
-	// request after the client closes (SDK lifecycle limitation). Keep the
-	// concurrency exercise, while allowing those SDK-owned goroutines until the
-	// final SDK pin resolves the leak.
-	assertNoGoroutineLeakWithSlack(t, baseline, sessions+2)
+	assertNoGoroutineLeak(t, baseline)
 }

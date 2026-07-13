@@ -212,6 +212,99 @@ func TestDispatch_SupplyInput_NullDataIsEmpty(t *testing.T) {
 	}
 }
 
+type blockingResumeStore struct {
+	TaskStore
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingResumeStore) Transition(ctx context.Context, id string, to protocolcodec.TaskStatus, msg string) (TaskRecord, error) {
+	if to == protocolcodec.TaskWorking && msg == "input received, resuming" {
+		close(s.entered)
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return TaskRecord{}, ctx.Err()
+		}
+	}
+	return s.TaskStore.Transition(ctx, id, to, msg)
+}
+
+func TestSupplyInputClaimsElicitationOnce(t *testing.T) {
+	base := NewInMemoryStore()
+	store := &blockingResumeStore{TaskStore: base, entered: make(chan struct{}), release: make(chan struct{})}
+	e, err := NewEngine(store, &Options{Logger: quietLogger(), GenerateID: func() (string, error) { return "one-shot", nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := e.CreateToolTask(context.Background(), CreateToolCallParams{
+		ToolName: "legacy-input",
+		Handle: func(ctx context.Context, h TaskHandle) (json.RawMessage, error) {
+			_, err := h.RequireInput(ctx, InputPrompt{Message: "approve?"})
+			return nil, err
+		},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, ok := e.PendingInput(created.ID); ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("elicitation was not registered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := e.SupplyInput(context.Background(), created.ID, InputResponse{Data: []byte(`true`)}); err != nil {
+		t.Fatal(err)
+	}
+	<-store.entered
+	if err := e.SupplyInput(context.Background(), created.ID, InputResponse{Data: []byte(`false`)}); !errors.Is(err, ErrNoPendingInput) {
+		t.Fatalf("second SupplyInput error = %v, want ErrNoPendingInput", err)
+	}
+	close(store.release)
+}
+
+func TestLegacyInputWaitObservesTaskCancellationWithBackgroundContext(t *testing.T) {
+	store := NewInMemoryStore()
+	e, err := NewEngine(store, &Options{Logger: quietLogger(), GenerateID: func() (string, error) { return "legacy-cancel", nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	created, err := e.CreateToolTask(context.Background(), CreateToolCallParams{
+		ToolName: "legacy-input",
+		Handle: func(_ context.Context, h TaskHandle) (json.RawMessage, error) {
+			_, err := h.RequireInput(context.Background(), InputPrompt{Message: "approve?"})
+			done <- err
+			return nil, err
+		},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, store, created.ID, protocolcodec.TaskInputRequired)
+	if _, err := e.Dispatch(context.Background(), MethodCancel, mustTaskIDParams(t, created.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.PendingInput(created.ID); ok {
+		t.Fatal("cancelled task retained a pending legacy elicitation")
+	}
+	if err := e.SupplyInput(context.Background(), created.ID, InputResponse{Data: []byte(`true`)}); !errors.Is(err, ErrNoPendingInput) {
+		t.Fatalf("SupplyInput after cancellation error = %v, want ErrNoPendingInput", err)
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled legacy wait returned nil")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled legacy background-context wait did not return")
+	}
+}
+
 // mustSupplyInputParamsRaw builds the on-wire `supplyInputParams` envelope —
 // `{taskId, data?, declined?}` — matching the schema the codec decodes. Tests
 // drive the dispatch path, so we shape the JSON by hand (the codec exposes a

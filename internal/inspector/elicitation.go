@@ -11,12 +11,15 @@ import (
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/hurtener/dockyard/internal/protocolcodec"
 )
 
 const (
 	elicitationTimeout = 30 * time.Second
 	modernProtocol     = "2026-07-28"
 	legacyProtocol     = "2025-11-25"
+	maxLegacyResponse  = 1 << 20
 )
 
 var modernTaskMethods = map[string]struct{}{
@@ -77,15 +80,17 @@ func deliverModernTaskInput(ctx context.Context, baseURL string, req Elicitation
 
 	client := mcpsdk.NewClient(
 		&mcpsdk.Implementation{Name: "dockyard-inspector", Version: "0.1.0"},
-		&mcpsdk.ClientOptions{MultiRoundTrip: &mcpsdk.MultiRoundTripOptions{Disabled: true}},
+		modernTaskClientOptions(),
 	)
 	for method := range modernTaskMethods {
 		if err := mcpsdk.AddSendingCustomMethod[*taskParams, *taskResult](client, method); err != nil {
 			return nil, fmt.Errorf("dockyard/internal/inspector: register %s: %w", method, err)
 		}
 	}
-	httpClient := &http.Client{Transport: taskRoutingTransport{base: http.DefaultTransport}}
-	session, err := client.Connect(ctx, &mcpsdk.StreamableClientTransport{Endpoint: baseURL, HTTPClient: httpClient}, nil)
+	httpClient := modernFirstHTTPClient(elicitationTimeout,
+		taskRoutingTransport{base: http.DefaultTransport}, false)
+	session, err := client.Connect(ctx,
+		&mcpsdk.StreamableClientTransport{Endpoint: baseURL, HTTPClient: httpClient}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("dockyard/internal/inspector: connect %q: %w", baseURL, err)
 	}
@@ -98,6 +103,15 @@ func deliverModernTaskInput(ctx context.Context, baseURL string, req Elicitation
 		return &ElicitationResponse{TaskID: req.TaskID, Error: err.Error()}, nil
 	}
 	return &ElicitationResponse{TaskID: req.TaskID, Delivered: true}, nil
+}
+
+func modernTaskClientOptions() *mcpsdk.ClientOptions {
+	return &mcpsdk.ClientOptions{
+		Capabilities: &mcpsdk.ClientCapabilities{Extensions: map[string]any{
+			protocolcodec.ModernTasksExtension: map[string]any{},
+		}},
+		MultiRoundTrip: &mcpsdk.MultiRoundTripOptions{Disabled: true},
+	}
 }
 
 type taskRoutingTransport struct {
@@ -154,28 +168,51 @@ func deliverLegacyTaskInput(ctx context.Context, baseURL string, req Elicitation
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
-	resp, err := http.DefaultClient.Do(httpReq)
+	resp, err := (&http.Client{Timeout: elicitationTimeout}).Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("dockyard/internal/inspector: legacy task input POST: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	out, err := io.ReadAll(resp.Body)
+	out, err := io.ReadAll(io.LimitReader(resp.Body, maxLegacyResponse+1))
 	if err != nil {
 		return nil, fmt.Errorf("dockyard/internal/inspector: read legacy task input response: %w", err)
+	}
+	if len(out) > maxLegacyResponse {
+		return nil, errors.New("dockyard/internal/inspector: legacy task input response exceeds 1 MiB")
 	}
 	if resp.StatusCode/100 != 2 {
 		return nil, fmt.Errorf("dockyard/internal/inspector: legacy task input status %d: %s", resp.StatusCode, truncate(out, 256))
 	}
 	var envelope struct {
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error,omitempty"`
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  json.RawMessage `json:"result"`
+		Error   json.RawMessage `json:"error"`
 	}
-	if err := json.Unmarshal(out, &envelope); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(out))
+	if err := dec.Decode(&envelope); err != nil {
 		return nil, fmt.Errorf("dockyard/internal/inspector: decode legacy task input envelope: %w (body %s)", err, truncate(out, 256))
 	}
-	if envelope.Error != nil {
-		return &ElicitationResponse{TaskID: req.TaskID, Error: envelope.Error.Message}, nil
+	if dec.Decode(&struct{}{}) != io.EOF {
+		return nil, errors.New("dockyard/internal/inspector: legacy task input response contains trailing JSON")
+	}
+	if envelope.JSONRPC != "2.0" || !bytes.Equal(bytes.TrimSpace(envelope.ID), []byte("1")) {
+		return nil, errors.New("dockyard/internal/inspector: malformed legacy task input JSON-RPC envelope")
+	}
+	hasResult := len(envelope.Result) > 0 && string(bytes.TrimSpace(envelope.Result)) != "null"
+	hasError := len(envelope.Error) > 0 && string(bytes.TrimSpace(envelope.Error)) != "null"
+	if hasResult == hasError {
+		return nil, errors.New("dockyard/internal/inspector: legacy task input response must contain exactly one of result or error")
+	}
+	if hasError {
+		var rpcErr struct {
+			Code    *int   `json:"code"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(envelope.Error, &rpcErr); err != nil || rpcErr.Code == nil || rpcErr.Message == "" {
+			return nil, errors.New("dockyard/internal/inspector: malformed legacy task input JSON-RPC error")
+		}
+		return &ElicitationResponse{TaskID: req.TaskID, Error: rpcErr.Message}, nil
 	}
 	return &ElicitationResponse{TaskID: req.TaskID, Delivered: true}, nil
 }

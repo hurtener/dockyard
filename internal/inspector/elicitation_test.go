@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/hurtener/dockyard/internal/protocolcodec"
 )
 
 // TestElicitationFromServer_DeliversTasksResult drives the
@@ -138,6 +140,39 @@ func TestElicitationFromServer_ServerErrorIsDeliveredFalse(t *testing.T) {
 	}
 }
 
+func TestElicitationFromServer_RejectsMalformedLegacyResponses(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "missing envelope fields", body: `{}`},
+		{name: "wrong id", body: `{"jsonrpc":"2.0","id":2,"result":{}}`},
+		{name: "missing result", body: `{"jsonrpc":"2.0","id":1}`},
+		{name: "null result", body: `{"jsonrpc":"2.0","id":1,"result":null}`},
+		{name: "result and error", body: `{"jsonrpc":"2.0","id":1,"result":{},"error":{"code":-32603,"message":"bad"}}`},
+		{name: "trailing json", body: `{"jsonrpc":"2.0","id":1,"result":{}} {}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			stand := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer stand.Close()
+			_, err := ElicitationFromServer(stand.URL)(context.Background(), ElicitationRequest{
+				Protocol: legacyProtocol,
+				TaskID:   "task-malformed",
+				InputResponses: map[string]json.RawMessage{
+					"approval": json.RawMessage(`{"action":"accept"}`),
+				},
+			})
+			if err == nil {
+				t.Fatal("malformed legacy response was accepted")
+			}
+		})
+	}
+}
+
 // TestElicitationFromServer_DetachedReturnsError — an empty baseURL is
 // the detached case; the adapter returns a typed error.
 func TestElicitationFromServer_DetachedReturnsError(t *testing.T) {
@@ -150,6 +185,20 @@ func TestElicitationFromServer_DetachedReturnsError(t *testing.T) {
 	}
 	if resp != nil {
 		t.Errorf("want nil response on detached, got %+v", resp)
+	}
+}
+
+func TestModernTaskClientOptionsAdvertiseTasksExtension(t *testing.T) {
+	t.Parallel()
+	opts := modernTaskClientOptions()
+	if opts.Capabilities == nil {
+		t.Fatal("modern task client capabilities are nil")
+	}
+	if _, ok := opts.Capabilities.Extensions[protocolcodec.ModernTasksExtension]; !ok {
+		t.Fatalf("modern task capabilities = %#v, want Tasks extension", opts.Capabilities.Extensions)
+	}
+	if opts.MultiRoundTrip == nil || !opts.MultiRoundTrip.Disabled {
+		t.Fatal("modern task client must leave automatic multi-round-trip handling disabled")
 	}
 }
 
@@ -216,6 +265,8 @@ func TestAssetsMux_Elicitation_Detached(t *testing.T) {
 	mux := newMux(Options{}, slog.New(slog.DiscardHandler))
 	req := httptest.NewRequest(http.MethodPost, "/api/tasks/elicitation", bytes.NewReader(
 		[]byte(`{"protocol":"2026-07-28","taskId":"x","inputResponses":{}}`)))
+	req.Host = "127.0.0.1"
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusServiceUnavailable {
@@ -241,6 +292,8 @@ func TestAssetsMux_Elicitation_BadBody(t *testing.T) {
 	}, slog.New(slog.DiscardHandler))
 	req := httptest.NewRequest(http.MethodPost, "/api/tasks/elicitation",
 		bytes.NewReader([]byte(`{"unknown":1}`)))
+	req.Host = "127.0.0.1"
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -260,6 +313,8 @@ func TestAssetsMux_Elicitation_RequiresTaskID(t *testing.T) {
 	}, slog.New(slog.DiscardHandler))
 	req := httptest.NewRequest(http.MethodPost, "/api/tasks/elicitation",
 		bytes.NewReader([]byte(`{"protocol":"2026-07-28","taskId":"","inputResponses":{}}`)))
+	req.Host = "127.0.0.1"
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -286,6 +341,8 @@ func TestAssetsMux_Elicitation_Success(t *testing.T) {
 	}, slog.New(slog.DiscardHandler))
 	req := httptest.NewRequest(http.MethodPost, "/api/tasks/elicitation",
 		bytes.NewReader([]byte(`{"protocol":"2026-07-28","taskId":"task-99","inputResponses":{"approval":{"action":"accept"}}}`)))
+	req.Host = "127.0.0.1"
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -311,6 +368,8 @@ func TestAssetsMux_Elicitation_ErrorIs502(t *testing.T) {
 	}, slog.New(slog.DiscardHandler))
 	req := httptest.NewRequest(http.MethodPost, "/api/tasks/elicitation",
 		bytes.NewReader([]byte(`{"protocol":"2026-07-28","taskId":"x","inputResponses":{"answer":{"action":"accept"}}}`)))
+	req.Host = "127.0.0.1"
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusBadGateway {

@@ -57,6 +57,10 @@ function stripModuleType(): Plugin {
 export default defineConfig({
   plugins: [svelte(), viteSingleFile(), stripModuleType()],
   base: './',
+  server: {
+    // contracts.ts is generated beside the Go source at the project root.
+    fs: { allow: ['..'] },
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

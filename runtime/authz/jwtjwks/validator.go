@@ -25,17 +25,42 @@ import (
 // DriverName is the name this validator driver registers under.
 const DriverName = "jwt-jwks"
 
+const (
+	defaultFetchTimeout = 10 * time.Second
+	minResponseBytes    = 1 << 10
+	maxResponseBytes    = 4 << 20
+	maxKeyCount         = 128
+	minCacheTTL         = time.Second
+	maxCacheTTL         = 24 * time.Hour
+	minRefreshCooldown  = time.Second
+	maxRefreshCooldown  = 5 * time.Minute
+	maxClockSkew        = 5 * time.Minute
+	minRSAModulusBytes  = 256
+	maxRSAModulusBytes  = 1024
+)
+
+var errUnsupportedJWK = errors.New("jwt-jwks: unsupported jwk")
+
 // Config controls bounded discovery and key caching. Zero values receive secure
-// defaults. AllowedAlgorithms must be explicit.
+// defaults. AllowedAlgorithms must explicitly contain only RS256, RS384, RS512,
+// ES256, ES384, or ES512. MaxResponseBytes is constrained to 1 KiB..4 MiB,
+// MaxKeys to 1..128, CacheTTL to 1 second..24 hours, RefreshCooldown to
+// 1 second..5 minutes, and ClockSkew to 0..5 minutes.
 type Config struct {
-	AllowedAlgorithms []string         `json:"allowed_algorithms"`
-	HTTPClient        *http.Client     `json:"-"`
-	MaxResponseBytes  int64            `json:"max_response_bytes,omitempty"`
-	MaxKeys           int              `json:"max_keys,omitempty"`
-	CacheTTL          time.Duration    `json:"cache_ttl,omitempty"`
-	RefreshCooldown   time.Duration    `json:"refresh_cooldown,omitempty"`
-	ClockSkew         time.Duration    `json:"clock_skew,omitempty"`
-	Now               func() time.Time `json:"-"`
+	// AllowedAlgorithms is mandatory and limits both JWT headers and usable JWKs.
+	AllowedAlgorithms []string     `json:"allowed_algorithms"`
+	HTTPClient        *http.Client `json:"-"`
+	// MaxResponseBytes bounds each discovery or JWKS document (default 1 MiB).
+	MaxResponseBytes int64 `json:"max_response_bytes,omitempty"`
+	// MaxKeys bounds the number of keys in one JWKS document (default 32).
+	MaxKeys int `json:"max_keys,omitempty"`
+	// CacheTTL controls successful JWKS retention (default 15 minutes).
+	CacheTTL time.Duration `json:"cache_ttl,omitempty"`
+	// RefreshCooldown rate-limits repeated JWKS refresh attempts (default 5 seconds).
+	RefreshCooldown time.Duration `json:"refresh_cooldown,omitempty"`
+	// ClockSkew is JWT time-claim leeway (default zero).
+	ClockSkew time.Duration    `json:"clock_skew,omitempty"`
+	Now       func() time.Time `json:"-"`
 }
 
 type jwksDocument struct {
@@ -61,7 +86,7 @@ type Validator struct {
 	mu                        sync.RWMutex
 	refreshMu                 sync.Mutex
 	keys                      map[string]verificationKey
-	expires, lastRefresh      time.Time
+	expires, lastAttempt      time.Time
 }
 
 func init() {
@@ -80,9 +105,12 @@ func New(ctx context.Context, issuer, resource string, cfg Config) (*Validator, 
 		return nil, errors.New("jwt-jwks: allowed algorithms are required")
 	}
 	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = &http.Client{Timeout: 10 * time.Second}
+		cfg.HTTPClient = &http.Client{Timeout: defaultFetchTimeout}
 	}
 	client := *cfg.HTTPClient
+	if client.Timeout <= 0 || client.Timeout > defaultFetchTimeout {
+		client.Timeout = defaultFetchTimeout
+	}
 	callerRedirectPolicy := client.CheckRedirect
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) == 0 || req.URL.Scheme != "https" || !sameOrigin(req.URL, via[0].URL) {
@@ -112,8 +140,20 @@ func New(ctx context.Context, issuer, resource string, cfg Config) (*Validator, 
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	if cfg.MaxResponseBytes < 1 || cfg.MaxKeys < 1 || cfg.CacheTTL < 0 || cfg.RefreshCooldown < 0 || cfg.ClockSkew < 0 {
-		return nil, errors.New("jwt-jwks: invalid bounds")
+	if cfg.MaxResponseBytes < minResponseBytes || cfg.MaxResponseBytes > maxResponseBytes {
+		return nil, fmt.Errorf("jwt-jwks: max response bytes must be between %d and %d", minResponseBytes, maxResponseBytes)
+	}
+	if cfg.MaxKeys < 1 || cfg.MaxKeys > maxKeyCount {
+		return nil, fmt.Errorf("jwt-jwks: max keys must be between 1 and %d", maxKeyCount)
+	}
+	if cfg.CacheTTL < minCacheTTL || cfg.CacheTTL > maxCacheTTL {
+		return nil, fmt.Errorf("jwt-jwks: cache TTL must be between %s and %s", minCacheTTL, maxCacheTTL)
+	}
+	if cfg.RefreshCooldown < minRefreshCooldown || cfg.RefreshCooldown > maxRefreshCooldown {
+		return nil, fmt.Errorf("jwt-jwks: refresh cooldown must be between %s and %s", minRefreshCooldown, maxRefreshCooldown)
+	}
+	if cfg.ClockSkew < 0 || cfg.ClockSkew > maxClockSkew {
+		return nil, fmt.Errorf("jwt-jwks: clock skew must be between 0s and %s", maxClockSkew)
 	}
 	for _, alg := range cfg.AllowedAlgorithms {
 		if alg != "RS256" && alg != "RS384" && alg != "RS512" && alg != "ES256" && alg != "ES384" && alg != "ES512" {
@@ -172,26 +212,12 @@ func (v *Validator) Validate(ctx context.Context, token string) (authz.Principal
 			return authz.Principal{}, authz.ErrInvalidToken
 		}
 	}
-	claims := jwt.MapClaims{}
-	parsed, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
-		kid, ok := t.Header["kid"].(string)
-		if !ok || kid == "" {
-			return nil, errors.New("missing key id")
+	parsed, claims, err := v.parse(ctx, token, true)
+	if err != nil && errors.Is(err, jwt.ErrTokenSignatureInvalid) {
+		if refreshErr := v.refresh(ctx, true); refreshErr == nil {
+			parsed, claims, err = v.parse(ctx, token, false)
 		}
-		key, ok := v.key(kid)
-		if !ok {
-			if refreshErr := v.refresh(ctx, true); refreshErr == nil {
-				key, ok = v.key(kid)
-			}
-		}
-		if !ok {
-			return nil, errors.New("unknown key id")
-		}
-		if err := key.matches(t.Method.Alg()); err != nil {
-			return nil, err
-		}
-		return key.key, nil
-	}, jwt.WithValidMethods(v.algorithms), jwt.WithIssuer(v.issuer), jwt.WithAudience(v.resource), jwt.WithExpirationRequired(), jwt.WithLeeway(v.skew), jwt.WithTimeFunc(v.now))
+	}
 	if err != nil || !parsed.Valid {
 		return authz.Principal{}, authz.ErrInvalidToken
 	}
@@ -204,6 +230,30 @@ func (v *Validator) Validate(ctx context.Context, token string) (authz.Principal
 		return authz.Principal{}, authz.ErrInvalidToken
 	}
 	return authz.Principal{Issuer: v.issuer, Subject: sub, Resource: v.resource, Scopes: scopes}, nil
+}
+
+func (v *Validator) parse(ctx context.Context, token string, refreshUnknown bool) (*jwt.Token, jwt.MapClaims, error) {
+	claims := jwt.MapClaims{}
+	parsed, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
+		kid, ok := t.Header["kid"].(string)
+		if !ok || kid == "" {
+			return nil, errors.New("missing key id")
+		}
+		key, ok := v.key(kid)
+		if !ok && refreshUnknown {
+			if refreshErr := v.refresh(ctx, true); refreshErr == nil {
+				key, ok = v.key(kid)
+			}
+		}
+		if !ok {
+			return nil, errors.New("unknown key id")
+		}
+		if err := key.matches(t.Method.Alg()); err != nil {
+			return nil, err
+		}
+		return key.key, nil
+	}, jwt.WithValidMethods(v.algorithms), jwt.WithIssuer(v.issuer), jwt.WithAudience(v.resource), jwt.WithExpirationRequired(), jwt.WithLeeway(v.skew), jwt.WithTimeFunc(v.now))
+	return parsed, claims, err
 }
 
 func parseScopes(claims jwt.MapClaims) ([]string, bool) {
@@ -238,15 +288,27 @@ func (v *Validator) refresh(ctx context.Context, force bool) error {
 	now := v.now()
 	v.mu.RLock()
 	fresh := now.Before(v.expires)
-	hasRefreshed := !v.lastRefresh.IsZero()
-	cooldown := now.Sub(v.lastRefresh) < v.cooldown
+	hasAttempted := !v.lastAttempt.IsZero()
+	cooldown := now.Sub(v.lastAttempt) < v.cooldown
+	attemptedSinceExpiry := !v.lastAttempt.Before(v.expires)
 	v.mu.RUnlock()
-	if hasRefreshed && cooldown && fresh {
-		return nil
+	if hasAttempted && cooldown {
+		if fresh {
+			return nil
+		}
+		// The successful fill that produced this expiry must not prevent the
+		// first refresh after expiration when CacheTTL is shorter than the
+		// cooldown. Once a post-expiry attempt fails, keep throttling retries.
+		if attemptedSinceExpiry {
+			return errors.New("jwt-jwks: key refresh throttled")
+		}
 	}
 	if !force && fresh {
 		return nil
 	}
+	v.mu.Lock()
+	v.lastAttempt = now
+	v.mu.Unlock()
 	var doc jwksDocument
 	if err := fetchJSON(ctx, v.client, v.jwksURI, v.maxBytes, &doc); err != nil {
 		return errors.New("jwt-jwks: key refresh failed")
@@ -257,16 +319,25 @@ func (v *Validator) refresh(ctx context.Context, force bool) error {
 	keys := make(map[string]verificationKey, len(doc.Keys))
 	for _, raw := range doc.Keys {
 		kid, key, err := parseJWK(raw)
+		if errors.Is(err, errUnsupportedJWK) {
+			continue
+		}
 		if err != nil {
 			return errors.New("jwt-jwks: invalid key set")
+		}
+		if key.alg != "" && !contains(v.algorithms, key.alg) || key.alg == "" && !keySupportsAny(key, v.algorithms) {
+			continue
 		}
 		if _, duplicate := keys[kid]; duplicate {
 			return errors.New("jwt-jwks: duplicate key id")
 		}
 		keys[kid] = key
 	}
+	if len(keys) == 0 {
+		return errors.New("jwt-jwks: no usable verification keys")
+	}
 	v.mu.Lock()
-	v.keys, v.lastRefresh, v.expires = keys, now, now.Add(v.ttl)
+	v.keys, v.expires = keys, now.Add(v.ttl)
 	v.mu.Unlock()
 	return nil
 }
@@ -304,35 +375,57 @@ func fetchJSON(ctx context.Context, client *http.Client, endpoint string, limit 
 }
 
 func parseJWK(raw json.RawMessage) (string, verificationKey, error) {
-	var j struct{ Kty, Kid, Use, Alg, N, E, Crv, X, Y string }
-	if err := json.Unmarshal(raw, &j); err != nil || j.Kid == "" || j.Use != "" && j.Use != "sig" {
+	var j struct {
+		Kty, Kid, Use, Alg, N, E, Crv, X, Y string
+		KeyOps                              json.RawMessage `json:"key_ops"`
+	}
+	if err := json.Unmarshal(raw, &j); err != nil || j.Kid == "" {
 		return "", verificationKey{}, errors.New("bad jwk")
 	}
-	if j.Alg == "" {
-		return "", verificationKey{}, errors.New("jwk alg is required")
+	if j.Use != "" && j.Use != "sig" {
+		return "", verificationKey{}, errUnsupportedJWK
+	}
+	if len(j.KeyOps) > 0 {
+		var keyOps []string
+		if err := json.Unmarshal(j.KeyOps, &keyOps); err != nil {
+			return "", verificationKey{}, errors.New("bad jwk key operations")
+		}
+		if !contains(keyOps, "verify") {
+			return "", verificationKey{}, errUnsupportedJWK
+		}
 	}
 	decode := func(s string) ([]byte, error) { return base64.RawURLEncoding.DecodeString(s) }
 	switch j.Kty {
 	case "RSA":
+		if j.Alg != "" && !strings.HasPrefix(j.Alg, "RS") {
+			return "", verificationKey{}, errUnsupportedJWK
+		}
 		nb, err := decode(j.N)
 		if err != nil {
 			return "", verificationKey{}, err
+		}
+		if len(nb) < minRSAModulusBytes || len(nb) > maxRSAModulusBytes || nb[0] == 0 {
+			return "", verificationKey{}, errors.New("invalid rsa modulus")
 		}
 		eb, err := decode(j.E)
 		if err != nil {
 			return "", verificationKey{}, err
 		}
-		e := 0
-		for _, b := range eb {
-			e = e<<8 + int(b)
+		if len(eb) == 0 || len(eb) > 4 {
+			return "", verificationKey{}, errors.New("invalid rsa exponent")
 		}
-		if len(nb) < 256 || e < 3 {
+		e := uint64(0)
+		for _, b := range eb {
+			e = e<<8 + uint64(b)
+		}
+		if e < 3 || e > 1<<31-1 || e%2 == 0 {
 			return "", verificationKey{}, errors.New("weak rsa key")
 		}
-		if !strings.HasPrefix(j.Alg, "RS") {
-			return "", verificationKey{}, errors.New("rsa algorithm mismatch")
+		n := new(big.Int).SetBytes(nb)
+		if n.BitLen() < 8*minRSAModulusBytes || n.BitLen() > 8*maxRSAModulusBytes {
+			return "", verificationKey{}, errors.New("invalid rsa modulus size")
 		}
-		return j.Kid, verificationKey{key: &rsa.PublicKey{N: new(big.Int).SetBytes(nb), E: e}, alg: j.Alg, kty: j.Kty}, nil
+		return j.Kid, verificationKey{key: &rsa.PublicKey{N: n, E: int(e)}, alg: j.Alg, kty: j.Kty}, nil
 	case "EC":
 		curves := map[string]struct {
 			ecdh      ecdh.Curve
@@ -344,9 +437,12 @@ func parseJWK(raw json.RawMessage) (string, verificationKey, error) {
 			"P-521": {ecdh.P521(), elliptic.P521(), 66},
 		}
 		curve, ok := curves[j.Crv]
+		if !ok {
+			return "", verificationKey{}, errUnsupportedJWK
+		}
 		xb, xerr := decode(j.X)
 		yb, yerr := decode(j.Y)
-		if !ok || xerr != nil || yerr != nil || len(xb) != curve.fieldSize || len(yb) != curve.fieldSize {
+		if xerr != nil || yerr != nil || len(xb) != curve.fieldSize || len(yb) != curve.fieldSize {
 			return "", verificationKey{}, errors.New("bad ec key")
 		}
 		encoded := make([]byte, 1+2*curve.fieldSize)
@@ -357,18 +453,18 @@ func parseJWK(raw json.RawMessage) (string, verificationKey, error) {
 			return "", verificationKey{}, errors.New("off-curve key")
 		}
 		wantAlg := map[string]string{"P-256": "ES256", "P-384": "ES384", "P-521": "ES512"}[j.Crv]
-		if j.Alg != wantAlg {
+		if j.Alg != "" && j.Alg != wantAlg {
 			return "", verificationKey{}, errors.New("ec algorithm mismatch")
 		}
 		x, y := new(big.Int).SetBytes(xb), new(big.Int).SetBytes(yb)
 		return j.Kid, verificationKey{key: &ecdsa.PublicKey{Curve: curve.ecdsa, X: x, Y: y}, alg: j.Alg, kty: j.Kty, crv: j.Crv}, nil
 	default:
-		return "", verificationKey{}, errors.New("unsupported key type")
+		return "", verificationKey{}, errUnsupportedJWK
 	}
 }
 
 func (k verificationKey) matches(alg string) error {
-	if k.alg == "" || k.alg != alg {
+	if k.alg != "" && k.alg != alg {
 		return errors.New("jwk algorithm does not match token")
 	}
 	if strings.HasPrefix(alg, "RS") && k.kty != "RSA" || strings.HasPrefix(alg, "ES") && k.kty != "EC" {
@@ -378,6 +474,24 @@ func (k verificationKey) matches(alg string) error {
 		return errors.New("jwk curve does not match token")
 	}
 	return nil
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func keySupportsAny(key verificationKey, algorithms []string) bool {
+	for _, alg := range algorithms {
+		if key.matches(alg) == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func sameOrigin(a, b *url.URL) bool {

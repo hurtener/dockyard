@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +12,10 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/hurtener/dockyard/internal/protocolcodec"
 	"github.com/hurtener/dockyard/runtime/obs"
 	"github.com/hurtener/dockyard/runtime/server"
+	"github.com/hurtener/dockyard/runtime/tasks"
 )
 
 func TestHTTPHandlerDualLifecycle(t *testing.T) {
@@ -110,20 +113,43 @@ func TestHTTPHandlerStatelessVersionValidationPrecedesDecode(t *testing.T) {
 	}
 }
 
-func TestHTTPHandlerDualRejectsUnknownModernVersion(t *testing.T) {
+func TestHTTPHandlerDualRejectsEveryUnsupportedVersion(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t)
 	h, err := s.HTTPHandler(&server.HTTPOptions{ProtocolMode: server.Dual, Security: server.DefaultHTTPSecurity()})
 	if err != nil {
 		t.Fatalf("HTTPHandler: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "http://example.test/mcp", strings.NewReader("{"))
+	for _, version := range []string{"2027-01-01", "2025-06-18", "2025-03-26", "2024-11-05", "2026-01-01", "garbage"} {
+		t.Run(version, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "http://example.test/mcp", strings.NewReader("{"))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Mcp-Protocol-Version", version)
+			res := httptest.NewRecorder()
+			h.ServeHTTP(res, req)
+			if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "unsupported MCP protocol version") {
+				t.Fatalf("version %q status/body = %d/%q, want clear no-downgrade rejection", version, res.Code, res.Body.String())
+			}
+		})
+	}
+}
+
+func TestHTTPHandlerDualAcceptsExplicitLegacyVersion(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t)
+	h, err := s.HTTPHandler(&server.HTTPOptions{ProtocolMode: server.Dual, Security: server.DefaultHTTPSecurity()})
+	if err != nil {
+		t.Fatalf("HTTPHandler: %v", err)
+	}
+	body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"legacy","version":"1"}}}`)
+	req := httptest.NewRequest(http.MethodPost, "http://example.test/mcp", body)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Mcp-Protocol-Version", "2027-01-01")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Mcp-Protocol-Version", "2025-11-25")
 	res := httptest.NewRecorder()
 	h.ServeHTTP(res, req)
-	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "unsupported MCP protocol version") {
-		t.Fatalf("unknown version status/body = %d/%q, want clear no-downgrade rejection", res.Code, res.Body.String())
+	if res.Code != http.StatusOK || res.Header().Get("Mcp-Session-Id") == "" {
+		t.Fatalf("explicit legacy version status/session = %d/%q", res.Code, res.Header().Get("Mcp-Session-Id"))
 	}
 }
 
@@ -148,5 +174,80 @@ func TestHTTPHandlerDualValidatesModernRoutingHeaders(t *testing.T) {
 	h.ServeHTTP(res, req)
 	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "Mcp-Method") {
 		t.Fatalf("mismatched routing header status/body = %d/%q, want 400 mismatch", res.Code, res.Body.String())
+	}
+}
+
+func TestServerForRequestRoutesLegacyTasksToSelectedServer(t *testing.T) {
+	newEngine := func(id string) (*tasks.Engine, tasks.TaskStore) {
+		store := tasks.NewInMemoryStore()
+		engine, err := tasks.NewEngine(store, &tasks.Options{GenerateID: func() (string, error) { return id, nil }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return engine, store
+	}
+	engineA, storeA := newEngine("shared-id")
+	engineB, storeB := newEngine("shared-id")
+	serverA, err := server.New(server.Info{Name: "tenant-a", Version: "1"}, &server.Options{
+		Tasks: engineA, TasksAuthContext: func(*http.Request) string { return "auth-a" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverB, err := server.New(server.Info{Name: "tenant-b", Version: "1"}, &server.Options{
+		Tasks: engineB, TasksAuthContext: func(*http.Request) string { return "auth-b" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseA := make(chan struct{})
+	defer close(releaseA)
+	if _, err := engineA.CreateToolTask(context.Background(), tasks.CreateToolCallParams{
+		ToolName: "a", AuthContext: "auth-a",
+		Run: func(context.Context) (json.RawMessage, error) {
+			<-releaseA
+			return json.RawMessage(`{}`), nil
+		},
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engineB.CreateToolTask(context.Background(), tasks.CreateToolCallParams{
+		ToolName: "b", AuthContext: "auth-b",
+		Run: func(ctx context.Context) (json.RawMessage, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	h, err := serverA.HTTPHandler(&server.HTTPOptions{
+		ProtocolMode: server.Dual,
+		Security:     server.DefaultHTTPSecurity(),
+		ServerForRequest: func(r *http.Request) *server.Server {
+			if r.Header.Get("X-Tenant") == "b" {
+				return serverB
+			}
+			return serverA
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tasks/cancel","params":{"taskId":"shared-id"}}`)
+	req := httptest.NewRequest(http.MethodPost, "http://example.test/mcp", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant", "b")
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || strings.Contains(res.Body.String(), "error") {
+		t.Fatalf("selected legacy cancel status/body = %d/%s", res.Code, res.Body.String())
+	}
+	recA, err := storeA.Get(context.Background(), "shared-id")
+	if err != nil || recA.Status != protocolcodec.TaskWorking {
+		t.Fatalf("tenant A task was affected: %#v, %v", recA, err)
+	}
+	recB, err := storeB.Get(context.Background(), "shared-id")
+	if err != nil || recB.Status != protocolcodec.TaskCancelled {
+		t.Fatalf("tenant B task was not cancelled: %#v, %v", recB, err)
 	}
 }

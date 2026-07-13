@@ -63,6 +63,14 @@ via `server.Options{Tasks: engine}` — no hand edit required. See
 the [agent skills index](/agent-skills/) for the `scaffold-a-server`
 skill that documents the full flag set.
 
+Custom `TaskStore` implementations remain compatible with `tasks.NewEngine`.
+Their dynamic value must provide a stable comparable coordination identity so
+requests arriving through another engine can still cancel and wake the owning
+worker. Comparable stores identify themselves automatically. Noncomparable
+stores, and wrappers that share one backend, implement
+`tasks.CoordinationIdentityProvider` and return the same backend identity from
+`TaskStoreCoordinationIdentity`.
+
 ### b) Scaffold a template
 
 The two shipped templates exercise the framework end-to-end:

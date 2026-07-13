@@ -64,6 +64,23 @@ HTTPS origin. An expired cache is never used when refresh fails. It validates
 signature, JWT/JWK algorithm and key-type compatibility, exact issuer, exact
 audience, expiry, subject, and scopes. It never retains or logs the bearer token.
 
+The JWT/JWKS driver applies these configuration constraints:
+
+- `AllowedAlgorithms`: one or more of `RS256`, `RS384`, `RS512`, `ES256`,
+  `ES384`, or `ES512`.
+- `MaxResponseBytes`: 1 KiB to 4 MiB; the default is 1 MiB.
+- `MaxKeys`: 1 to 128; the default is 32.
+- `CacheTTL`: 1 second to 24 hours; the default is 15 minutes.
+- `RefreshCooldown`: 1 second to 5 minutes; the default is 5 seconds.
+- `ClockSkew`: zero to 5 minutes; the default is zero.
+
+Configuration errors identify the invalid field and accepted range. A supplied
+HTTP client's timeout is capped at 10 seconds. RSA verification keys must have a
+2048- to 8192-bit modulus and a valid odd exponent; unsupported key types and
+keys whose `use`, `key_ops`, `alg`, type, or curve cannot verify an allowed
+algorithm are ignored. A JWKS document with no usable verification key is
+rejected.
+
 ## Metadata and challenges
 
 For resource `https://mcp.example.com/mcp`, the same HTTP handler serves:

@@ -74,10 +74,11 @@ type Tool struct {
 	Name string `yaml:"name"`
 	// Description is the model-facing hint.
 	Description string `yaml:"description"`
-	// Input is the Go type reference for the tool input contract — a
-	// "pkg/path.TypeName" string the codegen pipeline resolves. Required.
+	// Input is the Go type reference for the tool input contract in the
+	// canonical internal/contracts package. Required.
 	Input string `yaml:"input"`
-	// Output is the Go type reference for the tool output contract. Required.
+	// Output is the Go type reference for the tool output contract in the
+	// canonical internal/contracts package. Required.
 	Output string `yaml:"output"`
 	// UI links the tool to an apps[] entry by its id (RFC §4.2). Optional — a
 	// tool without a UI is a plain MCP tool.

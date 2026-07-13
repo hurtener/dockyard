@@ -86,13 +86,16 @@ func loadProjectManifest(projectDir string) (*manifest.Manifest, error) {
 // printGenerateResult writes the post-generate summary: every file written and
 // which of them actually changed. An idempotent rerun reports "no changes".
 func printGenerateResult(w io.Writer, res generate.Result) {
-	if len(res.Changed) == 0 {
+	if len(res.Changed) == 0 && len(res.Removed) == 0 {
 		fmt.Fprintf(w, "generate: %d files up to date, no changes\n", len(res.Written)) //nolint:errcheck // CLI stdout write
 		return
 	}
-	fmt.Fprintf(w, "generate: %d files written, %d changed\n", //nolint:errcheck // CLI stdout write
-		len(res.Written), len(res.Changed))
+	fmt.Fprintf(w, "generate: %d files written, %d changed, %d removed\n", //nolint:errcheck // CLI stdout write
+		len(res.Written), len(res.Changed), len(res.Removed))
 	for _, f := range res.Changed {
 		fmt.Fprintf(w, "  changed  %s\n", f) //nolint:errcheck // CLI stdout write
+	}
+	for _, f := range res.Removed {
+		fmt.Fprintf(w, "  removed  %s\n", f) //nolint:errcheck // CLI stdout write
 	}
 }

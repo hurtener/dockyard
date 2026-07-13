@@ -13,32 +13,10 @@
 -->
 <script lang="ts">
   import { ActionBar, FieldDiff, StatusChip } from 'dockyard-ui';
-
-  type FieldOption = { value: string; label: string };
-  type Field = {
-    key: string;
-    label: string;
-    type: 'string' | 'number' | 'boolean' | 'enum' | 'text';
-    current: unknown;
-    proposed: unknown;
-    options?: FieldOption[];
-    helper_text?: string;
-  };
-  type ProposalPayload = {
-    kind: 'proposal';
-    title: string;
-    description: string;
-    fields: Field[];
-    category?: string;
-    state: 'awaiting' | 'approved' | 'rejected' | 'empty' | 'error' | 'permission';
-    approved?: boolean;
-    edits?: Record<string, unknown>;
-    reason?: string;
-    decided_at?: string;
-  };
+  import type { Field, ProposeWithEditsOutput } from '../../internal/contracts/contracts.js';
 
   interface Props {
-    payload: ProposalPayload;
+    payload: ProposeWithEditsOutput;
     onApprove: (reason: string | undefined, edits: Record<string, unknown>) => void;
     onReject: (reason?: string) => void;
     onDecline: () => void;

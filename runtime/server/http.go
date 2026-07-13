@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -22,10 +24,15 @@ import (
 // other media type.
 const jsonMediaType = "application/json"
 
+const maxMCPRequestBytes = 4 << 20
+
 const (
 	protocolVersionHeader    = "Mcp-Protocol-Version"
+	legacyProtocolVersion    = "2025-11-25"
 	statelessProtocolVersion = "2026-07-28"
 )
+
+type selectedServerKey struct{}
 
 // ProtocolMode selects the MCP HTTP lifecycle accepted by HTTPHandler.
 type ProtocolMode uint8
@@ -151,6 +158,9 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 	var authorization *httpAuthorization
 	if opts != nil && opts.Authorization != nil {
 		cfg := *opts.Authorization
+		cfg.Scopes = append([]string(nil), cfg.Scopes...)
+		cfg.RequiredScopes = append([]string(nil), cfg.RequiredScopes...)
+		cfg.ContinuationKey = append([]byte(nil), cfg.ContinuationKey...)
 		validator, err := authz.Open(context.Background(), cfg)
 		if err != nil {
 			return nil, fmt.Errorf("dockyard/runtime/server: authorization: %w", err)
@@ -160,20 +170,27 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 			return nil, err
 		}
 		parsed, _ := url.Parse(metadataURL)
-		authorization = &httpAuthorization{cfg: cfg, validator: validator, metadataURL: metadataURL, metadataPath: parsed.EscapedPath(), continuation: newContinuationProtector(cfg.ContinuationKey)}
+		authorization = &httpAuthorization{cfg: cfg, validator: validator, metadataURL: metadataURL, metadataPath: parsed.EscapedPath(), metadataQuery: parsed.RawQuery, continuation: newContinuationProtector(cfg.ContinuationKey)}
 	}
 
-	getServer := func(*http.Request) *mcpsdk.Server { return s.mcp }
+	resolveServer := func(*http.Request) *Server { return s }
 	if opts != nil && opts.ServerForRequest != nil {
 		fn := opts.ServerForRequest
-		getServer = func(r *http.Request) *mcpsdk.Server {
+		resolveServer = func(r *http.Request) *Server {
 			ds := fn(r)
 			if ds == nil {
-				return s.mcp
+				return s
 			}
-			return ds.mcp
+			return ds
 		}
 	}
+	selectServer := func(r *http.Request) *Server {
+		if selected, ok := r.Context().Value(selectedServerKey{}).(*Server); ok {
+			return selected
+		}
+		return resolveServer(r)
+	}
+	getServer := func(r *http.Request) *mcpsdk.Server { return selectServer(r).mcp }
 
 	// DNS-rebinding (localhost) protection is on-by-default in the SDK and
 	// disabled via DisableLocalhostProtection. Dockyard maps its positive-sense
@@ -198,14 +215,30 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 			// its normal handler APIs still work. Mark the request before it
 			// reaches the SDK so handler edges do not publish that temporary ID.
 			h = statelessRequestMiddleware(h)
-		} else if s.tasksMount != nil {
-			// Tasks stays on the legacy lifecycle until Phase 33 migrates its
-			// wire layer, so it cannot interpret a modern stateless frame.
-			h = s.tasksMount.HTTPMiddleware(h)
+		} else {
+			// Legacy Tasks routing belongs to the per-request selected server,
+			// just like the SDK server. Using the receiver's mount here would
+			// cross tenant boundaries when ServerForRequest selects another
+			// Dockyard server.
+			next := h
+			h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				selected := selectServer(r)
+				if selected.tasksMount == nil {
+					next.ServeHTTP(w, r)
+					return
+				}
+				selected.tasksMount.HTTPMiddleware(next).ServeHTTP(w, r)
+			})
 		}
-		if s.tasksAuthContext != nil {
-			h = taskAuthMiddleware(h, s.tasksAuthContext)
-		}
+		next := h
+		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			selected := selectServer(r)
+			if selected.tasksAuthContext == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			taskAuthMiddleware(next, selected.tasksAuthContext).ServeHTTP(w, r)
+		})
 		return h
 	}
 
@@ -224,19 +257,24 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			version := r.Header.Get(protocolVersionHeader)
 			switch version {
-			case "":
+			case "", legacyProtocolVersion:
 				legacy.ServeHTTP(w, r)
 			case statelessProtocolVersion:
 				modern.ServeHTTP(w, r)
 			default:
-				if version > statelessProtocolVersion {
-					http.Error(w, "unsupported MCP protocol version "+version+"; supported versions: 2025-11-25, 2026-07-28", http.StatusBadRequest)
-					return
-				}
-				legacy.ServeHTTP(w, r)
+				http.Error(w, "unsupported MCP protocol version "+version+"; supported versions: 2025-11-25, 2026-07-28", http.StatusBadRequest)
+				return
 			}
 		})
 	}
+	// Resolve the Dockyard server exactly once per request. Both the SDK's
+	// getServer callback and Dockyard's Tasks/auth adapters consume this value.
+	next := handler
+	handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		selected := resolveServer(r)
+		ctx := context.WithValue(r.Context(), selectedServerKey{}, selected)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 
 	// The middleware chain is layered inner-to-outer so the OUTERMOST check
 	// runs first: cross-origin (CSRF) protection is the outer layer, then
@@ -250,6 +288,10 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 		// or malformed-content requests must not trigger discovery/JWKS work.
 		h = authorization.middleware(h)
 	}
+	// Bound every MCP POST before authorization or protocol decoding. The SDK
+	// reads request bodies eagerly, so this limit must be owned by Dockyard and
+	// shared by both lifecycle handlers rather than delegated to a Tasks shim.
+	h = mcpRequestBodyLimit(h)
 	if sec.ContentTypeVerification {
 		// Content-Type verification as Dockyard middleware — set explicitly,
 		// never inherited from an SDK default (AGENTS.md §7, D-112). A
@@ -299,11 +341,39 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 	return h, nil
 }
 
+func mcpRequestBodyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if r.ContentLength > maxMCPRequestBytes {
+			http.Error(w, "MCP request body exceeds 4 MiB", http.StatusRequestEntityTooLarge)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxMCPRequestBytes)
+		body, err := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				http.Error(w, "MCP request body exceeds 4 MiB", http.StatusRequestEntityTooLarge)
+				return
+			}
+			http.Error(w, "read MCP request body", http.StatusBadRequest)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.ContentLength = int64(len(body))
+		next.ServeHTTP(w, r)
+	})
+}
+
 type httpAuthorization struct {
-	cfg                       authz.Config
-	validator                 authz.Validator
-	metadataURL, metadataPath string
-	continuation              *continuationProtector
+	cfg                                      authz.Config
+	validator                                authz.Validator
+	metadataURL, metadataPath, metadataQuery string
+	continuation                             *continuationProtector
 }
 
 func (a *httpAuthorization) middleware(next http.Handler) http.Handler {
@@ -316,6 +386,10 @@ func (a *httpAuthorization) middleware(next http.Handler) http.Handler {
 		principal, err := a.validator.Validate(r.Context(), token)
 		if err != nil {
 			a.unauthorized(w, err)
+			return
+		}
+		if principal.Issuer != a.cfg.Issuer || principal.Resource != a.cfg.Resource || principal.Subject == "" {
+			a.unauthorized(w, authz.ErrInvalidToken)
 			return
 		}
 		if err := authz.RequireScopes(principal, a.cfg.RequiredScopes...); err != nil {
@@ -333,7 +407,7 @@ func (a *httpAuthorization) middleware(next http.Handler) http.Handler {
 func (a *httpAuthorization) metadataMiddleware(next http.Handler) http.Handler {
 	metadata := a.cfg.MetadataHandler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.EscapedPath() == a.metadataPath {
+		if r.URL.EscapedPath() == a.metadataPath && r.URL.RawQuery == a.metadataQuery {
 			metadata.ServeHTTP(w, r)
 			return
 		}

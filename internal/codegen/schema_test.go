@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"math/big"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -35,6 +37,30 @@ type scalarsInput struct {
 	Enabled bool    `json:"enabled"`
 	Note    string  `json:"note,omitzero"`
 }
+
+type bigIntCarrier struct {
+	Number big.Int `json:"number"`
+}
+
+type valueJSONMarshaler struct{ Value string }
+
+func (valueJSONMarshaler) MarshalJSON() ([]byte, error) { return []byte(`"value"`), nil }
+
+type pointerJSONMarshaler struct{ Value string }
+
+func (*pointerJSONMarshaler) MarshalJSON() ([]byte, error) { return []byte(`"pointer"`), nil }
+
+type valueTextMarshaler struct{ Value string }
+
+func (valueTextMarshaler) MarshalText() ([]byte, error) { return []byte("value"), nil }
+
+type pointerTextMarshaler struct{ Value string }
+
+func (*pointerTextMarshaler) MarshalText() ([]byte, error) { return []byte("pointer"), nil }
+
+type customEncodedBytes []byte
+
+func (customEncodedBytes) MarshalJSON() ([]byte, error) { return []byte(`{"custom":true}`), nil }
 
 type healthSignal struct {
 	Label  string `json:"label"`
@@ -108,6 +134,157 @@ type recursiveSpecial struct {
 	Next    *recursiveSpecial `json:"next,omitempty"`
 }
 
+type recursiveParity struct {
+	Bytes []byte           `json:"bytes"`
+	Pair  [2]string        `json:"pair"`
+	Dash  string           `json:"-,"` //nolint:staticcheck // Intentionally tests the non-ignoring json:"-," edge case.
+	Next  *recursiveParity `json:"next,omitempty"`
+}
+
+type recursiveA struct {
+	B *recursiveB `json:"b,omitempty"`
+}
+
+type recursiveB struct {
+	A *recursiveA `json:"a,omitempty"`
+}
+
+type TaggedAnonymousRecursive struct {
+	*TaggedAnonymousRecursive `json:"next,omitempty"`
+}
+
+func TestSchemaForDetectsTaggedAnonymousRecursion(t *testing.T) {
+	s, err := codegen.SchemaFor[TaggedAnonymousRecursive]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := s.Properties["next"]
+	if next == nil || len(next.AnyOf) != 2 || !strings.HasPrefix(next.AnyOf[1].Ref, "#/$defs/") {
+		t.Fatalf("tagged anonymous recursive field = %#v", next)
+	}
+}
+
+func TestSchemaFor_BytesMatchEncodingJSON(t *testing.T) {
+	type encodedBytes []byte
+	type byteCarrier struct {
+		Data  []byte       `json:"data"`
+		Alias encodedBytes `json:"alias"`
+	}
+	for name, schemaFor := range map[string]func() (*jsonschema.Schema, error){
+		"ordinary":  func() (*jsonschema.Schema, error) { return codegen.SchemaFor[byteCarrier]() },
+		"recursive": func() (*jsonschema.Schema, error) { return codegen.SchemaFor[recursiveParity]() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, err := schemaFor()
+			if err != nil {
+				t.Fatal(err)
+			}
+			field := s.Properties[map[bool]string{true: "bytes", false: "data"}[name == "recursive"]]
+			if !schemaHasType(field, "string") || field.ContentEncoding != "base64" || schemaHasType(field, "array") {
+				t.Fatalf("byte schema = %#v", field)
+			}
+			if name == "ordinary" && !schemaHasType(s.Properties["alias"], "string") {
+				t.Fatalf("named byte slice schema = %#v", s.Properties["alias"])
+			}
+		})
+	}
+}
+
+func TestSchemaForRejectsUnsupportedCustomJSONEncoding(t *testing.T) {
+	tests := map[string]func() error{
+		"json value receiver": func() error {
+			_, err := codegen.SchemaFor[struct {
+				Value valueJSONMarshaler `json:"value"`
+			}]()
+			return err
+		},
+		"json pointer receiver": func() error {
+			_, err := codegen.SchemaFor[struct {
+				Value pointerJSONMarshaler `json:"value"`
+			}]()
+			return err
+		},
+		"text value receiver": func() error {
+			_, err := codegen.SchemaFor[struct {
+				Value valueTextMarshaler `json:"value"`
+			}]()
+			return err
+		},
+		"text pointer receiver": func() error {
+			_, err := codegen.SchemaFor[struct {
+				Value pointerTextMarshaler `json:"value"`
+			}]()
+			return err
+		},
+		"named bytes with custom encoding": func() error {
+			_, err := codegen.SchemaFor[struct {
+				Value customEncodedBytes `json:"value"`
+			}]()
+			return err
+		},
+	}
+	for name, schemaFor := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := schemaFor()
+			if !errors.Is(err, codegen.ErrInvalidContract) || !strings.Contains(err.Error(), "without an explicit contract wire-shape override") {
+				t.Fatalf("SchemaFor error = %v, want unsupported custom encoding", err)
+			}
+		})
+	}
+}
+
+func TestRecursiveSchemaPreservesArrayAndJSONTagSemantics(t *testing.T) {
+	s, err := codegen.SchemaFor[recursiveParity]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair := s.Properties["pair"]
+	if pair.MinItems == nil || *pair.MinItems != 2 || pair.MaxItems == nil || *pair.MaxItems != 2 {
+		t.Fatalf("fixed array bounds = %v/%v", pair.MinItems, pair.MaxItems)
+	}
+	if _, ok := s.Properties["-"]; !ok {
+		t.Fatal(`json:"-," must produce the literal property "-"`)
+	}
+}
+
+func TestSchemaForRejectsPointerInputRoot(t *testing.T) {
+	if _, err := codegen.SchemaFor[*scalarsInput](); !errors.Is(err, codegen.ErrInvalidContract) {
+		t.Fatalf("error = %v, want ErrInvalidContract", err)
+	}
+	if _, err := codegen.OutputSchemaFor[*scalarsInput](); err != nil {
+		t.Fatalf("pointer output remains valid: %v", err)
+	}
+}
+
+func TestSchemaGenerationBoundsTypeDepth(t *testing.T) {
+	typ := reflect.TypeFor[string]()
+	for range 130 {
+		typ = reflect.SliceOf(typ)
+	}
+	root := reflect.StructOf([]reflect.StructField{{Name: "Value", Type: typ, Tag: `json:"value"`}})
+	if _, err := codegen.SchemaForType(root); !errors.Is(err, codegen.ErrInvalidContract) {
+		t.Fatalf("error = %v, want bounded ErrInvalidContract", err)
+	}
+}
+
+func TestRecursiveSchemaCanonicalizesNamedDefinitions(t *testing.T) {
+	s, err := codegen.SchemaFor[recursiveA]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := s.Properties["b"]
+	if len(b.AnyOf) != 2 || !strings.HasPrefix(b.AnyOf[1].Ref, "#/$defs/") {
+		t.Fatalf("named nested recursive type should be referenced: %#v", b)
+	}
+	raw, err := codegen.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := codegen.ValidateSchema(raw, true); err != nil {
+		t.Fatalf("canonical recursive graph does not resolve: %v\n%s", err, raw)
+	}
+}
+
 func TestSchemaFor_TimeAndRawMessage(t *testing.T) {
 	s, err := codegen.SchemaFor[shapesContract]()
 	if err != nil {
@@ -154,6 +331,92 @@ func TestSchemaFor_TimeAndRawMessage(t *testing.T) {
 	}
 	if !strings.Contains(string(out), `"payload": true`) {
 		t.Errorf("an untagged json.RawMessage should marshal as `\"payload\": true`, got:\n%s", out)
+	}
+}
+
+func TestSchemaFor_RejectsAddressabilityDependentBigNumbers(t *testing.T) {
+	tests := map[string]func() error{
+		"root Int value":     func() error { _, err := codegen.OutputSchemaFor[big.Int](); return err },
+		"root Int pointer":   func() error { _, err := codegen.OutputSchemaFor[*big.Int](); return err },
+		"root Rat value":     func() error { _, err := codegen.OutputSchemaFor[big.Rat](); return err },
+		"root Rat pointer":   func() error { _, err := codegen.OutputSchemaFor[*big.Rat](); return err },
+		"root Float value":   func() error { _, err := codegen.OutputSchemaFor[big.Float](); return err },
+		"root Float pointer": func() error { _, err := codegen.OutputSchemaFor[*big.Float](); return err },
+		"nested Int value": func() error {
+			_, err := codegen.SchemaFor[struct {
+				Value big.Int `json:"value"`
+			}]()
+			return err
+		},
+		"nested Int pointer": func() error {
+			_, err := codegen.SchemaFor[struct {
+				Value *big.Int `json:"value"`
+			}]()
+			return err
+		},
+		"nested Rat value": func() error {
+			_, err := codegen.SchemaFor[struct {
+				Value big.Rat `json:"value"`
+			}]()
+			return err
+		},
+		"nested Rat pointer": func() error {
+			_, err := codegen.SchemaFor[struct {
+				Value *big.Rat `json:"value"`
+			}]()
+			return err
+		},
+		"nested Float value": func() error {
+			_, err := codegen.SchemaFor[struct {
+				Value big.Float `json:"value"`
+			}]()
+			return err
+		},
+		"nested Float pointer": func() error {
+			_, err := codegen.SchemaFor[struct {
+				Value *big.Float `json:"value"`
+			}]()
+			return err
+		},
+	}
+	for name, schemaFor := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := schemaFor()
+			if !errors.Is(err, codegen.ErrInvalidContract) || !strings.Contains(err.Error(), "addressability-dependent") {
+				t.Fatalf("schema error = %v, want addressability-dependent math/big rejection", err)
+			}
+		})
+	}
+
+	value := bigIntCarrier{Number: *big.NewInt(123456789)}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"number":{}}` {
+		t.Fatalf("non-addressable big.Int JSON = %s, want object demonstrating unsafe context dependence", raw)
+	}
+}
+
+func TestSchemaFor_AddressabilityInspectionSkipsOnlyExactJSONDash(t *testing.T) {
+	t.Parallel()
+	schema, err := codegen.SchemaFor[struct {
+		Int    big.Int              `json:"-"`
+		Rat    *big.Rat             `json:"-"`
+		Float  big.Float            `json:"-"`
+		Custom pointerTextMarshaler `json:"-"`
+	}]()
+	if err != nil {
+		t.Fatalf("ignored custom encoders rejected: %v", err)
+	}
+	if len(schema.Properties) != 0 {
+		t.Fatalf("ignored properties were generated: %v", schema.Properties)
+	}
+	_, err = codegen.SchemaFor[struct {
+		Literal big.Rat `json:"-,"` //nolint:staticcheck // Intentionally tests the literal dash property.
+	}]()
+	if !errors.Is(err, codegen.ErrInvalidContract) || !strings.Contains(err.Error(), "addressability-dependent") {
+		t.Fatalf(`literal json:"-," error = %v, want addressability-dependent rejection`, err)
 	}
 }
 

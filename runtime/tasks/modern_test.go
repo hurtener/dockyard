@@ -144,6 +144,84 @@ func TestModernUpdateRejectsResponseForWrongUnionMember(t *testing.T) {
 	}
 }
 
+func TestModernUpdateRejectsCancelledTaskAndClearsInput(t *testing.T) {
+	t.Parallel()
+	store := NewInMemoryStore()
+	e, _ := NewEngine(store, &Options{Logger: quietLogger()})
+	requestDone := make(chan error, 1)
+	created, err := e.CreateToolTask(context.Background(), CreateToolCallParams{
+		ToolName:    "cancel-input",
+		AuthContext: "alice",
+		Handle: func(_ context.Context, h TaskHandle) (json.RawMessage, error) {
+			err := h.RequestInput(context.Background(), InputRequest{
+				Key: "approval", Method: InputMethodElicitation,
+				Payload: json.RawMessage(`{"method":"elicitation/create","params":{"message":"Approve?"}}`),
+			})
+			requestDone <- err
+			return nil, err
+		},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, store, created.ID, protocolcodec.TaskInputRequired)
+	if _, err := e.DispatchModern(context.Background(), "alice", MethodCancel, ModernRequest{TaskID: created.ID}); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if _, err := e.DispatchModern(context.Background(), "alice", MethodUpdate, ModernRequest{
+		TaskID: created.ID,
+		InputResponses: map[string]TaskInputResponse{
+			"approval": {Payload: json.RawMessage(`{"action":"accept"}`)},
+		},
+	}); !errors.Is(err, ErrIllegalTransition) {
+		t.Fatalf("update after cancellation error = %v, want ErrIllegalTransition", err)
+	}
+	rec, err := store.Get(context.Background(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Status != protocolcodec.TaskCancelled || len(rec.InputRequests) != 0 || len(rec.InputResponses) != 0 {
+		t.Fatalf("cancelled input state = %#v", rec)
+	}
+	select {
+	case err := <-requestDone:
+		if err == nil {
+			t.Fatal("RequestInput resumed successfully after cancellation")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled RequestInput waiter did not wake")
+	}
+}
+
+func TestModernUpdateWorkingIgnoresDuplicateAndUnknownResponses(t *testing.T) {
+	t.Parallel()
+	store := NewInMemoryStore()
+	e, _ := NewEngine(store, nil)
+	rec := workingRecord("modern-idempotent")
+	rec.AuthContext = "alice"
+	rec.InputResponses = map[string]TaskInputResponse{
+		"accepted": {Payload: json.RawMessage(`{"roots":[]}`)},
+	}
+	if err := store.Create(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+	for _, responses := range []map[string]TaskInputResponse{
+		{},
+		{"accepted": {Payload: json.RawMessage(`not-json`)}},
+		{"unknown": {Payload: json.RawMessage(`different-representation`)}},
+	} {
+		if _, err := e.DispatchModern(context.Background(), "alice", MethodUpdate, ModernRequest{
+			TaskID: rec.ID, InputResponses: responses,
+		}); err != nil {
+			t.Fatalf("idempotent working update %q: %v", responses, err)
+		}
+	}
+	got, err := store.Get(context.Background(), rec.ID)
+	if err != nil || len(got.InputResponses) != 1 || string(got.InputResponses["accepted"].Payload) != `{"roots":[]}` {
+		t.Fatalf("idempotent retries mutated task: %#v, %v", got, err)
+	}
+}
+
 func TestModernUpdateConcurrentReuse(t *testing.T) {
 	t.Parallel()
 	store := NewInMemoryStore()

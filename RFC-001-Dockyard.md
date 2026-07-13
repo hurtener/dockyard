@@ -232,9 +232,11 @@ quality:                          # see §9.4 — enforced by `dockyard validate
   require_spec_compliance: true
 ```
 
-The manifest's tool input/output values are **Go type references**; the codegen
-pipeline (§6) resolves them. The manifest never duplicates schema — schema is
-generated.
+The manifest's tool input/output values are **Go type references** in the
+canonical `internal/contracts` package; the codegen pipeline (§6) resolves
+them. Keeping every tool contract in that package ensures the one generated
+`contracts.ts` contains the complete App-facing contract surface. The manifest
+never duplicates schema — schema is generated.
 
 ### 4.3 The generated project layout
 
@@ -244,14 +246,18 @@ my-app/
   go.mod
   cmd/my-app/main.go            # thin entrypoint; calls the Dockyard runtime
   internal/
-    contracts/types.go          # SOURCE OF TRUTH — Go contract structs
-    contracts/generated.schema.json   # generated (§6) — do not edit
+    contracts/
+      types.go                  # SOURCE OF TRUTH — Go contract structs
+      <tool>_input.schema.json  # generated (§6) — do not edit
+      <tool>_output.schema.json # generated (§6) — do not edit
+      contracts.ts              # generated (§6) — do not edit
     tools/show_customer_health.go     # tool handler(s)
     app/server.go               # runtime wiring (mostly generated)
+  .dockyard/
+    generated-artifacts.json    # generated ownership index (§6) — do not edit
   web/
     src/apps/customer-health.svelte   # a ui:// resource (convention §7.6)
     src/lib/                    # Dockyard bridge shell library (vendored)
-    src/generated/contracts.ts  # generated (§6) — do not edit
     src/states/{Loading,Empty,Error,Permission}.svelte
     vite.config.ts
     dist/                       # built UI; //go:embed target (§14)
@@ -265,6 +271,10 @@ my-app/
 A developer opening any Dockyard project finds the same layout. The framework
 reduces boilerplate but does not hide the architecture: generated files are boring,
 readable, and clearly marked; the manifest exposes every wiring decision.
+Generated TypeScript remains beside its Go source even when a project has no
+`web/` tree. An App imports that canonical artifact from
+`internal/contracts/contracts.ts`; generation never changes ownership or output
+paths based on whether a UI happens to exist (D-198).
 
 ---
 
@@ -348,17 +358,19 @@ and TypeScript are generated **independently from Go**, each by a pure-Go tool, 
 the codegen path has **no Node dependency**:
 
 ```text
-                       ┌─ google/jsonschema-go .For() ─► internal/contracts/generated.schema.json
+                       ┌─ google/jsonschema-go .For() ─► internal/contracts/<tool>_<side>.schema.json
 internal/contracts/*.go │
    (SOURCE OF TRUTH) ────┤
-                       └─ gzuidhof/tygo ───────────────► web/src/generated/contracts.ts
+                       └─ gzuidhof/tygo ───────────────► internal/contracts/contracts.ts
 ```
 
 - **JSON Schema:** `github.com/google/jsonschema-go` — the same engine the official
   MCP SDK already uses internally (Brief 06 §2.3). Using anything else would create
   a divergent schema dialect; Dockyard standardizes on it.
 - **TypeScript:** `github.com/gzuidhof/tygo` — AST-based, so it preserves doc
-  comments, enums, and constants (Brief 06 §2.4).
+  comments, enums, and constants (Brief 06 §2.4). The artifact is generated for
+  backend-only and UI-bearing projects alike; an App imports it from the
+  canonical contracts directory (D-198).
 - **Drift check:** because schema and TS are generated independently, a bug in one
   generator could silently desync them. `dockyard validate` **cross-verifies**
   schema vs. TS and **hard-fails on drift or stale generated output** (Brief 06 R1).

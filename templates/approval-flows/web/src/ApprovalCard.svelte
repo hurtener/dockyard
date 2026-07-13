@@ -14,21 +14,10 @@
 -->
 <script lang="ts">
   import { StatusChip, ActionBar } from 'dockyard-ui';
-
-  type ApprovalPayload = {
-    kind: 'approval';
-    title: string;
-    description: string;
-    category?: string;
-    metadata?: Record<string, unknown>;
-    state: 'awaiting' | 'approved' | 'rejected' | 'empty' | 'error' | 'permission';
-    approved?: boolean;
-    reason?: string;
-    decided_at?: string;
-  };
+  import type { RequestApprovalOutput } from '../../internal/contracts/contracts.js';
 
   interface Props {
-    payload: ApprovalPayload;
+    payload: RequestApprovalOutput;
     onApprove: (reason?: string) => void;
     onReject: (reason?: string) => void;
     onDecline: () => void;

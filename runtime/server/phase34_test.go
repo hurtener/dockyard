@@ -79,6 +79,7 @@ func TestStructuredOutputSupportsPrimitiveAndExplicitNull(t *testing.T) {
 		if got, ok := envelope.Result["structuredContent"]; !ok || string(got) != tc.want {
 			t.Fatalf("structuredContent = %s, present %v, want %s: %s", got, ok, tc.want, raw)
 		}
+		assertResultType(t, envelope.Result, "complete")
 		assertTextFallback(t, envelope.Result["content"], tc.fallback)
 	}
 }
@@ -184,6 +185,79 @@ func TestModernResourceSemanticsRealHTTP(t *testing.T) {
 	assertError(t, invalid, -32602, "ordinary invalid params")
 }
 
+func TestModernDiscoveryRawWireConforms(t *testing.T) {
+	t.Parallel()
+	s, err := server.New(server.Info{Name: "strict-discovery", Version: "1.0.0"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := s.HTTPHandler(&server.HTTPOptions{ProtocolMode: server.Stateless20260728, Security: server.DefaultHTTPSecurity()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(h)
+	t.Cleanup(ts.Close)
+	raw := modernRPC(t, ts, `{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"test","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}}}`)
+	var envelope struct {
+		Result struct {
+			ResultType        string                     `json:"resultType"`
+			TTLMs             *int                       `json:"ttlMs"`
+			CacheScope        string                     `json:"cacheScope"`
+			SupportedVersions []string                   `json:"supportedVersions"`
+			Capabilities      map[string]json.RawMessage `json:"capabilities"`
+			ServerInfo        struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			} `json:"serverInfo"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("decode discovery response %s: %v", raw, err)
+	}
+	result := envelope.Result
+	if result.ResultType != "complete" || result.TTLMs == nil || *result.TTLMs < 0 ||
+		(result.CacheScope != "public" && result.CacheScope != "private") || result.Capabilities == nil ||
+		result.ServerInfo.Name != "strict-discovery" || result.ServerInfo.Version != "1.0.0" ||
+		!containsString(result.SupportedVersions, "2026-07-28") {
+		t.Fatalf("discovery result does not satisfy strict core fields: %s", raw)
+	}
+}
+
+func TestModernResultTypePreservesInputRequired(t *testing.T) {
+	t.Parallel()
+	type input struct{}
+	type output struct{}
+	s, err := server.New(server.Info{Name: "mrtr-result", Version: "1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.AddToolWithSchemasMRTR(s, server.ToolDef{Name: "approve"}, nil, nil,
+		func(context.Context, server.ToolCall[input]) (server.ToolOutput[output], error) {
+			return server.ToolOutput[output]{InputRequests: map[string]server.InputRequest{
+				"approval": server.ElicitationRequest{Message: "Approve?"},
+			}}, nil
+		}); err != nil {
+		t.Fatal(err)
+	}
+	h, err := s.HTTPHandler(&server.HTTPOptions{ProtocolMode: server.Stateless20260728, Security: server.DefaultHTTPSecurity()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(h)
+	t.Cleanup(ts.Close)
+	raw := modernRPC(t, ts, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"approve","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"test","version":"1"},"io.modelcontextprotocol/clientCapabilities":{"elicitation":{"form":{}}}}}}`)
+	var envelope struct {
+		Result map[string]json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	assertResultType(t, envelope.Result, "input_required")
+	if _, ok := envelope.Result["inputRequests"]; !ok {
+		t.Fatalf("input_required result lost inputRequests: %s", raw)
+	}
+}
+
 func TestLegacyResourceResponseOmitsCacheAndUsesLegacyMissingCode(t *testing.T) {
 	t.Parallel()
 	s, err := server.New(server.Info{Name: "legacy", Version: "1"}, &server.Options{ResourceListCache: server.CachePolicy{TTL: time.Second, Scope: server.CacheScopePublic}})
@@ -208,6 +282,9 @@ func TestLegacyResourceResponseOmitsCacheAndUsesLegacyMissingCode(t *testing.T) 
 	}
 	if bytes.Contains(envelope["result"], []byte(`"ttlMs"`)) || bytes.Contains(envelope["result"], []byte(`"cacheScope"`)) {
 		t.Fatalf("legacy cache metadata leaked: %s", list)
+	}
+	if bytes.Contains(envelope["result"], []byte(`"resultType"`)) {
+		t.Fatalf("modern result discriminator leaked into legacy response: %s", list)
 	}
 	templates := legacyRPC(t, ts, session, `{"jsonrpc":"2.0","id":4,"method":"resources/templates/list","params":{}}`).body
 	if err := json.Unmarshal(templates, &envelope); err != nil {
@@ -296,16 +373,37 @@ func assertResultCache(t *testing.T, raw []byte, ttl int, scope string) {
 	t.Helper()
 	var envelope struct {
 		Result struct {
-			TTL   int    `json:"ttlMs"`
-			Scope string `json:"cacheScope"`
+			ResultType string `json:"resultType"`
+			TTL        int    `json:"ttlMs"`
+			Scope      string `json:"cacheScope"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Result.TTL != ttl || envelope.Result.Scope != scope {
-		t.Fatalf("cache = %d/%q, want %d/%q: %s", envelope.Result.TTL, envelope.Result.Scope, ttl, scope, raw)
+	if envelope.Result.ResultType != "complete" || envelope.Result.TTL != ttl || envelope.Result.Scope != scope {
+		t.Fatalf("result type/cache = %q/%d/%q, want complete/%d/%q: %s", envelope.Result.ResultType, envelope.Result.TTL, envelope.Result.Scope, ttl, scope, raw)
 	}
+}
+
+func assertResultType(t *testing.T, result map[string]json.RawMessage, want string) {
+	t.Helper()
+	var got string
+	if err := json.Unmarshal(result["resultType"], &got); err != nil {
+		t.Fatalf("decode resultType %s: %v", result["resultType"], err)
+	}
+	if got != want {
+		t.Fatalf("resultType = %q, want %q", got, want)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func assertErrorCode(t *testing.T, raw []byte, code int64) {

@@ -40,31 +40,33 @@ func responseSemanticsMiddleware(opts *Options) mcpsdk.Middleware {
 				}
 				return result, err
 			}
-			if method == "tools/call" && presence.set {
-				raw, marshalErr := json.Marshal(result)
-				if marshalErr != nil {
-					return nil, marshalErr
-				}
-				raw, marshalErr = protocolcodec.EncodeStructuredPresence(raw, presence.present, presence.explicitNull)
-				if marshalErr != nil {
-					return nil, marshalErr
-				}
-				return &encodedResult{raw: raw}, nil
-			}
-			if method != "resources/list" && method != "resources/templates/list" && method != "resources/read" {
+			resourceResult := method == "resources/list" || method == "resources/templates/list" || method == "resources/read"
+			if version != protocolcodec.VersionMCP20260728 && (method != "tools/call" || !presence.set) && !resourceResult {
 				return result, nil
-			}
-			cache := listPolicy
-			if method == "resources/read" {
-				cache = readCache.policy
 			}
 			raw, marshalErr := json.Marshal(result)
 			if marshalErr != nil {
 				return nil, marshalErr
 			}
-			raw, marshalErr = protocolcodec.EncodeCacheMetadata(version, raw, protocolcodec.CacheMetadata{
-				TTLMs: int64(cache.TTL / time.Millisecond), Scope: normalizedCacheScope(cache.Scope, method == "resources/read"),
-			})
+			if method == "tools/call" && presence.set {
+				raw, marshalErr = protocolcodec.EncodeStructuredPresence(raw, presence.present, presence.explicitNull)
+				if marshalErr != nil {
+					return nil, marshalErr
+				}
+			}
+			if resourceResult {
+				cache := listPolicy
+				if method == "resources/read" {
+					cache = readCache.policy
+				}
+				raw, marshalErr = protocolcodec.EncodeCacheMetadata(version, raw, protocolcodec.CacheMetadata{
+					TTLMs: int64(cache.TTL / time.Millisecond), Scope: normalizedCacheScope(cache.Scope, method == "resources/read"),
+				})
+				if marshalErr != nil {
+					return nil, marshalErr
+				}
+			}
+			raw, marshalErr = protocolcodec.EncodeResultType(version, raw)
 			if marshalErr != nil {
 				return nil, marshalErr
 			}

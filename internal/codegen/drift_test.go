@@ -77,6 +77,86 @@ func TestCrossCheck_DocCommentBraceNotInterfaceClose(t *testing.T) {
 	}
 }
 
+func TestCrossCheck_NestedMultilineObjectDoesNotEndInterface(t *testing.T) {
+	t.Parallel()
+	schema := &jsonschema.Schema{Type: "object", Required: []string{"meta", "tail"}, Properties: map[string]*jsonschema.Schema{
+		"meta": {Type: "object"},
+		"tail": {Type: "string"},
+	}}
+	ts := []byte("export interface Payload {\n" +
+		"  meta: {\n" +
+		"    label: string;\n" +
+		"    options: {\n" +
+		"      enabled: boolean;\n" +
+		"    };\n" +
+		"  };\n" +
+		"  tail: string;\n" +
+		"}\n")
+	if err := codegen.CrossCheck(schema, "Payload", ts); err != nil {
+		t.Fatalf("nested multiline object caused false drift: %v", err)
+	}
+}
+
+func TestCrossCheck_LineCommentBraceNotInterfaceClose(t *testing.T) {
+	t.Parallel()
+	schema := &jsonschema.Schema{Type: "object", Required: []string{"meta", "tail"}, Properties: map[string]*jsonschema.Schema{
+		"meta": {Type: "object"},
+		"tail": {Type: "string"},
+	}}
+	ts := []byte("export interface Payload {\n" +
+		"  meta: {\n" +
+		"    url: \"https://example.test/{literal}\";\n" +
+		"    enabled: boolean; // } closes the example, not the object\n" +
+		"  };\n" +
+		"  tail: string;\n" +
+		"}\n")
+	if err := codegen.CrossCheck(schema, "Payload", ts); err != nil {
+		t.Fatalf("line-comment brace caused false drift: %v", err)
+	}
+}
+
+func TestCrossCheck_NestedMultilineObjectArrayIsArray(t *testing.T) {
+	t.Parallel()
+	schema := &jsonschema.Schema{Type: "object", Required: []string{"items", "tail"}, Properties: map[string]*jsonschema.Schema{
+		"items": {Type: "array"},
+		"tail":  {Type: "string"},
+	}}
+	ts := []byte("export interface Payload {\n" +
+		"  items: {\n" +
+		"    label: string;\n" +
+		"  }[];\n" +
+		"  tail: string;\n" +
+		"}\n")
+	if err := codegen.CrossCheck(schema, "Payload", ts); err != nil {
+		t.Fatalf("nested multiline object array caused false drift: %v", err)
+	}
+}
+
+func TestCrossCheck_ResolvesRecursivePropertyRef(t *testing.T) {
+	t.Parallel()
+	type node struct {
+		Value string `json:"value"`
+		Next  *node  `json:"next,omitempty"`
+	}
+	type payload struct {
+		Root node `json:"root"`
+	}
+	schema, err := codegen.SchemaFor[payload]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := []byte("export interface Payload {\n  root: Node;\n}\nexport interface Node {\n  value: string;\n  next?: Node;\n}\n")
+	if err := codegen.CrossCheck(schema, "Payload", good); err != nil {
+		t.Fatalf("resolved recursive object rejected: %v", err)
+	}
+	bad := []byte("export interface Payload {\n  root: any;\n}\n")
+	err = codegen.CrossCheck(schema, "Payload", bad)
+	assertDrift(t, err, "root")
+	if !strings.Contains(err.Error(), "object in the schema") {
+		t.Fatalf("recursive ref was not resolved to object: %v", err)
+	}
+}
+
 // --- CrossCheck: desync classes ---------------------------------------------
 
 func TestCrossCheck_PropertyMissingFromTS(t *testing.T) {
@@ -206,6 +286,75 @@ func TestCrossCheck_TygoIntAnnotationIsNotDrift(t *testing.T) {
 		"}\n")
 	if err := codegen.CrossCheck(schema, "NestedOutput", ts); err != nil {
 		t.Errorf("a tygo `/* int */` annotation should not be read as drift, got: %v", err)
+	}
+}
+
+func TestCrossCheck_JSONStringPointerWireType(t *testing.T) {
+	t.Parallel()
+	type contract struct {
+		Limit *int `json:"limit,string"`
+		Maybe *int `json:"maybe,string,omitempty"`
+	}
+	schema, err := codegen.SchemaFor[contract]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts, err := codegen.TypeScriptForSource("type Contract struct { Limit *int `json:\"limit,string\"`; Maybe *int `json:\"maybe,string,omitempty\"` }")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := codegen.CrossCheck(schema, "Contract", ts); err != nil {
+		t.Fatalf("nullable json ,string schema/TypeScript drift: %v\n%s", err, ts)
+	}
+	bad := []byte(strings.Replace(string(ts), "limit: string | null;", "limit: number | null;", 1))
+	assertDrift(t, codegen.CrossCheck(schema, "Contract", bad), "limit")
+}
+
+func TestCrossCheck_JSONStringPointerAliasAndAnonymousScalar(t *testing.T) {
+	t.Parallel()
+	type pointerAlias = *int
+	type AnonymousScalar int
+	type contract struct {
+		Value           pointerAlias `json:"value,string"`
+		AnonymousScalar `json:"count,string"`
+	}
+	schema, err := codegen.SchemaFor[contract]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts, err := codegen.TypeScriptForSource("type Pointer = *int\ntype Count int\ntype Contract struct { Value Pointer `json:\"value,string\"`; Count `json:\"count,string\"` }")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := codegen.CrossCheck(schema, "Contract", ts); err != nil {
+		t.Fatalf("pointer alias and anonymous scalar schema/TypeScript drift: %v\n%s", err, ts)
+	}
+}
+
+func TestCrossCheck_JSONStringPredeclaredAliases(t *testing.T) {
+	t.Parallel()
+	type byteAlias = byte
+	type runeAlias = rune
+	type bytePointerAlias = *byte
+	type runePointerAlias = *rune
+	type contract struct {
+		Byte        byte             `json:"byte,string"`
+		Rune        rune             `json:"rune,string"`
+		ByteAlias   byteAlias        `json:"byte_alias,string"`
+		RuneAlias   runeAlias        `json:"rune_alias,string"`
+		BytePointer bytePointerAlias `json:"byte_pointer,string"`
+		RunePointer runePointerAlias `json:"rune_pointer,string"`
+	}
+	schema, err := codegen.SchemaFor[contract]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts, err := codegen.TypeScriptForSource("type ByteAlias = byte\ntype RuneAlias = rune\ntype BytePointerAlias = *byte\ntype RunePointerAlias = *rune\ntype Contract struct { Byte byte `json:\"byte,string\"`; Rune rune `json:\"rune,string\"`; ByteAlias ByteAlias `json:\"byte_alias,string\"`; RuneAlias RuneAlias `json:\"rune_alias,string\"`; BytePointer BytePointerAlias `json:\"byte_pointer,string\"`; RunePointer RunePointerAlias `json:\"rune_pointer,string\"` }")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := codegen.CrossCheck(schema, "Contract", ts); err != nil {
+		t.Fatalf("byte/rune alias schema/TypeScript drift: %v\n%s", err, ts)
 	}
 }
 

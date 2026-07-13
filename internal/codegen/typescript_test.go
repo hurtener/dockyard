@@ -1,13 +1,18 @@
 package codegen_test
 
 import (
+	"bytes"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/hurtener/dockyard/internal/codegen"
+	"github.com/hurtener/dockyard/internal/codegen/testdata/externalcontract"
 )
 
 // generatedTSMarker is the canonical first line of every generated TypeScript
@@ -86,6 +91,86 @@ func TestTypeScriptForSource_NestedAndSlice(t *testing.T) {
 	}
 }
 
+func TestTypeScriptForSource_BytesUseBase64StringShape(t *testing.T) {
+	t.Parallel()
+	src := "type Payload struct {\n\tData []byte `json:\"data\"`\n\tChunks [][]uint8 `json:\"chunks\"`\n}\n"
+	got, err := codegen.TypeScriptForSource(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := string(got); !strings.Contains(text, "data: string;") || !strings.Contains(text, "chunks: string[];") {
+		t.Fatalf("byte slices must match encoding/json base64 strings:\n%s", text)
+	}
+}
+
+func TestTypeScriptForSource_ByteAliasesAndNestedFormsUseStrings(t *testing.T) {
+	t.Parallel()
+	src := "type Octet uint8\ntype MoreOctet Octet\ntype Payload struct {\n\tData []MoreOctet `json:\"data\"`\n\tNested map[string][][]Octet `json:\"nested\"`\n}\n"
+	got, err := codegen.TypeScriptForSource(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	if !strings.Contains(text, "data: string;") || !strings.Contains(text, "nested: { [key: string]: string[]};") {
+		t.Fatalf("byte aliases must follow encoding/json through nested forms:\n%s", text)
+	}
+}
+
+func TestTypeScriptForSource_TaggedAnonymousFieldIsNotFlattened(t *testing.T) {
+	t.Parallel()
+	src := "type Node struct {\n\t*Node `json:\"next,omitempty\"`\n}\n"
+	got, err := codegen.TypeScriptForSource(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := string(got); !strings.Contains(text, "next?: Node;") {
+		t.Fatalf("tagged anonymous field must remain a named JSON property:\n%s", text)
+	}
+}
+
+func TestTypeScriptForSource_InvalidAnonymousJSONTagIsPromoted(t *testing.T) {
+	t.Parallel()
+	src := "type Inner struct { Value string `json:\"value\"` }\ntype Outer struct { Inner `json:\"bad©name\"` }\n"
+	got, err := codegen.TypeScriptForSource(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	outer := text[strings.Index(text, "export interface Outer"):]
+	if !strings.Contains(outer, "value: string;") || strings.Contains(outer, "bad©name") || strings.Contains(outer, "Inner: Inner") {
+		t.Fatalf("invalid JSON tag must be ignored like encoding/json:\n%s", text)
+	}
+}
+
+func TestTypeScriptForSource_NormalizesNamedJSONTagsLikeEncodingJSON(t *testing.T) {
+	t.Parallel()
+	src := "type Marker string\n" +
+		"const MarkerSentinel Marker = \"dockyard©json©literal©dash\"\n" +
+		"type Payload struct {\n" +
+		"\t// Dash preserves the text 'dockyard©json©literal©dash'.\n" +
+		"\tDash string `json:\"-,\"`\n" +
+		"\tFallback string `json:\"bad©name,omitempty\"`\n" +
+		"\tReserved string `json:\"dockyard©json©literal©dash\"`\n}\n"
+	got, err := codegen.TypeScriptForSource(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	if !strings.Contains(text, "'-': string;") {
+		t.Fatalf(`json:"-," must produce the literal JSON property "-":\n%s`, text)
+	}
+	if !strings.Contains(text, "Fallback?: string;") || strings.Contains(text, "bad©name") {
+		t.Fatalf("invalid JSON tag names must fall back to the Go field name and retain options:\n%s", text)
+	}
+	if !strings.Contains(text, "Reserved: string;") {
+		t.Fatalf("source text matching the internal dash sentinel must still use encoding/json fallback:\n%s", text)
+	}
+	if !strings.Contains(text, "'dockyard©json©literal©dash'.") ||
+		!strings.Contains(text, `MarkerSentinel: Marker = "dockyard©json©literal©dash"`) {
+		t.Fatalf("literal-dash normalization changed comment or string content:\n%s", text)
+	}
+}
+
 func TestTypeScriptForSource_Deterministic(t *testing.T) {
 	t.Parallel()
 	a, err := codegen.TypeScriptForSource(tsNested)
@@ -119,6 +204,33 @@ func TestTypeScriptForSource_AcceptsPackageClause(t *testing.T) {
 	}
 	if strings.Contains(string(got), "time") {
 		t.Errorf("import-derived noise leaked into the output:\n%s", got)
+	}
+}
+
+func TestTypeScriptForSource_RejectsUnresolvedImportedContractType(t *testing.T) {
+	t.Parallel()
+	src := "package contracts\nimport \"math/big\"\ntype Payload struct { Number big.Int `json:\"number\"` }\n"
+	_, err := codegen.TypeScriptForSource(src)
+	if !errors.Is(err, codegen.ErrTypeScriptGen) || !strings.Contains(err.Error(), "cannot safely resolve imported type big.Int") {
+		t.Fatalf("big.Int source error = %v, want safe-resolution rejection", err)
+	}
+}
+
+func TestTypeScriptForSource_RejectsUnresolvedImportedConstValue(t *testing.T) {
+	t.Parallel()
+	src := "package contracts\nimport \"time\"\nconst Timeout = time.Second\ntype Payload struct { Value string `json:\"value\"` }\n"
+	_, err := codegen.TypeScriptForSource(src)
+	if !errors.Is(err, codegen.ErrTypeScriptGen) || !strings.Contains(err.Error(), "cannot safely resolve imported value time.Second") {
+		t.Fatalf("imported const value error = %v, want safe-resolution rejection", err)
+	}
+}
+
+func TestTypeScriptForSource_RejectsDotImportedContractTypes(t *testing.T) {
+	t.Parallel()
+	src := "package contracts\nimport . \"math/big\"\ntype Payload struct { Number Int `json:\"number\"` }\n"
+	_, err := codegen.TypeScriptForSource(src)
+	if !errors.Is(err, codegen.ErrTypeScriptGen) || !strings.Contains(err.Error(), "cannot safely resolve dot-imported contract types") {
+		t.Fatalf("dot-import source error = %v, want safe-resolution rejection", err)
 	}
 }
 
@@ -304,20 +416,58 @@ func TestTypeScriptForSource_EmbeddedTransitiveAndShadowing(t *testing.T) {
 	}
 }
 
-func TestTypeScriptForSource_EmbeddedForeignTypeLeftAlone(t *testing.T) {
+func TestTypeScriptForSource_EmbeddedDominanceAndPointerOptionality(t *testing.T) {
 	t.Parallel()
-	// An embedded type that is not a locally declared struct cannot be flattened
-	// — its fields are not visible here — so it is left for tygo.
+	src := "type Left struct { Value string }\n" +
+		"type Right struct { Value string }\n" +
+		"type Ambiguous struct { Left; Right }\n" +
+		"type Tagged struct { Plain; Named }\n" +
+		"type Plain struct { Value string }\n" +
+		"type Named struct { Value string `json:\"Value\"` }\n" +
+		"type Optional struct { *Left }\n"
+	got, err := codegen.TypeScriptForSource(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	ambiguous := interfaceBody(t, text, "Ambiguous")
+	if strings.Contains(ambiguous, "Value") {
+		t.Fatalf("equally dominant fields must remain ambiguous and be omitted:\n%s", ambiguous)
+	}
+	tagged := interfaceBody(t, text, "Tagged")
+	if strings.Count(tagged, "Value") != 1 {
+		t.Fatalf("a tagged field must dominate an untagged field at the same depth:\n%s", tagged)
+	}
+	optional := interfaceBody(t, text, "Optional")
+	if !strings.Contains(optional, "Value?: string;") {
+		t.Fatalf("a field promoted through a pointer ancestor must be optional:\n%s", optional)
+	}
+}
+
+func TestTypeScriptForSource_PromotedFieldPreservesComment(t *testing.T) {
+	t.Parallel()
+	src := "type Base struct {\n// ID identifies the object.\nID string `json:\"id\"`\n}\ntype Payload struct { Base }\n"
+	got, err := codegen.TypeScriptForSource(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(got)[strings.Index(string(got), "export interface Payload"):]
+	if !strings.Contains(body, "ID identifies the object") || !strings.Contains(body, "id: string;") {
+		t.Fatalf("promoted field lost its JSDoc:\n%s", got)
+	}
+}
+
+func TestTypeScriptForSource_RejectsEmbeddedForeignType(t *testing.T) {
+	t.Parallel()
+	// Source-only generation cannot inspect an imported type's wire behavior, so
+	// it must reject rather than let tygo degrade the field to any.
 	src := "type Widget struct {\n" +
 		"\tsync.Mutex\n" +
 		"\tName string `json:\"name\"`\n" +
 		"}\n"
-	got, err := codegen.TypeScriptForSource(src)
-	if err != nil {
-		t.Fatalf("TypeScriptForSource: %v", err)
-	}
-	if !strings.Contains(string(got), "name: string;") {
-		t.Errorf("the non-embedded field should still render:\n%s", got)
+	_, err := codegen.TypeScriptForSource(src)
+	if !errors.Is(err, codegen.ErrTypeScriptGen) || !strings.Contains(err.Error(), "cannot safely resolve imported type sync.Mutex") {
+		t.Fatalf("foreign embedded type error = %v, want safe-resolution rejection", err)
 	}
 }
 
@@ -350,6 +500,622 @@ func TestTypeScriptForDir(t *testing.T) {
 	if strings.Index(s, "Alpha") > strings.Index(s, "Beta") {
 		t.Errorf("declarations should appear in sorted-filename order:\n%s", s)
 	}
+}
+
+func TestTypeScriptForDir_SkipsGeneratedGoFiles(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFile(t, dir, "contracts.go", "package contracts\ntype Real struct { Value string }\n")
+	writeFile(t, dir, "suffix.generated.go", "package contracts\ntype SuffixGenerated struct { Value string }\n")
+	writeFile(t, dir, "marker_gen.go", "// Code generated by another tool. DO NOT EDIT.\npackage contracts\ntype MarkerGenerated struct { Value string }\n")
+	got, err := codegen.TypeScriptForDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	if !strings.Contains(text, "export interface Real") || strings.Contains(text, "SuffixGenerated") || strings.Contains(text, "MarkerGenerated") {
+		t.Fatalf("generated Go declarations leaked into contracts.ts:\n%s", got)
+	}
+}
+
+func TestTypeScriptForDir_ImportedLocalByteAliasUsesString(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/bytes\n\ngo 1.26.2\n")
+	for _, dir := range []string{"shared", "contracts"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, root, "shared/types.go", "package shared\ntype Octet uint8\ntype More Octet\n")
+	contractsDir := filepath.Join(root, "contracts")
+	writeFile(t, root, "contracts/contracts.go", "package contracts\nimport \"example.com/bytes/shared\"\ntype Payload struct { Data []shared.More `json:\"data\"` }\n")
+	got, err := codegen.TypeScriptForDir(contractsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "data: string;") {
+		t.Fatalf("imported local byte alias must use its wire shape:\n%s", got)
+	}
+}
+
+func TestTypeScriptForDir_ImportedExternalModuleByteAliasUsesStringOffline(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for _, dir := range []string{"wire", "contracts"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, root, "go.mod", "module example.com/app\n\ngo 1.26.2\n\nrequire example.com/wire v0.0.0\nreplace example.com/wire => ./wire\n")
+	writeFile(t, root, "wire/go.mod", "module example.com/wire\n\ngo 1.26.2\n")
+	writeFile(t, root, "wire/types.go", "package octets\ntype Octet uint8\ntype More Octet\ntype Word uint16\ntype Words []Word\ntype Lookup map[string]Word\ntype Pair [2]Word\ntype Meta struct { Label string `json:\"label\"`; Raw []byte `json:\"raw\"`; hidden string }\n")
+	writeFile(t, root, "contracts/contracts.go", "package contracts\nimport wire \"example.com/wire\"\ntype Payload struct { Data []wire.More `json:\"data\"`; Words wire.Words `json:\"words\"`; Lookup wire.Lookup `json:\"lookup\"`; Pair wire.Pair `json:\"pair\"`; Meta wire.Meta `json:\"meta\"` }\n")
+
+	got, err := codegen.TypeScriptForDir(filepath.Join(root, "contracts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := interfaceBody(t, string(got), "Payload")
+	if !strings.Contains(body, "data: string;") {
+		t.Fatalf("external-module byte alias must use its base64 wire shape:\n%s", got)
+	}
+	text := string(got)
+	for _, want := range []string{
+		"words: number /* uint16 */[];",
+		"lookup: { [key: string]: number /* uint16 */};",
+		"pair: number /* uint16 */[];",
+		"meta: {",
+		"label: string;",
+		"raw: string;",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("imported wire shape missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(text, "wire.") || strings.Contains(text, "hidden") {
+		t.Fatalf("generated TypeScript retained an undefined package selector or hidden field:\n%s", got)
+	}
+
+	tsc := filepath.Join("..", "..", "web", "inspector", "node_modules", ".bin", "tsc")
+	if _, err := os.Stat(tsc); err != nil {
+		t.Log("TypeScript compiler is not installed; syntax regression covered by shape assertions")
+		return
+	}
+	tsPath := filepath.Join(root, "contracts.ts")
+	if err := os.WriteFile(tsPath, got, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(tsc, "--noEmit", "--strict", "--skipLibCheck", "--target", "ES2022", tsPath) //nolint:gosec // tsc is a repository-local test dependency.
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generated TypeScript does not typecheck: %v\n%s\n%s", err, output, got)
+	}
+}
+
+func TestTypeScriptForDir_FlattensImportedAnonymousStruct(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for _, dir := range []string{"wire", "contracts"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, root, "go.mod", "module example.com/importedembed\n\ngo 1.26.2\n")
+	writeFile(t, root, "wire/types.go", "package wire\ntype Base struct { ID string `json:\"id\"` }\n")
+	writeFile(t, root, "contracts/contracts.go", "package contracts\nimport \"example.com/importedembed/wire\"\ntype Payload struct { *wire.Base; Name string `json:\"name\"` }\n")
+	got, err := codegen.TypeScriptForDir(filepath.Join(root, "contracts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := interfaceBody(t, string(got), "Payload")
+	if !strings.Contains(body, "id?: string;") || !strings.Contains(body, "name: string;") || strings.Contains(body, "Base:") {
+		t.Fatalf("imported anonymous struct was not promoted with pointer optionality:\n%s", got)
+	}
+}
+
+func TestTypeScriptForDir_ImportedNamedByteSliceUsesStringAndCrossChecks(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for _, dir := range []string{"wire", "contracts"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, root, "go.mod", "module example.com/app\n\ngo 1.26.2\n\nrequire example.com/wire v0.0.0\nreplace example.com/wire => ./wire\n")
+	writeFile(t, root, "wire/go.mod", "module example.com/wire\n\ngo 1.26.2\n")
+	writeFile(t, root, "wire/types.go", "package wire\ntype Bytes []byte\ntype MoreBytes Bytes\ntype Words []uint16\n")
+	writeFile(t, root, "contracts/contracts.go", "package contracts\nimport \"example.com/wire\"\ntype Payload struct { Data wire.MoreBytes `json:\"data\"`; Words wire.Words `json:\"words\"` }\n")
+
+	got, err := codegen.TypeScriptForDir(filepath.Join(root, "contracts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := interfaceBody(t, string(got), "Payload")
+	if !strings.Contains(body, "data: string;") {
+		t.Fatalf("imported named byte slice must use its base64 wire shape:\n%s", got)
+	}
+	if strings.Contains(body, "words: string;") {
+		t.Fatalf("non-byte imported slice was rewritten as base64:\n%s", got)
+	}
+	schema := &jsonschema.Schema{
+		Type:     "object",
+		Required: []string{"data", "words"},
+		Properties: map[string]*jsonschema.Schema{
+			"data":  {Type: "string", ContentEncoding: "base64"},
+			"words": {Type: "array"},
+		},
+	}
+	if err := codegen.CrossCheck(schema, "Payload", got); err != nil {
+		t.Fatalf("generated named-byte-slice TypeScript must match schema: %v", err)
+	}
+	bad := []byte(strings.Replace(string(got), "data: string;", "data: wire.MoreBytes;", 1))
+	if err := codegen.CrossCheck(schema, "Payload", bad); !errors.Is(err, codegen.ErrSchemaTSDrift) {
+		t.Fatalf("CrossCheck error = %v, want ErrSchemaTSDrift", err)
+	}
+}
+
+func TestTypeScriptForDir_ImportedStructJSONNamesMatchSchemaAndCompile(t *testing.T) {
+	t.Parallel()
+
+	schema, err := codegen.SchemaFor[externalcontract.Payload]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := schema.Properties["-"]; !ok {
+		t.Fatal(`schema must retain json:"-," as the literal property "-"`)
+	}
+	if fallback := schema.Properties["Fallback"]; fallback == nil {
+		t.Fatal("invalid JSON name must fall back to the Go field name")
+	}
+	if _, ok := schema.Properties["Ignored"]; ok {
+		t.Fatal(`schema must omit the exact tag json:"-"`)
+	}
+
+	got, err := codegen.TypeScriptForDir(filepath.Join("testdata", "externalcontract"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := interfaceBody(t, string(got), "Payload")
+	if !strings.Contains(body, "'-': string;") {
+		t.Fatalf(`imported json:"-," field must use the literal property "-":\n%s`, got)
+	}
+	if !strings.Contains(body, "Fallback?: string;") || strings.Contains(body, "bad©name") {
+		t.Fatalf("invalid imported JSON name must fall back while retaining options:\n%s", got)
+	}
+	if strings.Contains(body, "Ignored") {
+		t.Fatalf(`imported field tagged json:"-" must be omitted:\n%s`, got)
+	}
+	if err := codegen.CrossCheck(schema, "Payload", got); err != nil {
+		t.Fatalf("imported field schema/TypeScript drift: %v\n%s", err, got)
+	}
+
+	tsc := filepath.Join("..", "..", "web", "inspector", "node_modules", ".bin", "tsc")
+	if _, err := os.Stat(tsc); err != nil {
+		t.Log("TypeScript compiler is not installed; syntax covered by shape assertions")
+		return
+	}
+	tsPath := filepath.Join(t.TempDir(), "contracts.ts")
+	if err := os.WriteFile(tsPath, got, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(tsc, "--noEmit", "--strict", "--skipLibCheck", "--target", "ES2022", tsPath) //nolint:gosec // tsc is a repository-local test dependency.
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generated TypeScript does not typecheck: %v\n%s\n%s", err, output, got)
+	}
+}
+
+func TestTypeScriptForSource_JSONStringOption(t *testing.T) {
+	t.Parallel()
+	source := "type ByteAlias = byte\ntype RuneAlias = rune\ntype BytePointerAlias = *byte\ntype RunePointerAlias = *rune\ntype ScalarBase int\ntype Scalar ScalarBase\ntype Payload struct { Byte byte `json:\"byte,string\"`; Rune rune `json:\"rune,string\"`; ByteAlias ByteAlias `json:\"byte_alias,string\"`; RuneAlias RuneAlias `json:\"rune_alias,string\"`; BytePointer BytePointerAlias `json:\"byte_pointer,string\"`; RunePointer RunePointerAlias `json:\"rune_pointer,string\"`; Count int `json:\"count,string\"`; Limit *Scalar `json:\"limit,string\"`; Maybe *Scalar `json:\"maybe,string,omitempty\"`; Flag *bool `json:\"flag,string\"`; Ratio *float64 `json:\"ratio,string\"`; Text *string `json:\"text,string\"` }"
+	got, err := codegen.TypeScriptForSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	for _, want := range []string{"byte: string;", "rune: string;", "byte_alias: string;", "rune_alias: string;", "byte_pointer: string | null;", "rune_pointer: string | null;", "count: string;", "limit: string | null;", "maybe?: string | null;", "flag: string | null;", "ratio: string | null;", "text: string | null;"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("json ,string field missing %q:\n%s", want, got)
+		}
+	}
+	nullOptional, err := codegen.TypeScriptForSource(source, codegen.WithNullOptional())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(nullOptional), "maybe: string | null;") || strings.Contains(string(nullOptional), "null | null") {
+		t.Fatalf("nullable optional pointer has the wrong null style:\n%s", nullOptional)
+	}
+	_, err = codegen.TypeScriptForSource("type Payload struct { Values []int `json:\"values,string\"` }")
+	if !errors.Is(err, codegen.ErrTypeScriptGen) {
+		t.Fatalf("unsupported ,string error = %v, want ErrTypeScriptGen", err)
+	}
+	_, err = codegen.TypeScriptForSource("type Payload struct { Values *[]int `json:\"values,string\"` }")
+	if !errors.Is(err, codegen.ErrTypeScriptGen) {
+		t.Fatalf("unsupported pointer target error = %v, want ErrTypeScriptGen", err)
+	}
+	for _, source := range []string{
+		"type Payload struct { Value **int `json:\"value,string\"` }",
+		"type Pointer *int\ntype Payload struct { Value Pointer `json:\"value,string\"` }",
+	} {
+		if _, err := codegen.TypeScriptForSource(source); !errors.Is(err, codegen.ErrTypeScriptGen) {
+			t.Fatalf("unsupported pointer form error = %v, want ErrTypeScriptGen", err)
+		}
+	}
+}
+
+func TestTypeScriptForSource_JSONStringPointerAlias(t *testing.T) {
+	t.Parallel()
+	source := "type Pointer = *int\ntype Payload struct { Value Pointer `json:\"value,string\"` }"
+	got, err := codegen.TypeScriptForSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "value: string | null;") {
+		t.Fatalf("pointer alias must retain unnamed-pointer string behavior:\n%s", got)
+	}
+
+	for _, source := range []string{
+		"type Pointer *int\ntype Payload struct { Value Pointer `json:\"value,string\"` }",
+		"type Pointer *int\ntype Alias = Pointer\ntype Payload struct { Value Alias `json:\"value,string\"` }",
+	} {
+		if _, err := codegen.TypeScriptForSource(source); !errors.Is(err, codegen.ErrTypeScriptGen) {
+			t.Fatalf("defined pointer form error = %v, want ErrTypeScriptGen", err)
+		}
+	}
+}
+
+func TestTypeScriptForDir_JSONStringDeclarationsAcrossFiles(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	contractsDir := filepath.Join(root, "contracts")
+	if err := os.MkdirAll(contractsDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "go.mod", "module example.com/jsonstring\n\ngo 1.26.2\n")
+	writeFile(t, root, "contracts/a_scalar.go", "package contracts\ntype Scalar int\ntype Count int\ntype ByteAlias = byte\ntype RuneAlias = rune\n")
+	writeFile(t, root, "contracts/b_pointer.go", "package contracts\ntype Pointer = *Scalar\n")
+	writeFile(t, root, "contracts/c_alias.go", "package contracts\ntype PointerAlias = Pointer\ntype BytePointerAlias = *ByteAlias\ntype RunePointerAlias = *RuneAlias\n")
+	writeFile(t, root, "contracts/z_payload.go", "package contracts\ntype Payload struct { Value PointerAlias `json:\"value,string\"`; Byte ByteAlias `json:\"byte,string\"`; Rune RuneAlias `json:\"rune,string\"`; BytePointer BytePointerAlias `json:\"byte_pointer,string\"`; RunePointer RunePointerAlias `json:\"rune_pointer,string\"`; Count `json:\"count,string\"` }\n")
+
+	first, err := codegen.TypeScriptForDir(contractsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := interfaceBody(t, string(first), "Payload")
+	for _, want := range []string{"value: string | null;", "byte: string;", "rune: string;", "byte_pointer: string | null;", "rune_pointer: string | null;", "count: string;"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("cross-file json ,string declaration missing %q:\n%s", want, first)
+		}
+	}
+	for range 5 {
+		again, err := codegen.TypeScriptForDir(contractsDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(first, again) {
+			t.Fatalf("cross-file json ,string output is nondeterministic:\n%s\n---\n%s", first, again)
+		}
+	}
+}
+
+func TestTypeScriptForDir_JSONStringCrossFileRejections(t *testing.T) {
+	t.Parallel()
+	for name, declarations := range map[string]map[string]string{
+		"defined pointer": {
+			"a.go": "type Pointer *int",
+			"b.go": "type Alias = Pointer",
+			"z.go": "type Payload struct { Value Alias `json:\"value,string\"` }",
+		},
+		"alias cycle": {
+			"a.go": "type First = Second",
+			"b.go": "type Second = First",
+			"z.go": "type Payload struct { Value First `json:\"value,string\"` }",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			contractsDir := filepath.Join(root, "contracts")
+			if err := os.MkdirAll(contractsDir, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, root, "go.mod", "module example.com/rejected\n\ngo 1.26.2\n")
+			for filename, declaration := range declarations {
+				writeFile(t, root, "contracts/"+filename, "package contracts\n"+declaration+"\n")
+			}
+			_, firstErr := codegen.TypeScriptForDir(contractsDir)
+			_, secondErr := codegen.TypeScriptForDir(contractsDir)
+			if !errors.Is(firstErr, codegen.ErrTypeScriptGen) {
+				t.Fatalf("first error = %v, want ErrTypeScriptGen", firstErr)
+			}
+			if firstErr.Error() != secondErr.Error() {
+				t.Fatalf("rejection is nondeterministic:\n%v\n%v", firstErr, secondErr)
+			}
+		})
+	}
+}
+
+func TestTypeScriptForSource_JSONStringTaggedAnonymousScalar(t *testing.T) {
+	t.Parallel()
+	source := "type CountBase int\ntype Count = CountBase\ntype Limit int\ntype Payload struct { Count `json:\"count,string\"`; *Limit `json:\"limit,string\"` }"
+	got, err := codegen.TypeScriptForSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	for _, want := range []string{"count: string;", "limit: string | null;"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("tagged anonymous scalar missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestTypeScriptForDir_ImportedStandardWireTypesAndCustomMarshaler(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	contractsDir := filepath.Join(root, "contracts")
+	if err := os.MkdirAll(contractsDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "go.mod", "module example.com/special\n\ngo 1.26.2\n")
+	writeFile(t, root, "contracts/contracts.go", "package contracts\nimport \"log/slog\"\ntype Payload struct { Level slog.Level `json:\"level\"` }\n")
+	got, err := codegen.TypeScriptForDir(contractsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := interfaceBody(t, string(got), "Payload")
+	for _, want := range []string{"level: string;"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("standard wire type missing %q:\n%s", want, got)
+		}
+	}
+	schema := &jsonschema.Schema{Type: "object", Required: []string{"level"}, Properties: map[string]*jsonschema.Schema{
+		"level": {Type: "string"},
+	}}
+	if err := codegen.CrossCheck(schema, "Payload", got); err != nil {
+		t.Fatalf("standard wire type schema/TypeScript drift: %v", err)
+	}
+	for _, typeName := range []string{"Int", "Rat", "Float"} {
+		for _, pointer := range []string{"", "*"} {
+			form := "value"
+			if pointer != "" {
+				form = "pointer"
+			}
+			writeFile(t, root, "contracts/contracts.go", "package contracts\nimport \"math/big\"\ntype Payload struct { Number "+pointer+"big."+typeName+" `json:\"number\"` }\n")
+			if _, err := codegen.TypeScriptForDir(contractsDir); !errors.Is(err, codegen.ErrTypeScriptGen) || !strings.Contains(err.Error(), "custom JSON encoding") {
+				t.Fatalf("nested big.%s %s custom marshaler error = %v", typeName, form, err)
+			}
+			writeFile(t, root, "contracts/contracts.go", "package contracts\nimport \"math/big\"\ntype Payload = "+pointer+"big."+typeName+"\n")
+			if _, err := codegen.TypeScriptForDir(contractsDir); !errors.Is(err, codegen.ErrTypeScriptGen) || !strings.Contains(err.Error(), "custom JSON encoding") {
+				t.Fatalf("root big.%s %s custom marshaler error = %v", typeName, form, err)
+			}
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Join(root, "wire"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "wire/types.go", "package wire\ntype Custom struct { Value string }\nfunc (Custom) MarshalJSON() ([]byte, error) { return []byte(`\"custom\"`), nil }\n")
+	writeFile(t, root, "contracts/contracts.go", "package contracts\nimport \"example.com/special/wire\"\ntype Payload struct { Value wire.Custom `json:\"value\"` }\n")
+	if _, err := codegen.TypeScriptForDir(contractsDir); !errors.Is(err, codegen.ErrTypeScriptGen) || !strings.Contains(err.Error(), "custom JSON encoding") {
+		t.Fatalf("custom marshaler error = %v", err)
+	}
+}
+
+func TestTypeScriptForDir_CustomEncodingInspectionSkipsOnlyExactJSONDash(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	contractsDir := filepath.Join(root, "contracts")
+	for _, dir := range []string{contractsDir, filepath.Join(root, "wire")} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, root, "go.mod", "module example.com/ignoredcustom\n\ngo 1.26.2\n")
+	writeFile(t, root, "wire/types.go", "package wire\ntype Custom struct { Value string }\nfunc (Custom) MarshalJSON() ([]byte, error) { return nil, nil }\n")
+	writeFile(t, root, "contracts/contracts.go", `package contracts
+import (
+	"math/big"
+	"example.com/ignoredcustom/wire"
+)
+type Payload struct {
+	Int big.Int `+"`json:\"-\"`"+`
+	Rat *big.Rat `+"`json:\"-\"`"+`
+	Float big.Float `+"`json:\"-\"`"+`
+	Custom wire.Custom `+"`json:\"-\"`"+`
+}
+`)
+	got, err := codegen.TypeScriptForDir(contractsDir)
+	if err != nil {
+		t.Fatalf("ignored math/big fields rejected: %v", err)
+	}
+	body := interfaceBody(t, string(got), "Payload")
+	if strings.Contains(body, "Int") || strings.Contains(body, "Rat") || strings.Contains(body, "Float") || strings.Contains(body, "Custom") {
+		t.Fatalf("ignored fields leaked into TypeScript:\n%s", got)
+	}
+
+	writeFile(t, root, "contracts/contracts.go", "package contracts\nimport \"math/big\"\ntype Payload struct { Literal big.Rat `json:\"-,\"` }\n")
+	if _, err := codegen.TypeScriptForDir(contractsDir); !errors.Is(err, codegen.ErrTypeScriptGen) || !strings.Contains(err.Error(), "custom JSON encoding") {
+		t.Fatalf(`literal json:"-," error = %v, want custom encoding rejection`, err)
+	}
+}
+
+func TestTypeScriptForDir_LocalCustomJSONEncoding(t *testing.T) {
+	tests := map[string]string{
+		"json value receiver":   "func (Custom) MarshalJSON() ([]byte, error) { return nil, nil }",
+		"json pointer receiver": "func (*Custom) MarshalJSON() ([]byte, error) { return nil, nil }",
+		"text value receiver":   "func (Custom) MarshalText() ([]byte, error) { return nil, nil }",
+		"text pointer receiver": "func (*Custom) MarshalText() ([]byte, error) { return nil, nil }",
+	}
+	for name, method := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, "contracts"), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, root, "go.mod", "module example.com/localcustom\n\ngo 1.26.2\n")
+			writeFile(t, root, "contracts/contracts.go", "package contracts\ntype Custom struct { Value string `json:\"value\"` }\n"+method+"\ntype Payload struct { Custom Custom `json:\"custom\"` }\n")
+			_, err := codegen.TypeScriptForDir(filepath.Join(root, "contracts"))
+			if !errors.Is(err, codegen.ErrTypeScriptGen) || !strings.Contains(err.Error(), "custom JSON encoding") {
+				t.Fatalf("TypeScriptForDir error = %v, want custom encoding rejection", err)
+			}
+		})
+	}
+}
+
+func TestTypeScriptForDir_MarshalerMethodNamesRequireExactSignature(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "contracts"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "go.mod", "module example.com/samename\n\ngo 1.26.2\n")
+	writeFile(t, root, "contracts/contracts.go", `package contracts
+type JSONNameOnly struct { Value string `+"`json:\"value\"`"+` }
+func (JSONNameOnly) MarshalJSON() string { return "ordinary method" }
+type TextNameOnly struct { Value string `+"`json:\"value\"`"+` }
+func (*TextNameOnly) MarshalText(string) ([]byte, error) { return nil, nil }
+type Payload struct { JSON JSONNameOnly `+"`json:\"json\"`"+`; Text TextNameOnly `+"`json:\"text\"`"+` }
+`)
+	got, err := codegen.TypeScriptForDir(filepath.Join(root, "contracts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := interfaceBody(t, string(got), "Payload")
+	if !strings.Contains(body, "json: JSONNameOnly;") || !strings.Contains(body, "text: TextNameOnly;") {
+		t.Fatalf("same-name ordinary methods changed generated types:\n%s", got)
+	}
+}
+
+func TestTypeScriptForDir_ImportedCustomEncodingReceiverMatrix(t *testing.T) {
+	tests := map[string]string{
+		"json value receiver":   "func (Custom) MarshalJSON() ([]byte, error) { return nil, nil }",
+		"json pointer receiver": "func (*Custom) MarshalJSON() ([]byte, error) { return nil, nil }",
+		"text value receiver":   "func (Custom) MarshalText() ([]byte, error) { return nil, nil }",
+		"text pointer receiver": "func (*Custom) MarshalText() ([]byte, error) { return nil, nil }",
+	}
+	for name, method := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			for _, dir := range []string{"wire", "contracts"} {
+				if err := os.MkdirAll(filepath.Join(root, dir), 0o750); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeFile(t, root, "go.mod", "module example.com/importcustom\n\ngo 1.26.2\n")
+			writeFile(t, root, "wire/types.go", "package wire\ntype Custom struct { Value string }\n"+method+"\n")
+			writeFile(t, root, "contracts/contracts.go", "package contracts\nimport \"example.com/importcustom/wire\"\ntype Payload struct { Value wire.Custom `json:\"value\"` }\n")
+			_, err := codegen.TypeScriptForDir(filepath.Join(root, "contracts"))
+			if !errors.Is(err, codegen.ErrTypeScriptGen) || !strings.Contains(err.Error(), "custom JSON encoding") {
+				t.Fatalf("TypeScriptForDir error = %v, want custom encoding rejection", err)
+			}
+		})
+	}
+
+	root := t.TempDir()
+	for _, dir := range []string{"wire", "contracts"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, root, "go.mod", "module example.com/importordinary\n\ngo 1.26.2\n")
+	writeFile(t, root, "wire/types.go", "package wire\ntype Custom struct { Value string `json:\"value\"` }\nfunc (Custom) MarshalJSON() string { return \"ordinary\" }\nfunc (*Custom) MarshalText(string) ([]byte, error) { return nil, nil }\n")
+	writeFile(t, root, "contracts/contracts.go", "package contracts\nimport \"example.com/importordinary/wire\"\ntype Payload struct { Value wire.Custom `json:\"value\"` }\n")
+	got, err := codegen.TypeScriptForDir(filepath.Join(root, "contracts"))
+	if err != nil {
+		t.Fatalf("same-name imported methods rejected: %v", err)
+	}
+	if !strings.Contains(interfaceBody(t, string(got), "Payload"), "value: {") {
+		t.Fatalf("imported ordinary struct was not expanded:\n%s", got)
+	}
+}
+
+func TestTypeScriptForDir_PreservesImportedRecursiveType(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for _, dir := range []string{"wire", "contracts"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, root, "go.mod", "module example.com/recursive\n\ngo 1.26.2\n")
+	writeFile(t, root, "wire/types.go", "package wire\ntype Node struct { Value string `json:\"value\"`; Next *Node `json:\"next,omitempty\"` }\n")
+	writeFile(t, root, "contracts/contracts.go", "package contracts\nimport \"example.com/recursive/wire\"\ntype Payload struct { Root wire.Node `json:\"root\"` }\n")
+	got, err := codegen.TypeScriptForDir(filepath.Join(root, "contracts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	if strings.Contains(text, "next?: any") || !strings.Contains(text, "export interface DockyardImportedNode_") {
+		t.Fatalf("recursive imported type was not preserved as a declaration:\n%s", got)
+	}
+	schema := &jsonschema.Schema{Type: "object", Required: []string{"root"}, Properties: map[string]*jsonschema.Schema{"root": {Type: "object"}}}
+	if err := codegen.CrossCheck(schema, "Payload", got); err != nil {
+		t.Fatalf("recursive declaration cross-check: %v\n%s", err, got)
+	}
+	bad := []byte(regexp.MustCompile(`DockyardImportedNode_[0-9a-f]+`).ReplaceAllString(text, "any"))
+	if err := codegen.CrossCheck(schema, "Payload", bad); !errors.Is(err, codegen.ErrSchemaTSDrift) {
+		t.Fatalf("CrossCheck accepted any for known object: %v", err)
+	}
+}
+
+func TestTypeScriptForDir_ImportedByteAliasesAreFileScopedAndUseDeclaredPackageName(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/scopedbytes\n\ngo 1.26.2\n")
+	for _, dir := range []string{"bytepath", "numberpath", "contracts"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, root, "bytepath/types.go", "package wire\ntype Octet uint8\n")
+	writeFile(t, root, "numberpath/types.go", "package numeric\ntype Octet uint16\n")
+	contractsDir := filepath.Join(root, "contracts")
+	writeFile(t, root, "contracts/a.go", "package contracts\nimport \"example.com/scopedbytes/bytepath\"\ntype Bytes struct { Data []wire.Octet `json:\"data\"` }\n")
+	writeFile(t, root, "contracts/b.go", "package contracts\nimport wire \"example.com/scopedbytes/numberpath\"\ntype Numbers struct { Data []wire.Octet `json:\"numbers\"` }\n")
+	got, err := codegen.TypeScriptForDir(contractsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	if !strings.Contains(interfaceBody(t, text, "Bytes"), "data: string;") {
+		t.Fatalf("default import must use its declared package name:\n%s", text)
+	}
+	numbers := interfaceBody(t, text, "Numbers")
+	if strings.Contains(numbers, "numbers: string;") || !strings.Contains(numbers, "[];") {
+		t.Fatalf("a byte alias from another file must not leak through a reused import alias:\n%s", text)
+	}
+}
+
+func TestTypeScriptForDir_FlattensEmbeddedStructAcrossFiles(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/embedded\n\ngo 1.26.2\n")
+	contractsDir := filepath.Join(root, "contracts")
+	if err := os.MkdirAll(contractsDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "contracts/base.go", "package contracts\ntype Base struct { ID string `json:\"id\"` }\n")
+	writeFile(t, root, "contracts/output.go", "package contracts\ntype Output struct { *Base }\n")
+	got, err := codegen.TypeScriptForDir(contractsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := interfaceBody(t, string(got), "Output")
+	if !strings.Contains(body, "id?: string;") || strings.Contains(body, "Base: Base") {
+		t.Fatalf("cross-file pointer embedding must flatten with optional promoted fields:\n%s", got)
+	}
+}
+
+func interfaceBody(t *testing.T, source, name string) string {
+	t.Helper()
+	start := strings.Index(source, "export interface "+name)
+	if start < 0 {
+		t.Fatalf("interface %s not found:\n%s", name, source)
+	}
+	body := source[start:]
+	end := strings.Index(body, "}")
+	if end < 0 {
+		t.Fatalf("interface %s is unterminated:\n%s", name, source)
+	}
+	return body[:end]
 }
 
 func TestTypeScriptForDir_Empty(t *testing.T) {

@@ -11,15 +11,19 @@ import (
 )
 
 // Config is the authorization configuration consumed by HTTP server options.
-// Resource and Issuer must be canonical HTTPS URLs. DriverConfig is interpreted
-// only by the selected driver.
+// Resource and Issuer must be canonical HTTPS URLs. Scope values must satisfy
+// RFC 6749's scope-token grammar; offline_access is rejected because Dockyard is
+// a resource server and does not issue refresh tokens. DriverConfig is
+// interpreted only by the selected driver.
 type Config struct {
 	Driver   string
 	Resource string
 	Issuer   string
-	// Scopes are advertised as supported in protected-resource metadata.
+	// Scopes are advertised as supported in protected-resource metadata. Each
+	// value must be a non-empty RFC 6749 scope-token other than offline_access.
 	Scopes []string
-	// RequiredScopes are required on every protected MCP operation.
+	// RequiredScopes are required on every protected MCP operation and follow
+	// the same syntax restrictions as Scopes.
 	RequiredScopes []string
 	DriverConfig   any
 	// ContinuationKey authenticates framework-owned MRTR continuation state.
@@ -101,13 +105,37 @@ func (c Config) Validate() error {
 			return errors.New("authz: issuer must not contain a query")
 		}
 	}
+	supported := make(map[string]struct{}, len(c.Scopes))
+	for _, scope := range c.Scopes {
+		supported[scope] = struct{}{}
+	}
 	for _, scope := range append(append([]string(nil), c.Scopes...), c.RequiredScopes...) {
-		if scope == "" || strings.ContainsAny(scope, " \t\r\n") || scope == "offline_access" {
+		if !validScopeToken(scope) || scope == "offline_access" {
 			return fmt.Errorf("authz: invalid resource scope %q", scope)
+		}
+	}
+	for _, scope := range c.RequiredScopes {
+		if _, ok := supported[scope]; !ok {
+			return fmt.Errorf("authz: required scope %q is not in the supported scope set", scope)
 		}
 	}
 	if len(c.ContinuationKey) < 32 {
 		return errors.New("authz: continuation key must contain at least 32 bytes")
 	}
 	return nil
+}
+
+// validScopeToken implements RFC 6749's scope-token ABNF:
+// %x21 / %x23-5B / %x5D-7E.
+func validScopeToken(scope string) bool {
+	if scope == "" {
+		return false
+	}
+	for i := 0; i < len(scope); i++ {
+		b := scope[i]
+		if b != 0x21 && (b < 0x23 || b > 0x5b) && (b < 0x5d || b > 0x7e) {
+			return false
+		}
+	}
+	return true
 }

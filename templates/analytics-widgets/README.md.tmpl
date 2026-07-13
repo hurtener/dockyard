@@ -19,8 +19,8 @@ This project was created with
 
    ```sh
    go mod tidy
-   ( cd web && npm install )
    dockyard generate            # regenerate contract schema + TS (no-op if current)
+   ( cd web && npm install && npm run check )
    ```
 
 2. **Run it** — `go run .` serves over stdio (the usual MCP transport); set
@@ -96,7 +96,9 @@ theme via `hostContext.styles.variables`.
   typed contract is the integration surface.
 - `web/` — the Svelte App (one file `App.svelte` dispatches on
   `structuredContent.kind`), the per-widget renderers, and the template-local
-  `ChartFrame` that wraps Apache ECharts (wrappers around third-party fat
+  `ChartFrame` that wraps Apache ECharts. The App and renderers import their
+  payload types from `internal/contracts/contracts.ts`; wrappers around
+  third-party fat
   libs stay template-local; the shared `web/ui` inventory carries only
   primitives).
 - `fixtures/` — six fixtures per tool (`happy`, `empty`, `error`,

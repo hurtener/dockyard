@@ -228,7 +228,7 @@ func (o *orchestrator) run(ctx context.Context) error {
 	// rather than re-execing `bin/dockyard inspect`. The in-process choice
 	// is captured by D-162; the auto-attach + opt-out seam is D-161.
 	if !o.cfg.DisableInspector {
-		serverURL := "http://" + serverHTTPAddr
+		serverURL := inspectorServerURL(serverHTTPAddr)
 		o.inspector = newInspectorChild(o.logger, o.cfg.InspectorAddr, serverURL, o.projectDir)
 		if startErr := o.inspector.Start(ctx); startErr != nil {
 			// A bind failure is reported, not fatal: the rest of the dev
@@ -318,13 +318,18 @@ func (o *orchestrator) runCodegen() {
 		o.notifyCodegen(err)
 		return
 	}
-	if len(res.Changed) == 0 {
+	if !generationHasChanges(res) {
 		o.logger.InfoContext(o.ctx, "regenerate: no contract changes")
 	} else {
 		o.logger.InfoContext(o.ctx, "regenerate: contracts updated",
-			slog.Int("files_changed", len(res.Changed)))
+			slog.Int("files_changed", len(res.Changed)),
+			slog.Int("files_removed", len(res.Removed)))
 	}
 	o.notifyCodegen(nil)
+}
+
+func generationHasChanges(res generate.Result) bool {
+	return len(res.Changed) > 0 || len(res.Removed) > 0
 }
 
 // restartGoServer cleanly restarts the supervised Go MCP server. A restart
@@ -360,10 +365,20 @@ func (o *orchestrator) teardown() {
 // Go server. The Config override wins; otherwise the dev loop picks the
 // canonical scaffold default so a default run works without setup.
 func (o *orchestrator) serverHTTPAddr() string {
+	if addr, set := os.LookupEnv("DOCKYARD_HTTP_ADDR"); set && addr != "" {
+		return addr
+	}
 	if o.cfg.ServerHTTPAddr != "" {
 		return o.cfg.ServerHTTPAddr
 	}
 	return defaultServerHTTPAddr
+}
+
+func inspectorServerURL(serverHTTPAddr string) string {
+	if transport, set := os.LookupEnv("DOCKYARD_TRANSPORT"); set && transport != "http" {
+		return ""
+	}
+	return "http://" + serverHTTPAddr
 }
 
 // goServerExtraEnv returns the env-var pins the dev loop adds to the
@@ -374,10 +389,14 @@ func (o *orchestrator) goServerExtraEnv(serverHTTPAddr string) []string {
 	if o.cfg.DisableInspector {
 		return nil
 	}
-	return []string{
-		"DOCKYARD_TRANSPORT=http",
-		"DOCKYARD_HTTP_ADDR=" + serverHTTPAddr,
+	var env []string
+	if _, set := os.LookupEnv("DOCKYARD_TRANSPORT"); !set {
+		env = append(env, "DOCKYARD_TRANSPORT=http")
 	}
+	if _, set := os.LookupEnv("DOCKYARD_HTTP_ADDR"); !set {
+		env = append(env, "DOCKYARD_HTTP_ADDR="+serverHTTPAddr)
+	}
+	return env
 }
 
 func (o *orchestrator) notifyServerRestart() {

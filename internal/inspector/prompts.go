@@ -229,8 +229,9 @@ func dialAttachedPrompt(ctx context.Context, baseURL string) (*mcpsdk.ClientSess
 		&mcpsdk.Implementation{Name: "dockyard-inspector", Version: "0.1.0"},
 		nil,
 	)
+	httpClient := modernFirstHTTPClient(promptTimeout, nil, true)
 	session, err := client.Connect(ctx,
-		&mcpsdk.StreamableClientTransport{Endpoint: baseURL}, nil)
+		&mcpsdk.StreamableClientTransport{Endpoint: baseURL, HTTPClient: httpClient}, nil)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"dockyard/internal/inspector: connect %q: %w", baseURL, err)

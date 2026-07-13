@@ -9,16 +9,10 @@
 <script lang="ts">
   import { DataTable } from 'dockyard-ui';
   import type { Column, Row } from 'dockyard-ui';
-
-  type TablePayload = {
-    kind: 'table';
-    columns: Array<{ key: string; label: string; type: string; sortable?: boolean }>;
-    rows: Array<Record<string, unknown>>;
-    sort?: { column: string; dir: string } | null;
-  };
+  import type { CreateTableOutput } from '../../../internal/contracts/contracts.js';
 
   interface Props {
-    payload: TablePayload;
+    payload: CreateTableOutput;
   }
   let { payload }: Props = $props();
 

@@ -21,47 +21,15 @@
     PageState,
     type PageStateValue,
   } from 'dockyard-ui';
+  import type {
+    ProposeWithEditsOutput,
+    RequestApprovalOutput,
+  } from '../../internal/contracts/contracts.js';
 
   import ApprovalCard from './ApprovalCard.svelte';
   import EditsForm from './EditsForm.svelte';
 
-  type FieldOption = { value: string; label: string };
-  type Field = {
-    key: string;
-    label: string;
-    type: 'string' | 'number' | 'boolean' | 'enum' | 'text';
-    current: unknown;
-    proposed: unknown;
-    options?: FieldOption[];
-    helper_text?: string;
-  };
-
-  type ApprovalPayload = {
-    kind: 'approval';
-    title: string;
-    description: string;
-    category?: string;
-    metadata?: Record<string, unknown>;
-    state: 'awaiting' | 'approved' | 'rejected' | 'empty' | 'error' | 'permission';
-    approved?: boolean;
-    reason?: string;
-    decided_at?: string;
-    message?: string;
-  };
-  type ProposalPayload = {
-    kind: 'proposal';
-    title: string;
-    description: string;
-    fields: Field[];
-    category?: string;
-    state: 'awaiting' | 'approved' | 'rejected' | 'empty' | 'error' | 'permission';
-    approved?: boolean;
-    edits?: Record<string, unknown>;
-    reason?: string;
-    decided_at?: string;
-    message?: string;
-  };
-  type Payload = ApprovalPayload | ProposalPayload;
+  type Payload = RequestApprovalOutput | ProposeWithEditsOutput;
 
   let pageState: PageStateValue = $state('loading');
   let payload = $state<Payload | null>(null);
@@ -148,7 +116,7 @@
       payload = { ...payload, state: approved ? 'approved' : 'rejected', approved, reason, edits, decided_at: decidedAt };
     }
     pageState = 'ready';
-    if (payload.kind === 'approval' && taskId) {
+    if (payload?.kind === 'approval' && taskId) {
       void bridge.updateTask({
         taskId,
         inputResponses: { 'approval-decision': { approved, reason } },
@@ -202,14 +170,14 @@
 <div class="approval-app" data-testid="approval-app" data-tick={renderTick}>
   {#if payload?.kind === 'approval'}
     <ApprovalCard
-      payload={payload}
+      payload={payload as RequestApprovalOutput}
       onApprove={(reason) => onDecision(true, reason)}
       onReject={(reason) => onDecision(false, reason)}
       onDecline={onDecline}
     />
   {:else if payload?.kind === 'proposal'}
     <EditsForm
-      payload={payload}
+      payload={payload as ProposeWithEditsOutput}
       onApprove={(reason, edits) => onDecision(true, reason, edits)}
       onReject={(reason) => onDecision(false, reason)}
       onDecline={onDecline}
@@ -223,11 +191,9 @@
       state={pageState}
       emptyTitle="No prompt"
       emptyDescription={message || 'No approval prompt has arrived yet.'}
-      errorTitle="The approval App hit an error"
-      errorDescription={message || 'Something went wrong.'}
-      loadingDescription="Connecting to the host…"
-      permissionTitle="Not authorized"
-      permissionDescription={permissionMessage}
+      errorTitle={permissionMessage ? 'Not authorized' : 'The approval App hit an error'}
+      errorDescription={permissionMessage || message || 'Something went wrong.'}
+      loadingMessage="Connecting to the host…"
     >
       {#snippet children()}
         <p>Waiting for an approval prompt.</p>

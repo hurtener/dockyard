@@ -7,20 +7,12 @@
   ChartFrame.
 -->
 <script lang="ts">
+  import type { CreateChartOutput } from '../../../internal/contracts/contracts.js';
+
   import ChartFrame from './ChartFrame.svelte';
 
-  type ChartPayload = {
-    kind: 'chart';
-    type: string;
-    data: { series: Array<{ name: string; values: number[] }>; categories?: string[] };
-    title?: string;
-    options?: Record<string, unknown>;
-    state: string;
-    message?: string;
-  };
-
   interface Props {
-    payload: ChartPayload;
+    payload: CreateChartOutput;
     theme: 'light' | 'dark';
   }
   let { payload, theme }: Props = $props();
