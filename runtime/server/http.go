@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/url"
 	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/hurtener/dockyard/runtime/authz"
+	_ "github.com/hurtener/dockyard/runtime/authz/jwtjwks" // register the JWT/JWKS validator driver
 	"github.com/hurtener/dockyard/runtime/tasks"
 )
 
@@ -94,6 +97,9 @@ func (s HTTPSecurity) isZero() bool {
 // HTTPOptions configures the streamable-HTTP transport. A nil *HTTPOptions is
 // treated as the zero value with DefaultHTTPSecurity.
 type HTTPOptions struct {
+	// Authorization enables OAuth protected-resource behavior. Nil preserves
+	// the existing unauthenticated HTTP behavior.
+	Authorization *authz.Config
 	// Security is the explicit HTTP security posture. The zero value of
 	// HTTPSecurity has all protections OFF; HTTPHandler substitutes
 	// DefaultHTTPSecurity when Security is the zero value, so an app that does
@@ -142,6 +148,20 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 		return nil, errors.New("dockyard/runtime/server: HTTPHandler on nil server")
 	}
 	sec := opts.security()
+	var authorization *httpAuthorization
+	if opts != nil && opts.Authorization != nil {
+		cfg := *opts.Authorization
+		validator, err := authz.Open(context.Background(), cfg)
+		if err != nil {
+			return nil, fmt.Errorf("dockyard/runtime/server: authorization: %w", err)
+		}
+		metadataURL, err := cfg.MetadataURL()
+		if err != nil {
+			return nil, err
+		}
+		parsed, _ := url.Parse(metadataURL)
+		authorization = &httpAuthorization{cfg: cfg, validator: validator, metadataURL: metadataURL, metadataPath: parsed.EscapedPath(), continuation: newContinuationProtector(cfg.ContinuationKey)}
+	}
 
 	getServer := func(*http.Request) *mcpsdk.Server { return s.mcp }
 	if opts != nil && opts.ServerForRequest != nil {
@@ -225,6 +245,11 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 	// cross-origin regardless of method or body shape — the CSRF verdict does
 	// not depend on a body-shape check or routing downstream of it.
 	h := handler
+	if authorization != nil {
+		// Token validation is inside transport security checks. Rejected cross-origin
+		// or malformed-content requests must not trigger discovery/JWKS work.
+		h = authorization.middleware(h)
+	}
 	if sec.ContentTypeVerification {
 		// Content-Type verification as Dockyard middleware — set explicitly,
 		// never inherited from an SDK default (AGENTS.md §7, D-112). A
@@ -251,6 +276,11 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 		// before the mount answers it.
 		h = cop.Handler(h)
 	}
+	if authorization != nil {
+		// Metadata is a public, immutable GET route and bypasses both token
+		// validation and protected-transport checks.
+		h = authorization.metadataMiddleware(h)
+	}
 
 	// W3C TraceContext extractor (R5 — depth-audit remediation; D-122). It
 	// reads the inbound `traceparent` header — purely read-only — and stamps
@@ -269,9 +299,59 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 	return h, nil
 }
 
+type httpAuthorization struct {
+	cfg                       authz.Config
+	validator                 authz.Validator
+	metadataURL, metadataPath string
+	continuation              *continuationProtector
+}
+
+func (a *httpAuthorization) middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, err := authz.ParseBearer(r.Header.Values("Authorization"))
+		if err != nil {
+			a.unauthorized(w, err)
+			return
+		}
+		principal, err := a.validator.Validate(r.Context(), token)
+		if err != nil {
+			a.unauthorized(w, err)
+			return
+		}
+		if err := authz.RequireScopes(principal, a.cfg.RequiredScopes...); err != nil {
+			w.Header().Set("WWW-Authenticate", authz.Challenge(a.metadataURL, err, a.cfg.RequiredScopes))
+			http.Error(w, "insufficient scope", http.StatusForbidden)
+			return
+		}
+		ctx := authz.WithPrincipal(r.Context(), principal)
+		ctx = tasks.WithRequestAuthContext(ctx, principal.BindingKey())
+		ctx = withContinuationProtector(ctx, a.continuation)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (a *httpAuthorization) metadataMiddleware(next http.Handler) http.Handler {
+	metadata := a.cfg.MetadataHandler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() == a.metadataPath {
+			metadata.ServeHTTP(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *httpAuthorization) unauthorized(w http.ResponseWriter, err error) {
+	w.Header().Set("WWW-Authenticate", authz.Challenge(a.metadataURL, err, nil))
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
+}
+
 func taskAuthMiddleware(next http.Handler, auth tasks.AuthContextFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := tasks.WithRequestAuthContext(r.Context(), auth(r))
+		ctx := r.Context()
+		if tasks.RequestAuthContext(ctx) == "" {
+			ctx = tasks.WithRequestAuthContext(ctx, auth(r))
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

@@ -35,7 +35,7 @@ func (e *Engine) Dispatch(ctx context.Context, method string, params json.RawMes
 		}
 		return e.handleList(ctx, params)
 	case MethodSupplyInput:
-		return e.handleSupplyInput(ctx, params)
+		return e.handleSupplyInput(ctx, "", params)
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownMethod, method)
 	}
@@ -47,7 +47,7 @@ func (e *Engine) Dispatch(ctx context.Context, method string, params json.RawMes
 // codec's typed SupplyInputParams (P3 — no raw envelope keys leave the
 // codec). ErrNoPendingInput / ErrTaskNotFound surface as JSON-RPC errors
 // so the inspector renders an honest message.
-func (e *Engine) handleSupplyInput(ctx context.Context, params json.RawMessage) (json.RawMessage, error) {
+func (e *Engine) handleSupplyInput(ctx context.Context, authContext string, params json.RawMessage) (json.RawMessage, error) {
 	p, err := e.codec.DecodeSupplyInputParams(params)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidParams, err)
@@ -55,6 +55,9 @@ func (e *Engine) handleSupplyInput(ctx context.Context, params json.RawMessage) 
 	resp := InputResponse{Declined: p.Declined}
 	if len(p.Data) > 0 && string(p.Data) != "null" {
 		resp.Data = p.Data
+	}
+	if _, err := e.authorizedRecord(ctx, authContext, p.TaskID); err != nil {
+		return nil, err
 	}
 	if err := e.SupplyInput(ctx, p.TaskID, resp); err != nil {
 		return nil, err

@@ -76,6 +76,14 @@ dockyard inspect --url http://127.0.0.1:8080 --dir path/to/project
 A non-loopback `--port` host is refused before the listener opens —
 mechanical enforcement of RFC §12 (the CVE-2025-49596 lesson).
 
+The inspector deliberately does not implement OAuth authorization-code/PKCE,
+accept a bearer-token flag, forward credentials, or store tokens. Attaching to
+an OAuth-protected endpoint therefore surfaces its challenge and stops; it never
+downgrades around authorization. Use Harbor or a purpose-built test client for
+the protected path, and an unauthenticated loopback-only configuration for local
+inspector work. Configuration details are in
+`docs/site/guides/oauth-protected-resource.md`.
+
 ## The rail tabs
 
 | Tab        | What it shows / does                                                       |

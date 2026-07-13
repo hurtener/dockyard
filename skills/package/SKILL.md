@@ -68,6 +68,13 @@ current stateless MCP clients. Keep the endpoint behind your normal TLS and
 reverse-proxy boundary; protocol selection comes from the request's declared MCP
 version, not the request body.
 
+For a public OAuth-protected endpoint, configure `server.HTTPOptions.Authorization`
+with a canonical HTTPS resource and trusted issuer as described in
+`docs/site/guides/oauth-protected-resource.md`. `Scopes` advertises all supported
+scopes; `RequiredScopes` is the global set required on every protected operation.
+Build and install never acquire,
+embed, forward, or store OAuth tokens; Harbor owns the production client flow.
+
 The project's `main.go` owns its transport wiring (the scaffold templates
 respect `DOCKYARD_TRANSPORT` + `DOCKYARD_HTTP_ADDR`); `dockyard run`
 sets them and drives the binary. The CLI never reimplements a transport.

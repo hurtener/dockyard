@@ -25,6 +25,11 @@ func RequestAuthContext(ctx context.Context) string {
 	return v
 }
 
+func requestAuthContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(authContextKey{}).(string)
+	return v, ok
+}
+
 // This file holds the task security model (RFC §8.5, §15; brief 02 §4.5):
 // auth-context binding of tasks/get|result|cancel and the auth-scoped
 // tasks/list. Crypto-strong task IDs live in id.go (CryptoID, 128-bit
@@ -65,6 +70,8 @@ func (e *Engine) DispatchAs(
 			return nil, fmt.Errorf("%w: %q (tasks/list not advertised)", ErrUnknownMethod, method)
 		}
 		return e.handleListScoped(ctx, authContext, params)
+	case MethodSupplyInput:
+		return e.handleSupplyInput(ctx, authContext, params)
 	default:
 		return e.Dispatch(ctx, method, params)
 	}

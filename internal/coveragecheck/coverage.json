@@ -75,6 +75,14 @@
       "min": 85,
       "band": "conformance"
     },
+    "github.com/hurtener/dockyard/runtime/authz": {
+      "min": 80,
+      "band": "new-package"
+    },
+    "github.com/hurtener/dockyard/runtime/authz/jwtjwks": {
+      "min": 80,
+      "band": "new-package"
+    },
     "github.com/hurtener/dockyard/runtime/obs": {
       "min": 85,
       "band": "conformance"

@@ -707,6 +707,12 @@ wrapper over it. RFC §9.2. D-084.
 
 ## P
 
+**Protected Resource Metadata** — the RFC 9728 document through which an OAuth
+protected resource advertises its canonical resource identifier, trusted
+authorization server, supported scopes, and bearer-token presentation methods.
+For a resource with a path, Dockyard serves the path-aware document under
+`/.well-known/oauth-protected-resource/<resource-path>`. RFC §15, §19.2. D-195.
+
 **`protocolcodec`** — the internal package (`internal/protocolcodec`) that is the
 *only* place raw MCP extension wire formats are imported. Codecs are versioned and
 keyed on the negotiated `protocolVersion`. The mechanism behind forward-
@@ -1084,8 +1090,10 @@ is a deliberate, reviewed update of the vendored file. RFC §16. AGENTS.md §10.
 
 **Verified principal** — the immutable identity derived after an OAuth resource
 server validates an inbound bearer token. It carries trusted issuer, subject,
-audience/resource, expiry, and scope information into a request; it is never a
-raw bearer token or an MCP session identity. RFC §19.2.
+audience/resource, and scopes into a request; token expiry is validated but is
+not part of the principal. It is never a raw bearer token or an MCP session
+identity. Dockyard derives Task and authenticated MRTR binding from its issuer,
+subject, and resource. RFC §19.2. D-196.
 
 **Versioned codec** — the forward-compatibility mechanism of `protocolcodec`:
 codecs are keyed on the negotiated MCP `protocolVersion`, so a spec revision

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -66,6 +67,19 @@ func TestGolden(t *testing.T) {
 		if string(got) != string(want) {
 			t.Errorf("scaffolded %s differs from golden — run -update and review:\n--- got ---\n%s\n--- want ---\n%s",
 				rel, got, want)
+		}
+	}
+}
+
+func TestGoldenDocumentsOptInOAuthWithoutSecrets(t *testing.T) {
+	readme, err := os.ReadFile(filepath.Join("testdata", "golden", "README.md.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(readme)
+	for _, want := range []string{"Optional OAuth protection for HTTP", "examples/oauth-resource-server", "environment", "does not change the default stdio or HTTP behavior"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("README golden missing %q", want)
 		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/hurtener/dockyard/runtime/authz"
 	"github.com/hurtener/dockyard/runtime/obs"
 	"github.com/hurtener/dockyard/runtime/tasks"
 )
@@ -309,6 +310,15 @@ func addToolWithSchemasCore[In, Out any](
 			sdkResponses = req.Params.InputResponses
 			state = req.Params.RequestState
 		}
+		if protector, protected := continuationFromContext(ctx); protected && state != "" {
+			principal, _ := authz.PrincipalFromContext(ctx)
+			opened, openErr := protector.open(principal, def.Name, toolArgs(req), RequestState(state))
+			if openErr != nil {
+				var zero Out
+				return nil, zero, openErr
+			}
+			state = string(opened)
+		}
 		responses, err := decodeInputResponses(sdkResponses)
 		if err != nil {
 			var zero Out
@@ -351,7 +361,17 @@ func addToolWithSchemasCore[In, Out any](
 			var zero Out
 			return nil, zero, err
 		}
-		res.RequestState = string(result.RequestState)
+		if protector, protected := continuationFromContext(ctx); protected && result.RequestState != "" {
+			principal, _ := authz.PrincipalFromContext(ctx)
+			sealed, sealErr := protector.seal(principal, def.Name, toolArgs(req), result.RequestState)
+			if sealErr != nil {
+				var zero Out
+				return nil, zero, sealErr
+			}
+			res.RequestState = string(sealed)
+		} else {
+			res.RequestState = string(result.RequestState)
+		}
 		if result.CreatedTask != nil {
 			if res.Meta == nil {
 				res.Meta = mcpsdk.Meta{}

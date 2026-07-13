@@ -6695,3 +6695,74 @@ SDK-backed ordinary calls retain request-scoped metadata and version headers;
 raw modern Tasks calls also carry their method and task routing headers. This
 introduces no production client API, credential storage, or remote inspector
 bind. Apps `2026-01-26` `ui/initialize` remains a separate iframe dialect.
+
+---
+
+## D-195 — OAuth resource authorization is typed public configuration behind a validator driver seam
+
+**Date:** 2026-07-12
+**Status:** Settled (Phase 36 design-owner approval).
+**Where it lives:** `runtime/authz`, `runtime/authz/jwtjwks`,
+`runtime/server.HTTPOptions`, RFC §15 and §19.2.
+
+**Why.** Dockyard must expose protected-resource behavior without coupling the
+server API to JWT/JWKS wire details or drifting into Harbor's OAuth-client role.
+Issuer discovery based on an untrusted token claim, unbounded remote documents,
+or implicit public-resource derivation would create SSRF, resource-exhaustion,
+and audience-confusion risks.
+
+**The decision.** `HTTPOptions.Authorization` accepts `authz.Config`: a named
+validator driver, explicit canonical HTTPS resource and trusted issuer, required
+resource scopes, driver-specific typed configuration, and an MRTR continuation
+key. Validators implement `authz.Validator` and register through the existing
+factory + driver pattern; the built-in `jwt-jwks` driver is init-registered. It
+starts RFC 8414 discovery only from the configured issuer, requires exact issuer
+and HTTPS JWKS metadata, explicitly allowlists algorithms, and bounds response
+bytes, key count, cache lifetime, and refresh frequency. The canonical resource
+is never inferred from request or proxy headers. Dockyard publishes path-aware
+RFC 9728 metadata and Bearer challenges, but never acquires, forwards, logs, or
+stores tokens; Harbor owns OAuth-client and credential lifecycles.
+
+---
+
+## D-196 — Tasks and authenticated MRTR bind to a derived verified-principal identity
+
+**Date:** 2026-07-12
+**Status:** Settled (Phase 36 design-owner approval).
+**Where it lives:** `runtime/authz.Principal`, `runtime/tasks`,
+`runtime/server/mrtr_auth.go`, RFC §8 and §19.2.
+
+**Why.** Stateless HTTP requests have no durable MCP session identity. Persisting
+raw bearer tokens or subjects would expose credentials and identity data, while
+trusting request `_meta` would permit impersonation. Core MRTR retries also need
+integrity and principal binding without turning their opaque state into server
+session storage.
+
+**The decision.** Successful validation creates an immutable request principal
+containing exact issuer, subject, resource, and scopes. Dockyard derives a stable
+SHA-256 binding from length-prefixed issuer + subject + resource and uses that
+non-reversible value for Task ownership across create, get, update, cancel, and
+input operations. Authenticated core MRTR state is HMAC-sealed with the configured
+continuation key and binds that derived principal, tool, argument digest, opaque
+handler state, and a ten-minute expiry. It is rejected across principals, tools,
+arguments, expiry, or tampering. Neither durable Tasks nor MRTR state contains a
+bearer token; Task input and core MRTR remain separate lifecycles under D-192.
+
+---
+
+## D-197 — Advertised and globally required OAuth scopes are distinct
+
+**Date:** 2026-07-12
+**Status:** Settled (Phase 36 adversarial review remediation).
+**Where it lives:** `runtime/authz.Config`, `runtime/server.HTTPOptions`, RFC §19.2.
+
+**Why.** A protected resource can support scopes that are not required by every
+operation. Treating the metadata's complete supported set as a universal request
+requirement over-constrains clients and makes the RFC 9728 advertisement
+semantically incorrect.
+
+**The decision.** `Config.Scopes` is the supported set advertised in protected
+resource metadata. `Config.RequiredScopes` is a separate global policy, and every
+protected MCP operation requires every entry. Operation-specific scope callbacks
+are not part of the initial API; deployments that need different policies use
+separate protected endpoints. Challenges enumerate the complete required set.

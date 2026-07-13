@@ -106,6 +106,12 @@ that is not under `dockyard dev`), use `dockyard inspect --url
 http://127.0.0.1:8080` in a second terminal — same surface, separate
 process.
 
+The inspector has no OAuth flow, bearer-token flag, token forwarding, or
+credential store. It cannot attach to an OAuth-protected server without being
+challenged. Use Harbor or a purpose-built test client for authenticated calls,
+or run an unauthenticated loopback-only configuration during inspector work; see
+`docs/site/guides/oauth-protected-resource.md`.
+
 ## Common pitfalls
 
 - **Port 8080 is busy on my machine.** The dev loop's HTTP pin defaults
