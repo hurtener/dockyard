@@ -47,7 +47,7 @@ jobs:
       # internal/inspector/dist/ so the //go:embed directive picks up the real
       # SPA (remediation R4 B1). Without Node here the build embeds only the
       # .gitkeep anchor and the inspector serves its in-Go placeholder page.
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -83,7 +83,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -106,7 +106,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm

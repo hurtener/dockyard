@@ -72,7 +72,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -246,7 +246,7 @@ jobs:
       # registry-url makes setup-node write an .npmrc that reads the token
       # from NODE_AUTH_TOKEN — the token VALUE is never in the workflow, only
       # the secret reference (CLAUDE.md §7 — no hardcoded secrets).
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
