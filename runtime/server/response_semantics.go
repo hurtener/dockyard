@@ -24,8 +24,9 @@ type encodedResult struct {
 
 func (r *encodedResult) MarshalJSON() ([]byte, error) { return r.raw, nil }
 
-func responseSemanticsMiddleware(opts *Options) mcpsdk.Middleware {
+func responseSemanticsMiddleware(info Info, opts *Options) mcpsdk.Middleware {
 	listPolicy := resourceListCachePolicy(opts)
+	serverInfo := protocolcodec.ServerInfo{Name: info.Name, Title: info.Title, Version: info.Version}
 	return func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
 		return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
 			version := requestProtocolVersion(req)
@@ -67,6 +68,14 @@ func responseSemanticsMiddleware(opts *Options) mcpsdk.Middleware {
 				}
 			}
 			raw, marshalErr = protocolcodec.EncodeResultType(version, raw)
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			// SEP-2575: the SDK annotates serverInfo into each modern result's
+			// _meta after the middleware returns, but encodedResult ships
+			// pre-baked bytes that shadow that annotation — so Dockyard injects
+			// serverInfo here, consistent with how it owns resultType.
+			raw, marshalErr = protocolcodec.EncodeServerInfo(version, raw, serverInfo)
 			if marshalErr != nil {
 				return nil, marshalErr
 			}

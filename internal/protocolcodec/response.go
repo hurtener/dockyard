@@ -67,6 +67,62 @@ func EncodeCacheMetadata(version ProtocolVersion, raw json.RawMessage, cache Cac
 	return json.Marshal(result)
 }
 
+// metaKeyServerInfo is the SEP-2575 _meta key under which a modern-protocol
+// server identifies itself on every result.
+const metaKeyServerInfo = "io.modelcontextprotocol/serverInfo"
+
+// ServerInfo is the protocol-agnostic server identity injected into modern
+// responses per SEP-2575.
+type ServerInfo struct {
+	Name    string
+	Title   string
+	Version string
+}
+
+// EncodeServerInfo annotates a modern-protocol result's _meta with the server
+// identity SEP-2575 requires, unless the producer already set it. Legacy
+// versions are unchanged. The returned JSON is fresh and safe for concurrent
+// callers.
+func EncodeServerInfo(version ProtocolVersion, raw json.RawMessage, info ServerInfo) (json.RawMessage, error) {
+	if version != VersionMCP20260728 {
+		return raw, nil
+	}
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("protocolcodec: response result: %w", err)
+	}
+	if result == nil {
+		return nil, fmt.Errorf("protocolcodec: response result must be an object")
+	}
+	var meta map[string]json.RawMessage
+	if rawMeta, ok := result["_meta"]; ok {
+		if err := json.Unmarshal(rawMeta, &meta); err != nil {
+			return nil, fmt.Errorf("protocolcodec: response _meta: %w", err)
+		}
+	}
+	if meta == nil {
+		meta = map[string]json.RawMessage{}
+	}
+	if _, present := meta[metaKeyServerInfo]; present {
+		return raw, nil
+	}
+	impl := map[string]string{"name": info.Name, "version": info.Version}
+	if info.Title != "" {
+		impl["title"] = info.Title
+	}
+	encodedImpl, err := json.Marshal(impl)
+	if err != nil {
+		return nil, err
+	}
+	meta[metaKeyServerInfo] = encodedImpl
+	encodedMeta, err := json.Marshal(meta)
+	if err != nil {
+		return nil, err
+	}
+	result["_meta"] = encodedMeta
+	return json.Marshal(result)
+}
+
 // EncodeStructuredPresence applies Dockyard's typed presence decision after
 // SDK output adaptation. It also maintains MCP's JSON text fallback for every
 // non-object value, including explicit null.

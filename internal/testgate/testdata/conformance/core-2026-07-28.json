@@ -21,12 +21,12 @@
       "resultType": "complete",
       "supportedVersions": ["2026-07-28"],
       "capabilities": {"tools": {}},
-      "serverInfo": {"name": "fixture-server", "version": "1.0.0"},
+      "_meta": {"io.modelcontextprotocol/serverInfo": {"name": "fixture-server", "version": "1.0.0"}},
       "ttlMs": 3600000,
       "cacheScope": "public"
     }
   },
   "expect": {
-    "result.serverInfo.name": "fixture-server"
+    "result.resultType": "complete"
   }
 }

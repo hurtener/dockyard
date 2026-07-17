@@ -152,9 +152,16 @@ func validateLifecycleShape(version string, request, response map[string]any) er
 	if _, ok := result["capabilities"].(map[string]any); !ok {
 		return fmt.Errorf("modern discovery result must contain capabilities")
 	}
-	serverInfo, ok := result["serverInfo"].(map[string]any)
+	// Per SEP-2575, the server identifies itself in each new-protocol
+	// result's _meta under io.modelcontextprotocol/serverInfo, not as a
+	// top-level serverInfo field.
+	resultMeta, ok := result["_meta"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("modern discovery result must contain _meta with serverInfo (SEP-2575)")
+	}
+	serverInfo, ok := resultMeta["io.modelcontextprotocol/serverInfo"].(map[string]any)
 	if !ok || serverInfo["name"] == "" || serverInfo["version"] == "" {
-		return fmt.Errorf("modern discovery result serverInfo must contain name and version")
+		return fmt.Errorf("modern discovery result _meta serverInfo must contain name and version")
 	}
 	versions, ok := result["supportedVersions"].([]any)
 	if !ok || len(versions) == 0 {

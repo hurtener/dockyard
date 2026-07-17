@@ -23,6 +23,20 @@ deliberately deferred to V2.
 
 (No entries yet — the next release surface will land here.)
 
+## [1.9.1] - 2026-07-17
+
+### Changed
+
+- **Upgraded the MCP Go SDK to `v1.7.0-pre.3`.** This prerelease continues
+  aligning the `2026-07-28` protocol with the specification, including
+  SEP-2575: on `2026-07-28` responses a server now identifies itself in each
+  result's `_meta` (under `io.modelcontextprotocol/serverInfo`) rather than as
+  a top-level `serverInfo` field. Dockyard emits the server's name, title, and
+  version in that location on every modern-protocol response; `2025-11-25` and
+  earlier responses are unchanged. Clients reading `serverInfo` from the
+  discovery result's top level on the `2026-07-28` protocol must read it from
+  `_meta` instead.
+
 ## [1.9.0] - 2026-07-13
 
 ### Added

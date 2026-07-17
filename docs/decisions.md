@@ -6792,3 +6792,35 @@ for every project shape. Every manifest tool input/output reference must name a
 type in the canonical `internal/contracts` Go package; noncanonical package
 references fail manifest validation and generation rather than silently omitting
 their types from `contracts.ts`.
+
+---
+
+## D-199 — go-sdk pinned to `v1.7.0-pre.3`; SEP-2575 serverInfo owned in `protocolcodec`
+
+**Date:** 2026-07-17
+**Status:** Settled (dependency bump for the v1.9.1 release).
+**Where it lives:** `go.mod`, `internal/protocolcodec/response.go`
+(`EncodeServerInfo`), `runtime/server/response_semantics.go`,
+`internal/testgate/conformance.go`, `scripts/smoke/phase-31.sh`.
+
+**Why.** The `2026-07-28`-targeting prerelease `v1.7.0-pre.3` lands the
+SEP-2575 spec-compliance change that moves the server identity out of a
+top-level `DiscoverResult.ServerInfo` field and into every new-protocol
+result's `_meta` under `io.modelcontextprotocol/serverInfo`. The SDK injects
+it post-hoc, after receiving middleware runs. Dockyard's
+`responseSemanticsMiddleware` returns an `encodedResult` carrying pre-baked
+JSON bytes for every modern-protocol response (it already owns `resultType`
+and cache metadata via `protocolcodec`), so the SDK's post-hoc annotation is
+shadowed and `serverInfo` would silently vanish from all `2026-07-28`
+responses.
+
+**The decision.** Dockyard owns the SEP-2575 `serverInfo` shape itself, behind
+the `internal/protocolcodec` seam (P3), via `EncodeServerInfo`. The response
+middleware injects the server's `{name, title, version}` into each
+modern-protocol result's `_meta` — unless a producer already set it — mirroring
+how it owns `resultType`. The offline core-conformance checker and fixture
+assert `serverInfo` in `result._meta`, not as a top-level field. Legacy
+(`2025-11-25` and earlier) responses are unchanged. This is a spec-tracking
+change within the same protocol version; it does not advance Dockyard's
+finalization claim (the SDK is still a prerelease — see
+`docs/specifications/README.md`).
