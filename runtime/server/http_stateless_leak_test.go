@@ -40,7 +40,7 @@ func TestStatelessHTTPDoesNotLeakServerReadGoroutines(t *testing.T) {
 			run("bare_sdk_handler", newSDKHandler(newSDKServer()), nil)
 
 			responseServer := newSDKServer()
-			responseServer.AddReceivingMiddleware(responseSemanticsMiddleware(nil))
+			responseServer.AddReceivingMiddleware(responseSemanticsMiddleware(Info{Name: "leak-test", Version: "1.0.0"}, nil))
 			run("response_semantics", newSDKHandler(responseServer), nil)
 
 			taskResultServer := newSDKServer()

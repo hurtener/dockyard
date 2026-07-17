@@ -104,6 +104,80 @@ func TestEncodeResultTypeRejectsNonObject(t *testing.T) {
 	}
 }
 
+func TestEncodeServerInfoVersioned(t *testing.T) {
+	t.Parallel()
+	info := ServerInfo{Name: "acme", Title: "Acme", Version: "1.2.3"}
+
+	modern, err := EncodeServerInfo(VersionMCP20260728, json.RawMessage(`{"supportedVersions":["2026-07-28"]}`), info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := serverInfoFrom(t, modern)
+	if got["name"] != "acme" || got["version"] != "1.2.3" || got["title"] != "Acme" {
+		t.Fatalf("modern serverInfo = %v", got)
+	}
+
+	// Legacy is untouched: no _meta serverInfo injected.
+	legacy, err := EncodeServerInfo(VersionMCP20251125, json.RawMessage(`{"value":1}`), info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(legacy) != `{"value":1}` {
+		t.Fatalf("legacy result mutated: %s", legacy)
+	}
+}
+
+func TestEncodeServerInfoPreservesExisting(t *testing.T) {
+	t.Parallel()
+	// A producer-set serverInfo wins; the codec must not overwrite it.
+	input := json.RawMessage(`{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"upstream","version":"9"}}}`)
+	raw, err := EncodeServerInfo(VersionMCP20260728, input, ServerInfo{Name: "acme", Version: "1.2.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := serverInfoFrom(t, raw); got["name"] != "upstream" || got["version"] != "9" {
+		t.Fatalf("serverInfo overwritten: %v", got)
+	}
+}
+
+func TestEncodeServerInfoRejectsNonObject(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []json.RawMessage{json.RawMessage(`null`), json.RawMessage(`[]`)} {
+		if _, err := EncodeServerInfo(VersionMCP20260728, raw, ServerInfo{Name: "acme", Version: "1"}); err == nil {
+			t.Fatalf("EncodeServerInfo accepted %s", raw)
+		}
+	}
+}
+
+func TestEncodeServerInfoConcurrent(t *testing.T) {
+	t.Parallel()
+	const workers = 32
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := EncodeServerInfo(VersionMCP20260728, json.RawMessage(`{"value":1}`), ServerInfo{Name: "acme", Version: "1"}); err != nil {
+				t.Errorf("EncodeServerInfo: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func serverInfoFrom(t *testing.T, raw json.RawMessage) map[string]string {
+	t.Helper()
+	var result struct {
+		Meta struct {
+			ServerInfo map[string]string `json:"io.modelcontextprotocol/serverInfo"`
+		} `json:"_meta"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatalf("decode %s: %v", raw, err)
+	}
+	return result.Meta.ServerInfo
+}
+
 func TestResourceNotFoundCode(t *testing.T) {
 	t.Parallel()
 	if got := ResourceNotFoundCode(VersionMCP20260728); got != -32602 {

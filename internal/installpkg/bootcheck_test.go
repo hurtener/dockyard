@@ -31,7 +31,6 @@ func TestBootCheckNegotiation(t *testing.T) {
 				return &mcpsdk.DiscoverResult{
 					SupportedVersions: []string{"2026-07-28"},
 					Capabilities:      &mcpsdk.ServerCapabilities{},
-					ServerInfo:        &mcpsdk.Implementation{Name: "modern", Version: "1"},
 				}, nil
 			},
 		},
@@ -48,7 +47,6 @@ func TestBootCheckNegotiation(t *testing.T) {
 				return &mcpsdk.DiscoverResult{
 					SupportedVersions: []string{"2025-11-25"},
 					Capabilities:      &mcpsdk.ServerCapabilities{},
-					ServerInfo:        &mcpsdk.Implementation{Name: "legacy", Version: "1"},
 				}, nil
 			},
 			wantInitialize: true,
@@ -59,7 +57,6 @@ func TestBootCheckNegotiation(t *testing.T) {
 				return &mcpsdk.DiscoverResult{
 					SupportedVersions: []string{"2027-01-01"},
 					Capabilities:      &mcpsdk.ServerCapabilities{},
-					ServerInfo:        &mcpsdk.Implementation{Name: "future", Version: "1"},
 				}, nil
 			},
 			wantErr: true,
@@ -70,7 +67,6 @@ func TestBootCheckNegotiation(t *testing.T) {
 				return &mcpsdk.DiscoverResult{
 					SupportedVersions: []string{"garbage"},
 					Capabilities:      &mcpsdk.ServerCapabilities{},
-					ServerInfo:        &mcpsdk.Implementation{Name: "malformed", Version: "1"},
 				}, nil
 			},
 			wantErr: true,

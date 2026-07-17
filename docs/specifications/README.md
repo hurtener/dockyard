@@ -48,7 +48,7 @@ is summarized in the research briefs (`docs/research/01-mcp-apps-extension.md`,
 
 Before Dockyard claims final `2026-07-28` conformance, the owning change must:
 
-1. Re-pin `github.com/modelcontextprotocol/go-sdk` from `v1.7.0-pre.2` to the
+1. Re-pin `github.com/modelcontextprotocol/go-sdk` from `v1.7.0-pre.3` to the
    stable release.
 2. Replace each RC snapshot with the final upstream commit and date.
 3. Produce a normative diff from the RC snapshots and assign every changed

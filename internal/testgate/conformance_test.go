@@ -146,7 +146,10 @@ func TestCoreConformanceTracksPinnedSDKDiscoverResult(t *testing.T) {
 		Cacheable:         mcpsdk.Cacheable{TTLMs: 3_600_000, CacheScope: "public"},
 		SupportedVersions: []string{modernCoreVersion},
 		Capabilities:      &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}},
-		ServerInfo:        &mcpsdk.Implementation{Name: "fixture-server", Version: "1.0.0"},
+		// Per SEP-2575 serverInfo now rides in the result _meta rather than
+		// as a top-level field; the pinned SDK annotates it at the session
+		// layer, so a directly-marshaled result carries it explicitly here.
+		Meta: mcpsdk.Meta{mcpsdk.MetaKeyServerInfo: &mcpsdk.Implementation{Name: "fixture-server", Version: "1.0.0"}},
 	}
 	sdkRaw, err := json.Marshal(sdkResult)
 	if err != nil {

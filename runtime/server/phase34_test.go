@@ -198,6 +198,8 @@ func TestModernDiscoveryRawWireConforms(t *testing.T) {
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
 	raw := modernRPC(t, ts, `{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"test","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}}}`)
+	// Per SEP-2575 the server identifies itself in the new-protocol result's
+	// _meta under io.modelcontextprotocol/serverInfo, not a top-level field.
 	var envelope struct {
 		Result struct {
 			ResultType        string                     `json:"resultType"`
@@ -205,10 +207,12 @@ func TestModernDiscoveryRawWireConforms(t *testing.T) {
 			CacheScope        string                     `json:"cacheScope"`
 			SupportedVersions []string                   `json:"supportedVersions"`
 			Capabilities      map[string]json.RawMessage `json:"capabilities"`
-			ServerInfo        struct {
-				Name    string `json:"name"`
-				Version string `json:"version"`
-			} `json:"serverInfo"`
+			Meta              struct {
+				ServerInfo struct {
+					Name    string `json:"name"`
+					Version string `json:"version"`
+				} `json:"io.modelcontextprotocol/serverInfo"`
+			} `json:"_meta"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
@@ -217,7 +221,7 @@ func TestModernDiscoveryRawWireConforms(t *testing.T) {
 	result := envelope.Result
 	if result.ResultType != "complete" || result.TTLMs == nil || *result.TTLMs < 0 ||
 		(result.CacheScope != "public" && result.CacheScope != "private") || result.Capabilities == nil ||
-		result.ServerInfo.Name != "strict-discovery" || result.ServerInfo.Version != "1.0.0" ||
+		result.Meta.ServerInfo.Name != "strict-discovery" || result.Meta.ServerInfo.Version != "1.0.0" ||
 		!containsString(result.SupportedVersions, "2026-07-28") {
 		t.Fatalf("discovery result does not satisfy strict core fields: %s", raw)
 	}

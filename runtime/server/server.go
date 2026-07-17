@@ -236,7 +236,7 @@ func New(info Info, opts *Options) (*Server, error) {
 		Version: info.Version,
 	}, sdkOpts)
 	mcpSrv.AddReceivingMiddleware(createdTaskResultMiddleware())
-	mcpSrv.AddReceivingMiddleware(responseSemanticsMiddleware(opts))
+	mcpSrv.AddReceivingMiddleware(responseSemanticsMiddleware(info, opts))
 	s := &Server{
 		info:                 info,
 		log:                  log,
