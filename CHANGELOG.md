@@ -23,6 +23,19 @@ deliberately deferred to V2.
 
 (No entries yet — the next release surface will land here.)
 
+## [1.9.2] - 2026-07-20
+
+### Fixed
+
+- **Confirmed and locked SEP-2575 `serverInfo` coverage for modern Tasks.**
+  On the `2026-07-28` protocol, `tasks/get`, `tasks/update`, and `tasks/cancel`
+  results now have regression tests asserting they carry the `serverInfo`
+  `_meta` and `resultType` discriminator, matching every other modern result.
+  The modern protocol is served only over stateless HTTP — it cannot be
+  negotiated over stdio, whose sessions remain on the `2025-11-25` lifecycle —
+  so no server-visible behavior changed; this release adds the tests and
+  documentation that pin the invariant.
+
 ## [1.9.1] - 2026-07-17
 
 ### Changed
@@ -32,8 +45,9 @@ deliberately deferred to V2.
   SEP-2575: on `2026-07-28` responses a server now identifies itself in each
   result's `_meta` (under `io.modelcontextprotocol/serverInfo`) rather than as
   a top-level `serverInfo` field. Dockyard emits the server's name, title, and
-  version in that location on every modern-protocol response; `2025-11-25` and
-  earlier responses are unchanged. Clients reading `serverInfo` from the
+  version in that location on modern-protocol results served through the SDK
+  response path; `2025-11-25` and earlier responses are unchanged. Clients
+  reading `serverInfo` from the
   discovery result's top level on the `2026-07-28` protocol must read it from
   `_meta` instead.
 

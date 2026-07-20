@@ -33,11 +33,15 @@ else
   skip "modern Tasks parity test (serverInfo + resultType) not present yet"
 fi
 
-# --- Item 3: the Mount has a version-aware branch or documented invariant -----
-if grep -qE "2026-07-28|VersionMCP20260728|protocolVersion" runtime/tasks/transport.go 2>/dev/null; then
-  ok "Tasks Mount is protocol-version aware for 2026-07-28"
+# --- Item 3: the reachability invariant is proven + recorded ------------------
+# The modern protocol is unreachable off the stateless HTTP path, so the Tasks
+# mount's legacy codec is correct over stdio. Satisfied by a test + a decision,
+# not a code branch (see D-200).
+if grep -rqs "TestModernProtocolUnreachableViaInitialize" runtime/server 2>/dev/null &&
+   grep -qs "^## D-200" docs/decisions.md 2>/dev/null; then
+  ok "modern-protocol-unreachable-over-stdio invariant is proven by test and recorded (D-200)"
 else
-  skip "Tasks Mount has no explicit 2026-07-28 version branch yet"
+  skip "reachability invariant test/decision not present yet"
 fi
 
 # --- Item 4: CHANGELOG carries 1.9.2 and drops the over-broad 1.9.1 wording ---

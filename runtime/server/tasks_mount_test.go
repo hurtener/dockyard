@@ -314,6 +314,22 @@ func TestTasksMount_Stdio_RoutesTasksFrames(t *testing.T) {
 		if got.ID != created.Task.ID {
 			t.Fatalf("stdio tasks/get returned %q, want %q", got.ID, created.Task.ID)
 		}
+		// Regression (v1.9.2): a stdio session is always legacy — the SDK caps
+		// initialize negotiation below 2026-07-28 (see
+		// TestModernProtocolUnreachableViaInitialize), so the mount's legacy
+		// codec is correct here. The response must carry neither the modern
+		// resultType discriminator nor the SEP-2575 serverInfo _meta; those are
+		// modern-only and belong to the stateless HTTP path.
+		var resultFields map[string]json.RawMessage
+		if err := json.Unmarshal(decoded["result"], &resultFields); err != nil {
+			t.Fatalf("decode stdio tasks/get result fields: %v", err)
+		}
+		if _, hasResultType := resultFields["resultType"]; hasResultType {
+			t.Errorf("stdio tasks/get result carries modern resultType: %s", decoded["result"])
+		}
+		if bytes.Contains(line, []byte("io.modelcontextprotocol/serverInfo")) {
+			t.Errorf("stdio tasks/get frame carries modern serverInfo _meta: %s", line)
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("stdio tasks/get over the mount timed out")
 	}
