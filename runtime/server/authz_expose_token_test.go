@@ -103,7 +103,7 @@ func TestExposeRawTokenNotExposedForRejectedRequest(t *testing.T) {
 	s, _ := New(Info{Name: "expose-reject", Version: "1"}, nil)
 	reached := false
 	opts := exposeTokenOptions(true)
-	opts.ServerForRequest = func(r *http.Request) *Server { reached = true; return s }
+	opts.ServerForRequest = func(_ *http.Request) *Server { reached = true; return s }
 	h, err := s.HTTPHandler(opts)
 	if err != nil {
 		t.Fatal(err)
