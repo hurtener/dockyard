@@ -6824,3 +6824,40 @@ assert `serverInfo` in `result._meta`, not as a top-level field. Legacy
 change within the same protocol version; it does not advance Dockyard's
 finalization claim (the SDK is still a prerelease — see
 `docs/specifications/README.md`).
+
+---
+
+## D-200 — Modern `2026-07-28` Tasks are an HTTP-stateless-only surface; the Tasks mount serves only legacy sessions
+
+**Date:** 2026-07-20
+**Status:** Settled (v1.9 wave A — v1.9.2; adversarial-review follow-up to D-199).
+**Where it lives:** `runtime/tasks` (the transport mount), `runtime/server`
+(HTTP stateless path + stdio), and the tests
+`TestModernTaskResultsCarryServerInfoAndResultType`,
+`TestModernProtocolUnreachableViaInitialize`, and the stdio legacy-shape
+assertion in `TestTasksMount_Stdio_RoutesTasksFrames`.
+
+**Why.** Adversarial review of the v1.9.1 SEP-2575 change (D-199) observed that
+the Tasks transport mount intercepts `tasks/*` frames ahead of the SDK with an
+engine codec pinned to `protocolcodec.DefaultVersion` (`2025-11-25`), so a
+response the mount serves carries neither `resultType` nor the `serverInfo`
+`_meta`. The question was whether a modern `2026-07-28` Tasks response could
+therefore be served with a legacy shape.
+
+**The decision.** It cannot, by construction. The modern protocol replaces the
+`initialize` lifecycle with the stateless `server/discover` flow, which only the
+HTTP stateless handler serves; the pinned SDK caps `initialize` negotiation
+below `2026-07-28` (`negotiatedVersion`), and stdio speaks only the `initialize`
+lifecycle. Therefore a stdio session is always legacy, and the mount's legacy
+codec is correct there. The one reachable modern Tasks path is HTTP-stateless,
+where `tasks/get`/`tasks/update`/`tasks/cancel` are served by the SDK custom
+methods and flow through `responseSemanticsMiddleware` — so each carries
+`resultType` and the SEP-2575 `serverInfo` `_meta`, exactly like a non-Tasks
+modern result. The mount's `HTTPMiddleware` is installed only on the legacy
+(non-stateless) branch, so it never intercepts a modern request. This invariant
+is locked by tests, not by a code change; the honest v1.9.1 CHANGELOG wording is
+corrected to say modern Tasks results carry `serverInfo` rather than claiming
+literally every modern-protocol frame does. Extending the mount's codec to a
+version-aware modern path (which would also need the server identity plumbed
+into `runtime/tasks`) remains a non-goal unless the modern protocol ever becomes
+reachable off the SDK path.
