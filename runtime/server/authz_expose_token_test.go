@@ -163,6 +163,47 @@ func TestExposeRawTokenNeverEntersDurableTaskState(t *testing.T) {
 	}
 }
 
+// TestExposeRawTokenScrubbedFromDetachedTaskRun proves the exposed token stays
+// request-scoped: an async task run detached from the request context does NOT
+// inherit it, so a task handler that outlives the request cannot read a token
+// it should re-exchange for (D-201). runtime/server registers the authz
+// scrubber via init(), so this holds for any engine in the process.
+func TestExposeRawTokenScrubbedFromDetachedTaskRun(t *testing.T) {
+	store := tasks.NewInMemoryStore()
+	engine, err := tasks.NewEngine(store, &tasks.Options{
+		GenerateID: func() (string, error) { return "scrub-task", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(chan struct {
+		token string
+		ok    bool
+	}, 1)
+	principal := authz.Principal{Issuer: "iss", Subject: "alice", Resource: "res"}
+	ctx := authz.WithRawToken(context.Background(), "SENTINEL-DETACH-TOKEN")
+	ctx = tasks.WithRequestAuthContext(ctx, principal.BindingKey())
+
+	if _, err := engine.CreateForToolCall(ctx, tasks.CreateToolCallParams{
+		ToolName:    "work",
+		AuthContext: principal.BindingKey(),
+		Run: func(runCtx context.Context) (json.RawMessage, error) {
+			tok, ok := authz.RawTokenFromContext(runCtx)
+			seen <- struct {
+				token string
+				ok    bool
+			}{tok, ok}
+			return json.RawMessage(`{}`), nil
+		},
+	}); err != nil {
+		t.Fatalf("CreateForToolCall: %v", err)
+	}
+	got := <-seen
+	if got.ok || got.token != "" {
+		t.Fatalf("detached task run inherited the exposed token: %q, %v", got.token, got.ok)
+	}
+}
+
 // TestMRTRContinuationBindsPrincipalNotToken proves the authenticated MRTR
 // continuation binds the non-reversible principal key and never the raw token
 // or the plaintext subject (D-196, D-201).

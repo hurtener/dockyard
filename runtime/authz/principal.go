@@ -53,6 +53,18 @@ func RawTokenFromContext(ctx context.Context) (string, bool) {
 	return t, ok && t != ""
 }
 
+// WithoutRawToken returns a child context in which the exposed token reads as
+// absent. It keeps the delegation token request-scoped: work detached from the
+// originating request (e.g. an async Task run) must not inherit it — such work
+// re-exchanges on its own fresh inbound token. Registered as a Tasks
+// detach-scrubber by runtime/server so the strip is automatic.
+func WithoutRawToken(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(rawTokenKey{}).(string); !ok {
+		return ctx
+	}
+	return context.WithValue(ctx, rawTokenKey{}, "")
+}
+
 // BindingKey returns a stable, non-reversible identity suitable for persistence.
 // Length-prefixing prevents tuple ambiguity; SHA-256 makes collisions
 // computationally infeasible without requiring a deployment secret.

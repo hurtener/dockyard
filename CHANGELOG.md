@@ -36,9 +36,10 @@ deliberately deferred to V2.
   endpoint. The token is exposed only after full validation (signature, issuer,
   resource, subject, required scopes), is request-scoped, never enters durable
   Task or MRTR continuation state, and is never logged. This is delegation, not
-  token passthrough: the inbound token stays audience-bound to the server and
-  reaches only the trusted exchange. Off by default; existing servers are
-  unaffected. See the OAuth protected-resource guide.
+  token passthrough: the inbound token stays audience-bound to the server, and
+  the handler must present it only to the trusted exchange — never to a
+  downstream resource API. Off by default; existing servers are unaffected. See
+  the OAuth protected-resource guide.
 
 ## [1.9.2] - 2026-07-20
 

@@ -32,3 +32,24 @@ func TestRawTokenEmptyStringReadsAsAbsent(t *testing.T) {
 		t.Fatalf("empty-token context = %q, %v; want \"\", false", got, ok)
 	}
 }
+
+func TestWithoutRawTokenStripsExposedToken(t *testing.T) {
+	t.Parallel()
+	ctx := WithRawToken(context.Background(), "header.payload.signature")
+	stripped := WithoutRawToken(ctx)
+	if got, ok := RawTokenFromContext(stripped); ok || got != "" {
+		t.Fatalf("stripped context = %q, %v; want \"\", false", got, ok)
+	}
+	// The original context is unchanged — stripping is a child-context operation.
+	if got, ok := RawTokenFromContext(ctx); !ok || got != "header.payload.signature" {
+		t.Fatalf("source context mutated by strip: %q, %v", got, ok)
+	}
+}
+
+func TestWithoutRawTokenNoOpWhenAbsent(t *testing.T) {
+	t.Parallel()
+	base := context.Background()
+	if WithoutRawToken(base) != base {
+		t.Fatal("WithoutRawToken allocated a child context when no token was present")
+	}
+}

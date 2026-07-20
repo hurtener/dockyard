@@ -997,8 +997,8 @@ issuer. It validates signature, algorithm, issuer, audience/resource, time
 claims, and required scopes; it never stores or logs a bearer or refresh token,
 and by default discards the validated token after the request. A verified request
 principal, not a raw header or MCP session, binds Tasks and reaches handler
-contexts. `offline_access` is not a protected resource scope and is never
-advertised by Dockyard.
+contexts (the one exception is the opt-in delegation token below). `offline_access`
+is not a protected resource scope and is never advertised by Dockyard.
 
 **Delegated token exchange (opt-in).** A resource server that must obtain a
 downstream token by RFC 8693 token exchange — presenting the validated inbound

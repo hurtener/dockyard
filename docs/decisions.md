@@ -6701,7 +6701,11 @@ bind. Apps `2026-01-26` `ui/initialize` remains a separate iframe dialect.
 ## D-195 — OAuth resource authorization is typed public configuration behind a validator driver seam
 
 **Date:** 2026-07-12
-**Status:** Settled (Phase 36 design-owner approval).
+**Status:** Settled (Phase 36 design-owner approval). The blanket "never
+forwards … tokens" clause is **partially superseded by D-201** (2026-07-20):
+Dockyard still never performs token *passthrough* and discards the validated
+token by default, but a validated token may be exposed opt-in for RFC 8693
+delegation. Everything else in this entry stands.
 **Where it lives:** `runtime/authz`, `runtime/authz/jwtjwks`,
 `runtime/server.HTTPOptions`, RFC §15 and §19.2.
 
@@ -6867,7 +6871,10 @@ reachable off the SDK path.
 ## D-201 — Opt-in exposure of the validated inbound token for RFC 8693 delegation
 
 **Date:** 2026-07-20
-**Status:** Settled (v1.10 wave A). Refines D-195 and D-196; RFC §19.2 amended.
+**Status:** Settled (v1.10 wave A). RFC §19.2 amended.
+**Supersedes:** the blanket "never forwards … tokens" clause of D-195 (the
+discard-after-validation default and the token-passthrough prohibition stand).
+Reaffirms — does not change — D-196 (durable Task/MRTR state stays token-free).
 **Where it lives:** `runtime/authz` (`Config.ExposeRawToken`, `WithRawToken`,
 `RawTokenFromContext`), `runtime/server/http.go` (the authorization middleware),
 RFC §19.2, and `docs/site/guides/oauth-protected-resource.md`.
@@ -6905,8 +6912,11 @@ trusted exchange. Invariants, asserted by tests:
 - **Validated-only.** The token is threaded in *after* `Validate` and the
   issuer/resource/subject/scope gates — never for a rejected request.
 - **Request-scoped.** It never enters durable Task or MRTR continuation state,
-  which continue to bind `principal.BindingKey()` (D-196); a resumed request
-  carries its own fresh inbound token and re-exchanges on that.
+  which continue to bind `principal.BindingKey()` (D-196). It is also stripped
+  from the context the Tasks engine detaches for an async task run (a registered
+  `tasks` detach-scrubber wired by `runtime/server`), so task work that outlives
+  the request cannot inherit it — a resumed or async request re-exchanges on its
+  own fresh inbound token.
 - **Never logged.** The token stays outside all framework logs, as under D-195.
 - **Both lifecycles.** Available on the synchronous request that carried the
   token under both `ProtocolMode`s; never carried across a resumed request.
