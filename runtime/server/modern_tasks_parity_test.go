@@ -104,7 +104,7 @@ func TestModernProtocolUnreachableViaInitialize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 	negotiated := negotiatedProtocolVersion(t, raw)
 	if negotiated == "2026-07-28" {
