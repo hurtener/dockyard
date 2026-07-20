@@ -23,6 +23,23 @@ deliberately deferred to V2.
 
 (No entries yet — the next release surface will land here.)
 
+## [1.10.0] - 2026-07-20
+
+### Added
+
+- **Opt-in access to the validated inbound token for RFC 8693 delegation.** A
+  new `authz.Config.ExposeRawToken` (default `false`), with the
+  `authz.WithRawToken` / `authz.RawTokenFromContext` accessor pair, lets a
+  resource server that performs delegated token exchange retrieve the validated
+  inbound bearer token from the handler context — for the sole purpose of
+  presenting it as an RFC 8693 `subject_token` to a trusted token-exchange
+  endpoint. The token is exposed only after full validation (signature, issuer,
+  resource, subject, required scopes), is request-scoped, never enters durable
+  Task or MRTR continuation state, and is never logged. This is delegation, not
+  token passthrough: the inbound token stays audience-bound to the server and
+  reaches only the trusted exchange. Off by default; existing servers are
+  unaffected. See the OAuth protected-resource guide.
+
 ## [1.9.2] - 2026-07-20
 
 ### Fixed

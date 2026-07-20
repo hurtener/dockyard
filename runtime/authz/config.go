@@ -29,6 +29,17 @@ type Config struct {
 	// ContinuationKey authenticates framework-owned MRTR continuation state.
 	// It must contain at least 32 bytes and is never exposed on the wire.
 	ContinuationKey []byte
+	// ExposeRawToken makes the validated inbound bearer token retrievable from
+	// the handler context via RawTokenFromContext, for the sole purpose of
+	// presenting it as an RFC 8693 subject_token to a trusted token-exchange
+	// endpoint. Default false: the token is discarded after validation (D-201).
+	//
+	// Enable only when the server performs delegated token exchange. The token
+	// is exposed ONLY after full validation (signature, issuer, resource,
+	// subject, required scopes). It is request-scoped, never persisted, never
+	// placed in durable Task or MRTR continuation state, and must never be
+	// logged or forwarded to any endpoint other than the trusted exchange.
+	ExposeRawToken bool
 }
 
 // Validator validates an unadorned bearer token and never retains it.

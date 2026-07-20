@@ -34,6 +34,25 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	return p, true
 }
 
+type rawTokenKey struct{}
+
+// WithRawToken returns a child context carrying the validated inbound bearer
+// token. Framework-internal: the server sets it only when Config.ExposeRawToken
+// is true, and only after the token has passed every validation gate (D-201).
+func WithRawToken(ctx context.Context, token string) context.Context {
+	return context.WithValue(ctx, rawTokenKey{}, token)
+}
+
+// RawTokenFromContext returns the validated inbound bearer token when the server
+// was configured with ExposeRawToken. The false result — no token available — is
+// the normal case; expose the token only to present it as an RFC 8693
+// subject_token to a trusted token-exchange endpoint (never log, persist, or
+// forward it elsewhere).
+func RawTokenFromContext(ctx context.Context) (string, bool) {
+	t, ok := ctx.Value(rawTokenKey{}).(string)
+	return t, ok && t != ""
+}
+
 // BindingKey returns a stable, non-reversible identity suitable for persistence.
 // Length-prefixing prevents tuple ambiguity; SHA-256 makes collisions
 // computationally infeasible without requiring a deployment secret.

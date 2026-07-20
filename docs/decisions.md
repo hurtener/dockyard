@@ -6861,3 +6861,55 @@ literally every modern-protocol frame does. Extending the mount's codec to a
 version-aware modern path (which would also need the server identity plumbed
 into `runtime/tasks`) remains a non-goal unless the modern protocol ever becomes
 reachable off the SDK path.
+
+---
+
+## D-201 — Opt-in exposure of the validated inbound token for RFC 8693 delegation
+
+**Date:** 2026-07-20
+**Status:** Settled (v1.10 wave A). Refines D-195 and D-196; RFC §19.2 amended.
+**Where it lives:** `runtime/authz` (`Config.ExposeRawToken`, `WithRawToken`,
+`RawTokenFromContext`), `runtime/server/http.go` (the authorization middleware),
+RFC §19.2, and `docs/site/guides/oauth-protected-resource.md`.
+
+**Why.** A resource server that must call a downstream API (e.g. Microsoft
+Graph) on the caller's behalf obtains a downstream token by RFC 8693 token
+exchange: it presents the validated inbound token as `subject_token` to a
+trusted authorization server, which independently re-verifies the JWT and mints
+a new token for the downstream audience. That independent re-verification is
+what makes the principal→subject binding cryptographic rather than
+trust-the-caller. D-195 hardened Dockyard to discard the token after validation
+("never acquires, forwards, logs, or stores tokens"), which forecloses this
+standard, spec-blessed pattern and pushes every consumer into a wrapper that
+re-parses `Authorization` independently of `authz.ParseBearer` and grabs the
+token *before* validation — worse on parsing drift and on exposing the token for
+requests Dockyard is about to reject.
+
+This is **not** an MCP-spec change. The MCP Authorization spec requires audience
+binding (already enforced) and forbids *token passthrough* — relaying an inbound
+token to a downstream resource API. RFC 8693 exchange to a trusted authorization
+server is the opposite of passthrough; the downstream API never sees the inbound
+token. The discard-after-validation posture was Dockyard being stricter than the
+spec; this decision relaxes that self-imposed strictness, opt-in and gated, while
+staying spec-compliant.
+
+**The decision.** D-195's blanket "never forwards" is refined to: Dockyard never
+performs *token passthrough*, and by default discards the validated token after
+the request. A new `authz.Config.ExposeRawToken` (default `false`) makes the
+validated inbound token retrievable from the handler context via
+`RawTokenFromContext`, for the sole purpose of an RFC 8693 `subject_token` to a
+trusted exchange. Invariants, asserted by tests:
+
+- **Default off.** Zero value ⇒ `RawTokenFromContext` returns `("", false)`; no
+  behavior change for existing servers.
+- **Validated-only.** The token is threaded in *after* `Validate` and the
+  issuer/resource/subject/scope gates — never for a rejected request.
+- **Request-scoped.** It never enters durable Task or MRTR continuation state,
+  which continue to bind `principal.BindingKey()` (D-196); a resumed request
+  carries its own fresh inbound token and re-exchanges on that.
+- **Never logged.** The token stays outside all framework logs, as under D-195.
+- **Both lifecycles.** Available on the synchronous request that carried the
+  token under both `ProtocolMode`s; never carried across a resumed request.
+
+Extending exposure beyond RFC 8693 subject-token use, or having Dockyard perform
+the exchange itself, remains out of scope — the handler is the RFC 8693 client.
