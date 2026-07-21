@@ -291,6 +291,16 @@ leaves `App.Domain` empty for the host's default per-conversation origin.
 Dockyard emits it byte-for-byte and does **not** synthesise it. RFC §7.5. D-176
 (supersedes the auto-derivation of D-062/D-063).
 
+**Delegated token exchange** — obtaining a downstream token by presenting the
+validated inbound bearer token as an [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693)
+`subject_token` to a *trusted authorization server*, which independently
+re-verifies it and mints a new token for the downstream audience. Distinct from
+**token passthrough** (relaying the inbound token to a downstream resource API,
+which the MCP spec forbids): here the inbound token stays audience-bound to this
+server and reaches only the exchange. Dockyard supports it via the opt-in
+`authz.Config.ExposeRawToken`; the handler is the RFC 8693 client, not Dockyard.
+RFC §19.2. D-201.
+
 **Deny-by-default CSP** — the Content-Security-Policy a UI resource gets when it
 declares no `_meta.ui.csp` domains: zero external origins, so a single-file HTML
 bundle just works. `runtime/apps` encodes it by **omitting** the `_meta.ui` CSP

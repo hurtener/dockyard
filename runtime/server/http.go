@@ -398,6 +398,13 @@ func (a *httpAuthorization) middleware(next http.Handler) http.Handler {
 			return
 		}
 		ctx := authz.WithPrincipal(r.Context(), principal)
+		if a.cfg.ExposeRawToken {
+			// Opt-in (D-201): expose the validated token for RFC 8693 delegation
+			// only. It is placed after every validation gate, is request-scoped,
+			// and is never threaded into durable Task/MRTR state — that binds the
+			// derived principal (below), not the token.
+			ctx = authz.WithRawToken(ctx, token)
+		}
 		ctx = tasks.WithRequestAuthContext(ctx, principal.BindingKey())
 		ctx = withContinuationProtector(ctx, a.continuation)
 		next.ServeHTTP(w, r.WithContext(ctx))

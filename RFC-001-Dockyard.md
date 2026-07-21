@@ -994,10 +994,33 @@ validation, and scope accumulation.
 The initial Dockyard driver validates signed JWT access tokens using metadata and
 JWKS fetched only from an explicitly configured, trusted authorization-server
 issuer. It validates signature, algorithm, issuer, audience/resource, time
-claims, and required scopes; it never stores, logs, or forwards a bearer or
-refresh token. A verified request principal, not a raw header or MCP session,
-binds Tasks and reaches handler contexts. `offline_access` is not a protected
-resource scope and is never advertised by Dockyard.
+claims, and required scopes; it never stores or logs a bearer or refresh token,
+and by default discards the validated token after the request. A verified request
+principal, not a raw header or MCP session, binds Tasks and reaches handler
+contexts (the one exception is the opt-in delegation token below). `offline_access`
+is not a protected resource scope and is never advertised by Dockyard.
+
+**Delegated token exchange (opt-in).** A resource server that must obtain a
+downstream token by RFC 8693 token exchange — presenting the validated inbound
+token as `subject_token` to a *trusted authorization server*, which
+independently re-verifies it and mints a new token for the downstream audience —
+may opt into exposing that token to its handlers (`ExposeRawToken`). This is the
+one sanctioned relaxation of the discard-after-validation default, and it stays
+inside the MCP specification: the spec's prohibition is *token passthrough* —
+relaying an inbound token to a downstream resource API without proper
+audience-binding (MCP Security Best Practices; the spec's "MCP servers MUST NOT
+accept any tokens that were not explicitly issued for the MCP server"). RFC 8693
+exchange is the opposite: the inbound token is audience-bound to this server
+(already validated), it is presented only to the trusted exchange, and the
+downstream API receives only the exchange-minted, differently-audienced token —
+never the inbound one. When enabled, the validated token — past every
+signature/issuer/resource/subject/scope check — is retrievable from the handler
+context for that sole purpose. It remains request-scoped, is never persisted
+(durable Task and MRTR continuation state continue to bind the derived principal,
+not the token — §8, D-196), is never logged, and must reach only the trusted
+exchange over TLS. It is off by default; enabling it changes no existing
+behavior. Dockyard still performs no OAuth-client flow itself — the handler is
+the RFC 8693 client; Harbor's client responsibilities are unchanged.
 
 ---
 

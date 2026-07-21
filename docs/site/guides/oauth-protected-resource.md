@@ -125,13 +125,68 @@ and binds it to the verified principal, tool, arguments, and a ten-minute
 lifetime. Another principal cannot replay it. This state is independent of
 durable Task input and contains no bearer token.
 
+### Delegated token exchange (RFC 8693)
+
+By default the validated inbound token is discarded after the request — handlers
+receive the parsed principal, not the token. A server that must obtain a
+*downstream* token (for example, to call Microsoft Graph on the caller's behalf)
+gets it by [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) token exchange:
+present the validated inbound token as the `subject_token` to a trusted
+token-exchange endpoint, which independently re-verifies the JWT and returns a
+new token minted for the downstream audience.
+
+For that — and only that — opt into exposing the validated token:
+
+```go
+opts := &server.HTTPOptions{
+	Authorization: &authz.Config{
+		// … driver, resource, issuer, required scopes …
+		ExposeRawToken: true,
+	},
+}
+```
+
+The token is then retrievable in a handler, only after every validation gate has
+passed:
+
+```go
+token, ok := authz.RawTokenFromContext(ctx)
+if !ok {
+	return result, errors.New("delegation token unavailable")
+}
+// Present `token` as the RFC 8693 subject_token to the TRUSTED exchange only.
+form := url.Values{
+	"grant_type":         {"urn:ietf:params:oauth:grant-type:token-exchange"},
+	"subject_token":      {token},
+	"subject_token_type": {"urn:ietf:params:oauth:token-type:jwt"},
+	"audience":           {"https://graph.microsoft.com"},
+}
+// POST form to the trusted token-exchange endpoint over TLS; use the
+// provider-audience token it returns to call the downstream API.
+```
+
+::: warning This is delegation, not token passthrough
+The inbound token's audience is *this server*, and it is presented **only** to
+the trusted exchange — never forwarded to a downstream provider API. The
+downstream call uses the exchange-minted token, which carries the provider's own
+audience. The two tokens stay separate. Send the inbound token to nothing but the
+trusted exchange, always over TLS, and never log or persist it. `ExposeRawToken`
+is off by default; leave it off unless the server performs delegated exchange.
+The token is request-scoped and never enters durable Task or MRTR state (D-201).
+:::
+
 ## Client boundary
 
-Dockyard is server-side only. It does not acquire, forward, refresh, or store
-OAuth tokens. Harbor is the production MCP/OAuth client and sends the access
-token to the protected Dockyard endpoint. The local inspector and install boot
-check remain short-lived, operator-initiated development clients; they do not
-implement an OAuth flow or credential store.
+Dockyard is server-side only. It validates the inbound access token and, by
+default, discards it; it never acquires, refreshes, or stores OAuth tokens, and
+never forwards a token to a downstream resource API. The one exception is
+opt-in, above: with `ExposeRawToken`, a handler may present the validated token
+to a trusted RFC 8693 exchange — Dockyard still performs no OAuth-client flow
+itself; the handler is the exchange client. Harbor remains the production
+MCP/OAuth client and sends the access token to the protected Dockyard endpoint.
+The local inspector and install boot check remain short-lived,
+operator-initiated development clients; they do not implement an OAuth flow or
+credential store.
 
 ## See also
 

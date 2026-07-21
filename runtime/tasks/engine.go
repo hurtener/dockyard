@@ -559,7 +559,9 @@ func (e *Engine) createForToolCallWithRequired(ctx context.Context, p CreateTool
 	// tasks/cancel — cancellation is cooperative (the handler observes ctx).
 	// The task is detached from the request context: a tools/call returns its
 	// CreateTaskResult immediately, so the task must outlive the request.
-	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	// scrubDetached strips request-scoped credentials (e.g. an exposed
+	// delegation token) that must not outlive the request into the async run.
+	runCtx, cancel := context.WithCancel(scrubDetached(context.WithoutCancel(ctx)))
 	// One obs/v1 trace span correlates the whole task lifecycle: the start
 	// event here, any progress events, and the terminal event in finish all
 	// share this span (RFC §11.2 — W3C Trace Context correlation).

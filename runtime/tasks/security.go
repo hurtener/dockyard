@@ -5,9 +5,42 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 )
 
 type authContextKey struct{}
+
+// detachScrubbers transform the context the engine hands to an async task run
+// when it detaches from the originating request. They exist so a lower layer
+// (e.g. runtime/authz) can strip a request-scoped credential that must not
+// outlive the request, without runtime/tasks depending on that layer. The
+// composition layer (runtime/server) registers them from init().
+var (
+	scrubberMu      sync.RWMutex
+	detachScrubbers []func(context.Context) context.Context
+)
+
+// RegisterDetachScrubber registers a context transform applied to the detached
+// context of every async task run (see [detachScrubbers]). Idempotent per fn is
+// not guaranteed; callers register exactly once from init().
+func RegisterDetachScrubber(fn func(context.Context) context.Context) {
+	if fn == nil {
+		return
+	}
+	scrubberMu.Lock()
+	defer scrubberMu.Unlock()
+	detachScrubbers = append(detachScrubbers, fn)
+}
+
+// scrubDetached applies every registered detach scrubber to ctx.
+func scrubDetached(ctx context.Context) context.Context {
+	scrubberMu.RLock()
+	defer scrubberMu.RUnlock()
+	for _, fn := range detachScrubbers {
+		ctx = fn(ctx)
+	}
+	return ctx
+}
 
 // WithRequestAuthContext binds the authenticated requestor identity to ctx.
 // Transport adapters call it before invoking app code.
