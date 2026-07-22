@@ -1073,6 +1073,17 @@ inspector forwards it. RFC §8.4. D-171.
 
 ## U
 
+**Unauthenticated handshake** — the opt-in HTTP authorization posture
+(`authz.Config.UnauthenticatedHandshake`, RFC §19.2, D-202) that serves the MCP
+lifecycle and discovery methods without a token and requires a valid token only
+on invocations. The exempt set is a Dockyard-owned, deny-by-default allowlist
+(`initialize`, `notifications/initialized`, `ping`, `server/discover`, the
+`*/list` discovery methods, and the transport-lifecycle GET/DELETE); every other
+method fails closed to token-required. It unblocks a multi-user runtime that
+opens one shared connection and runs the handshake with no per-user token —
+discovery public, invocation protected (the Stowage / D-152 trade). Off by
+default.
+
 **UI auto-discovery** — the RFC §7.6 convention by which a `.svelte` file under
 `web/src/apps/` becomes a `ui://` resource without a manual registration call:
 `apps.Discover` walks the convention directory and lifts each file into a
