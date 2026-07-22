@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -376,39 +377,179 @@ type httpAuthorization struct {
 	continuation                             *continuationProtector
 }
 
+// exemptHandshakeMethods is the Dockyard-owned allowlist of MCP methods that
+// Config.UnauthenticatedHandshake serves without a token: MCP lifecycle and
+// discovery only. It is a package-level constant set — never caller-overridable
+// — so an invocation method (tools/call, resources/read, prompts/get,
+// completion/complete, tasks/*, …) can never be added to it from configuration.
+// Every method NOT in this set — known, unknown, or introduced by a future spec
+// — requires a valid token (deny-by-default); see requestExempt. server/discover
+// is the modern 2026-07-28 combined handshake+discovery method; the rest are the
+// legacy 2025-11-25 lifecycle and */list discovery methods (D-202).
+var exemptHandshakeMethods = map[string]struct{}{
+	"initialize":                {},
+	"notifications/initialized": {},
+	"ping":                      {},
+	"server/discover":           {},
+	"tools/list":                {},
+	"resources/list":            {},
+	"resources/templates/list":  {},
+	"prompts/list":              {},
+}
+
 func (a *httpAuthorization) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, err := authz.ParseBearer(r.Header.Values("Authorization"))
-		if err != nil {
-			a.unauthorized(w, err)
+		if a.cfg.UnauthenticatedHandshake && a.requestExempt(r) {
+			// Exempt (lifecycle / discovery / transport): a token is optional.
+			// An absent token proceeds with no principal; a present token is
+			// still validated (identity only — RequiredScopes gate invocation,
+			// not discovery), and an invalid token is rejected even here.
+			if len(r.Header.Values("Authorization")) == 0 {
+				next.ServeHTTP(w, r)
+				return
+			}
+			a.authenticate(w, r, next, false /* enforceScopes */)
 			return
 		}
-		principal, err := a.validator.Validate(r.Context(), token)
-		if err != nil {
-			a.unauthorized(w, err)
-			return
-		}
-		if principal.Issuer != a.cfg.Issuer || principal.Resource != a.cfg.Resource || principal.Subject == "" {
-			a.unauthorized(w, authz.ErrInvalidToken)
-			return
-		}
+		a.authenticate(w, r, next, true /* enforceScopes */)
+	})
+}
+
+// authenticate validates the bearer token and, on success, threads the derived
+// principal (and the opt-in raw token, Tasks auth context, and continuation
+// protector) onto the request context before invoking next. It writes a 401 on
+// a missing/invalid token and, when enforceScopes is true, a 403 on insufficient
+// scope. enforceScopes is false only on the exempt handshake/discovery path,
+// where a valid low-scope token still yields an identity-filterable principal
+// rather than a scope rejection (D-202).
+func (a *httpAuthorization) authenticate(w http.ResponseWriter, r *http.Request, next http.Handler, enforceScopes bool) {
+	token, err := authz.ParseBearer(r.Header.Values("Authorization"))
+	if err != nil {
+		a.unauthorized(w, err)
+		return
+	}
+	principal, err := a.validator.Validate(r.Context(), token)
+	if err != nil {
+		a.unauthorized(w, err)
+		return
+	}
+	if principal.Issuer != a.cfg.Issuer || principal.Resource != a.cfg.Resource || principal.Subject == "" {
+		a.unauthorized(w, authz.ErrInvalidToken)
+		return
+	}
+	if enforceScopes {
 		if err := authz.RequireScopes(principal, a.cfg.RequiredScopes...); err != nil {
 			w.Header().Set("WWW-Authenticate", authz.Challenge(a.metadataURL, err, a.cfg.RequiredScopes))
 			http.Error(w, "insufficient scope", http.StatusForbidden)
 			return
 		}
-		ctx := authz.WithPrincipal(r.Context(), principal)
-		if a.cfg.ExposeRawToken {
-			// Opt-in (D-201): expose the validated token for RFC 8693 delegation
-			// only. It is placed after every validation gate, is request-scoped,
-			// and is never threaded into durable Task/MRTR state — that binds the
-			// derived principal (below), not the token.
-			ctx = authz.WithRawToken(ctx, token)
+	}
+	ctx := authz.WithPrincipal(r.Context(), principal)
+	if a.cfg.ExposeRawToken {
+		// Opt-in (D-201): expose the validated token for RFC 8693 delegation
+		// only. It is placed after every validation gate, is request-scoped,
+		// and is never threaded into durable Task/MRTR state — that binds the
+		// derived principal (below), not the token.
+		ctx = authz.WithRawToken(ctx, token)
+	}
+	ctx = tasks.WithRequestAuthContext(ctx, principal.BindingKey())
+	ctx = withContinuationProtector(ctx, a.continuation)
+	next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// requestExempt reports whether r targets only exempt handshake/discovery
+// methods, or is a transport-lifecycle GET/DELETE that carries no JSON-RPC
+// method. It fails closed: a non-POST that is not GET/DELETE, an unreadable or
+// unparseable body, a missing/non-string method, an unknown method, or a batch
+// containing any non-exempt element all return false (token required). The POST
+// body was already buffered by mcpRequestBodyLimit (an in-memory reader);
+// requestExempt re-reads and restores it for the downstream SDK handler.
+func (a *httpAuthorization) requestExempt(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodDelete:
+		// GET is the legacy SSE stream-open and DELETE is session teardown: both
+		// are transport lifecycle, carry no JSON-RPC method, and invoke nothing.
+		// The modern stateless lifecycle uses neither. Any client→server
+		// invocation still arrives as a POST and is gated below.
+		return true
+	case http.MethodPost:
+		body, err := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		// Restore the body for the downstream SDK handler regardless of verdict.
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		if err != nil {
+			return false
 		}
-		ctx = tasks.WithRequestAuthContext(ctx, principal.BindingKey())
-		ctx = withContinuationProtector(ctx, a.continuation)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+		return allMethodsExempt(body)
+	default:
+		return false
+	}
+}
+
+// allMethodsExempt reports whether every JSON-RPC message in body targets a
+// method in exemptHandshakeMethods. A single object is exempt when its method is
+// in the allowlist; a batch (a JSON array) is exempt only when it is non-empty
+// and every element is. Any parse failure, a missing/non-string method, an empty
+// batch, or a single non-exempt element returns false — the security-critical
+// direction is that this never returns true for a request carrying an invocation.
+func allMethodsExempt(body []byte) bool {
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	if len(trimmed) == 0 {
+		return false
+	}
+	if trimmed[0] == '[' {
+		var batch []json.RawMessage
+		if err := json.Unmarshal(body, &batch); err != nil || len(batch) == 0 {
+			return false
+		}
+		for _, el := range batch {
+			if !messageExempt(el) {
+				return false
+			}
+		}
+		return true
+	}
+	return messageExempt(body)
+}
+
+// messageExempt reports whether a single JSON-RPC message object targets an
+// exempt method. It MUST extract the method the same way the go-sdk dispatcher
+// does — otherwise a peek/dispatch parser differential is an authentication
+// bypass. The SDK decodes with a case-SENSITIVE decoder
+// (segmentio/encoding/json + DontMatchCaseInsensitiveStructFields), honouring
+// only the exact-case, last-wins "method" key; stdlib encoding/json is
+// case-INSENSITIVE and last-wins, so a struct/`json` decode of this body could
+// read a decoy key like "Method" as the method and mis-classify an invocation
+// as exempt (adversarial-review finding; D-202). To stay differential-free, the
+// method is read from an exact-case map key, and any case-variant sibling of
+// "method" (or a missing/non-string method, or a parse failure) fails closed to
+// not-exempt. Failing closed is always safe: the worst case is that a genuine
+// discovery request is asked for a token — no real MCP client sends a
+// case-variant "method" key.
+func messageExempt(raw json.RawMessage) bool {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return false
+	}
+	rawMethod, ok := obj["method"]
+	if !ok {
+		return false
+	}
+	// Fail closed if any other key folds to "method" (e.g. "Method", "METHOD"):
+	// today's SDK decoder is case-sensitive and would ignore such a sibling, but
+	// this guard keeps the classification correct even if that ever changes, and
+	// eliminates the differential rather than approximating the SDK's decoder.
+	for k := range obj {
+		if k != "method" && strings.EqualFold(k, "method") {
+			return false
+		}
+	}
+	var method string
+	if err := json.Unmarshal(rawMethod, &method); err != nil {
+		return false
+	}
+	_, exempt := exemptHandshakeMethods[method]
+	return exempt
 }
 
 func (a *httpAuthorization) metadataMiddleware(next http.Handler) http.Handler {

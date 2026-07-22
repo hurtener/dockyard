@@ -175,6 +175,72 @@ is off by default; leave it off unless the server performs delegated exchange.
 The token is request-scoped and never enters durable Task or MRTR state (D-201).
 :::
 
+## Unauthenticated handshake (multi-user runtimes)
+
+By default every MCP method is protected: a request without a valid token gets
+`401`, including the handshake. That is correct when each client holds its own
+token — but a multi-user runtime opens **one shared** connection to the server
+and runs the handshake (`initialize` / `server/discover` / `tools/list`) with
+**no** per-user token, because the token is per-user and only exists at
+tool-call time. Against a fully protected endpoint every handshake call `401`s,
+the connection never establishes, and no tools are ever discovered.
+
+Opt into serving the MCP lifecycle and discovery methods without a token, while
+still requiring a valid token on invocations:
+
+```go
+opts := &server.HTTPOptions{
+	Authorization: &authz.Config{
+		// … driver, resource, issuer, required scopes …
+		UnauthenticatedHandshake: true,
+	},
+}
+```
+
+The exempt set is owned by Dockyard and is deny-by-default — you cannot add to
+it, and nothing else is ever exempt:
+
+| Exempt (no token required) | Protected (valid token required) |
+| --- | --- |
+| `initialize`, `notifications/initialized`, `ping` | `tools/call` |
+| `server/discover` (modern 2026-07-28 handshake+discovery) | `resources/read`, `resources/subscribe`, `resources/unsubscribe` |
+| `tools/list` | `prompts/get` |
+| `resources/list`, `resources/templates/list` | `completion/complete` |
+| `prompts/list` | `logging/setLevel`, `tasks/*` |
+| stream-open `GET`, teardown `DELETE` (transport lifecycle) | any other notification, and any unknown / future method |
+
+Behavior when the flag is on:
+
+- A token's **absence** on an exempt method is not an error; the request proceeds
+  with no principal.
+- A token **present** on an exempt method is still validated for identity
+  (signature, issuer, audience/resource, subject) and its principal populated, so
+  `tools/list` can be identity-filtered. `RequiredScopes` gate **invocations**,
+  not discovery — a valid low-scope token still gets discovery.
+- A token **present but invalid** on an exempt method is still rejected (`401`).
+- A JSON-RPC **batch** is exempt only when every element is an exempt method; any
+  invocation element requires a valid token for the whole batch.
+- **Invocations are unchanged** — signature, issuer, audience, subject, and
+  required scopes are all enforced exactly as with the flag off.
+
+::: warning Discovery becomes public
+Exempting `tools/list` (and the other `*/list` methods) makes tool names,
+schemas, descriptions, resource templates, and prompt names discoverable
+**without a token**. This is the intended trade — discovery public, invocation
+protected — and the reason the flag is opt-in. If even discovery must stay
+private, leave `UnauthenticatedHandshake` off (D-202).
+:::
+
+On the legacy session lifecycle the stream-open `GET` and teardown `DELETE` are
+exempt as transport lifecycle — the shared session is established without a
+per-user token, so its stream and teardown cannot demand one. A party holding a
+valid (crypto-random) `Mcp-Session-Id` can therefore open or tear down that
+session without a token. No JSON-RPC invocation is dispatched over those verbs
+and the stream carries no per-user data (per-user results flow only as the
+response to an authenticated `tools/call`), and the modern stateless lifecycle
+uses neither verb. This is an accepted, documented property of the opt-in
+(D-202).
+
 ## Client boundary
 
 Dockyard is server-side only. It validates the inbound access token and, by

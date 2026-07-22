@@ -23,6 +23,35 @@ deliberately deferred to V2.
 
 (No entries yet — the next release surface will land here.)
 
+## [1.11.0] - 2026-07-22
+
+### Added
+
+- **Opt-in unauthenticated MCP handshake — authorization required only on
+  invocations.** A new `authz.Config.UnauthenticatedHandshake` (default `false`)
+  serves the MCP lifecycle and discovery methods without a token, and requires a
+  valid token only on invocations. This unblocks a multi-user runtime that opens
+  one shared connection and runs `initialize` / `server/discover` / `tools/list`
+  with no per-user token (the token is per-user and exists only at tool-call
+  time); previously every handshake call 401'd against a Dockyard resource
+  server, so the connection never established and no tools were discovered. The
+  exempt set is a Dockyard-owned, deny-by-default allowlist — lifecycle
+  (`initialize`, `notifications/initialized`, `ping`, `server/discover`) and
+  discovery (`tools/list`, `resources/list`, `resources/templates/list`,
+  `prompts/list`), plus the transport-lifecycle stream-open GET and teardown
+  DELETE. Every other method — `tools/call`, `resources/read`,
+  `resources/subscribe`, `resources/unsubscribe`, `prompts/get`,
+  `completion/complete`, `logging/setLevel`, `tasks/*`, any other notification,
+  and any unknown or future method — still requires a valid token, so an
+  invocation can never be accidentally exposed; a batch is exempt only when every
+  element is. A token presented on an exempt method is still validated for
+  identity and its principal populated (so discovery can be identity-filtered),
+  while required scopes gate invocations, not discovery. This is the
+  discovery-public / invocation-protected trade: tool names, schemas, and
+  descriptions become discoverable without a token — the intended trade-off, and
+  the reason it is opt-in. Off by default; existing servers are unaffected. See
+  the OAuth protected-resource guide.
+
 ## [1.10.0] - 2026-07-20
 
 ### Added

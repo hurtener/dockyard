@@ -6923,3 +6923,121 @@ trusted exchange. Invariants, asserted by tests:
 
 Extending exposure beyond RFC 8693 subject-token use, or having Dockyard perform
 the exchange itself, remains out of scope — the handler is the RFC 8693 client.
+
+## D-202 — Opt-in unauthenticated MCP handshake (auth required only on invocations)
+
+**Date:** 2026-07-22
+**Status:** Settled (v1.11 wave A). RFC §19.2 amended.
+**Supersedes / changes:** nothing. Additive and opt-in; the default posture
+(every method protected) is unchanged. Extends the discovery-public trade of
+D-152 (contract-first stops at discovery; prompts/resources registration is
+public) from stdio dev ergonomics to the HTTP authorization boundary.
+**Where it lives:** `runtime/authz` (`Config.UnauthenticatedHandshake`),
+`runtime/server/http.go` (the authorization middleware, `exemptHandshakeMethods`,
+`requestExempt`, `allMethodsExempt`), RFC §19.2, and
+`docs/site/guides/oauth-protected-resource.md`.
+
+**Why.** A multi-user MCP runtime (Harbor, WorkBridge) opens **one shared** MCP
+connection to a resource server and runs the handshake — `initialize`,
+`server/discover`, `tools/list` — with **no** per-user token, because the token
+is per-user and only exists at tool-call time. Dockyard v1.10 applies
+authorization as uniform, all-or-nothing HTTP middleware: it validates the bearer
+before the JSON-RPC method is decoded, so every method — including the handshake
+— requires a token. Against a Dockyard resource server every handshake call 401s,
+the connection never establishes, and no tools are ever discovered (observed
+symptom: empty tool list + `auth_required`). The only prior escape was fully
+open (`Authorization: nil`), which drops per-user protection on invocations too.
+
+The established fix — Pengui D-152, shipped for Stowage — is to serve the
+handshake unauthenticated and require the per-user token only on invocations.
+This decision brings the same posture to Dockyard, opt-in and security-gated.
+
+This is **not** an MCP-spec change and does not weaken audience binding: an
+invocation still validates signature, issuer, audience/resource, subject, and
+required scopes exactly as before. It relaxes only *when* a token is demanded —
+never *how* one is validated.
+
+**The decision.** A new `authz.Config.UnauthenticatedHandshake` (default
+`false`) serves an allowlist of MCP lifecycle and discovery methods without a
+token, and requires a valid token on everything else. Invariants, asserted by
+tests:
+
+- **Default off.** The zero value is unchanged: every method is protected, and
+  the handshake 401s without a token. The middleware does not even read the body
+  when the flag is off.
+- **Dockyard-owned, deny-by-default allowlist.** The exempt set is a package-level
+  constant — `initialize`, `notifications/initialized`, `ping`, `server/discover`
+  (the modern 2026-07-28 combined handshake+discovery), and the `*/list`
+  discovery methods (`tools/list`, `resources/list`, `resources/templates/list`,
+  `prompts/list`), plus the transport-lifecycle GET (SSE stream-open) and DELETE
+  (session teardown). It is **not** caller-overridable. Every other method —
+  `tools/call`, `resources/read`, `resources/subscribe`, `resources/unsubscribe`,
+  `prompts/get`, `completion/complete`, `logging/setLevel`, `tasks/*`, any
+  notification other than `initialized`, and any unknown or future method — fails
+  closed to token-required. An invocation can never be accidentally exposed.
+- **Identity on exempt, scopes on invocation.** A token presented on an exempt
+  method is validated for identity (signature/issuer/resource/subject) and its
+  principal populated (so `tools/list` can be identity-filtered); `RequiredScopes`
+  are enforced only on invocations, not on discovery. A token's *absence* on an
+  exempt method is not an error; a token that is *present but invalid* is still
+  rejected (a bad credential is surfaced, not silently ignored).
+- **Batch fails closed.** A JSON-RPC batch is exempt only when it is non-empty
+  and every element is an exempt method; any invocation element (or any parse
+  failure / missing method) requires a valid token for the whole batch.
+- **Both lifecycles.** The method peek is per-POST and identical for the legacy
+  2025-11-25 and stateless 2026-07-28 lifecycles; only the legacy GET/DELETE
+  transport frames differ, and both are exempt. The peek reuses the body already
+  buffered by `mcpRequestBodyLimit` (bounded at 4 MiB), so it adds no unbounded
+  read.
+
+**Security trade — explicit.** Exempting `tools/list` (and the other `*/list`
+methods) makes tool names, schemas, descriptions, resource templates, and prompt
+names discoverable **without** a token. That is the intended trade — discovery
+public, invocation protected — and it matches D-152 and the Stowage precedent.
+It is opt-in; a server that must keep even discovery private simply leaves the
+flag off. Documented on the config field and in the OAuth guide.
+
+**On "skills".** There is no `skills/*` MCP route: Dockyard's `skills/` are Agent
+Skills (`SKILL.md` DX docs, Phase 29), not a JSON-RPC method, and the runtime
+dispatches none. Prompts and resources *are* real routes and are covered by the
+allowlist (`prompts/list`, `resources/list`, `resources/templates/list` exempt;
+`prompts/get`, `resources/read`, `resources/subscribe`, `resources/unsubscribe`
+protected). Recorded here so the classification cannot drift back into question.
+
+Having Dockyard bind the SSE stream to a per-session principal, or exempting
+benign control notifications (`logging/setLevel`, `notifications/cancelled`,
+`notifications/roots/list_changed`), remains out of scope: the shared stream
+carries no per-user data, and deny-by-default keeps the exempt surface minimal
+and drift-proof. A future need for a specific benign notification is a reviewed
+addition to the allowlist, not a config knob.
+
+**Adversarial review (2026-07-22).** Two findings, both addressed:
+
+1. **Parser-differential bypass (was CRITICAL; fixed).** The method peek must
+   extract the method exactly as the go-sdk dispatcher does, or a decoy key is an
+   authentication bypass. The SDK decodes with a case-*sensitive* decoder
+   (`segmentio/encoding/json` + `DontMatchCaseInsensitiveStructFields`), honouring
+   only the exact-case `"method"`; stdlib `encoding/json` is case-*insensitive*
+   and last-wins. A body such as
+   `{"method":"tools/call","Method":"tools/list"}` with no token would be read as
+   `tools/list` (exempt) by a stdlib struct decode but dispatched as `tools/call`
+   by the SDK — an unauthenticated invocation. `allMethodsExempt`/`messageExempt`
+   therefore read the method from an exact-case map key and fail closed on any
+   case-variant sibling of `"method"` (and on a missing/non-string method or any
+   parse failure), eliminating the differential rather than approximating the
+   SDK's decoder. Guarded by `TestUnauthHandshakeParserDifferentialCannotBypass`
+   (end-to-end through the real SDK, so it catches any residual differential) and
+   the `FuzzAllMethodsExempt` fail-closed target.
+2. **Unauthenticated GET/DELETE on the legacy lifecycle (accepted residual).**
+   With the flag on, a party holding a valid `Mcp-Session-Id` can open that
+   session's SSE stream (GET) or tear it down (DELETE) without a token. This is
+   inherent to exempting the transport-lifecycle verbs, which the multi-user
+   model *requires*: the shared session is established unauthenticated (the
+   handshake carries no per-user token), so its stream-open and teardown cannot
+   demand one. The exposure is bounded — session IDs are crypto-random, so this
+   needs a *leaked* ID (an already-privileged attacker), no JSON-RPC invocation
+   is dispatched, the shared stream carries no per-user data (per-user results
+   flow only as the response to an authenticated `tools/call` POST), and the
+   modern stateless lifecycle uses neither verb. Accepted and documented rather
+   than fixed by per-session binding, which would break the shared-connection
+   model this feature exists to serve.

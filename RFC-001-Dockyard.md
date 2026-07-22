@@ -1022,6 +1022,27 @@ exchange over TLS. It is off by default; enabling it changes no existing
 behavior. Dockyard still performs no OAuth-client flow itself — the handler is
 the RFC 8693 client; Harbor's client responsibilities are unchanged.
 
+**Unauthenticated handshake (opt-in).** A multi-user MCP runtime opens one
+shared connection to a resource server and runs the MCP handshake — `initialize`
+/ `server/discover` / `tools/list` — with no per-user token, because the token is
+per-user and exists only at tool-call time. Uniform all-or-nothing authorization
+401s every one of those calls, so the connection never establishes. Dockyard may
+opt into serving the MCP lifecycle and discovery methods *without* a token, while
+still requiring a valid token on invocations (`authz.Config.UnauthenticatedHandshake`).
+The exempt set is a Dockyard-owned, deny-by-default allowlist — lifecycle
+(`initialize`, `notifications/initialized`, `ping`, `server/discover`) and
+discovery (`tools/list`, `resources/list`, `resources/templates/list`,
+`prompts/list`), plus the transport-lifecycle stream-open GET and teardown DELETE.
+Every other method, known or future, requires a valid token; a batch is exempt
+only when every element is. A token presented on an exempt method is still
+validated for identity and its principal populated (so discovery can be
+identity-filtered), but `RequiredScopes` gate invocations, not discovery. This is
+the discovery-public / invocation-protected posture (D-152, the Stowage
+precedent): it makes tool names and schemas discoverable without a token — the
+intended trade — and it changes only *when* a token is demanded, never *how* one
+is validated (audience binding on invocations is unchanged). Off by default;
+enabling it changes no existing behavior. D-202.
+
 ---
 
 ## Appendix A — subsystem ↔ brief cross-reference

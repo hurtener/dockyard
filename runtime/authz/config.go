@@ -40,6 +40,34 @@ type Config struct {
 	// placed in durable Task or MRTR continuation state, and must never be
 	// logged or forwarded to any endpoint other than the trusted exchange.
 	ExposeRawToken bool
+	// UnauthenticatedHandshake serves the MCP lifecycle and discovery methods
+	// WITHOUT requiring a token, and requires a valid token only on invocation
+	// methods. The exempt set is a Dockyard-owned, deny-by-default allowlist —
+	// lifecycle (initialize, notifications/initialized, ping, server/discover)
+	// and discovery (tools/list, resources/list, resources/templates/list,
+	// prompts/list), plus the transport-lifecycle GET (SSE stream-open) and
+	// DELETE (session teardown). Every other method — tools/call, resources/read,
+	// resources/subscribe, resources/unsubscribe, prompts/get, completion/complete,
+	// logging/setLevel, tasks/*, any notification other than initialized, and any
+	// unknown or future method — still requires a valid token (deny-by-default),
+	// so an invocation can never be accidentally exposed. Default false: every
+	// method is protected (the current behavior).
+	//
+	// A token presented on an exempt method is still validated for identity
+	// (signature, issuer, resource, subject) and its principal populated (so
+	// tools/list can be identity-filtered); RequiredScopes are NOT enforced on an
+	// exempt method (they gate invocation, not discovery), a token's ABSENCE is
+	// not an error, and an invalid token is still rejected. Invocation methods
+	// missing a valid token receive 401 + the Bearer challenge exactly as today.
+	// A JSON-RPC batch is exempt only when every element is an exempt method; any
+	// invocation element requires a valid token for the whole batch.
+	//
+	// This is the Stowage/D-152 posture: discovery is public, invocation is
+	// protected. It makes tool names, schemas, and descriptions discoverable
+	// without a token — the intended trade for a multi-user runtime that opens
+	// one shared connection and only holds a per-user token at tool-call time
+	// (D-202). Off by default; existing servers are unaffected.
+	UnauthenticatedHandshake bool
 }
 
 // Validator validates an unadorned bearer token and never retains it.
