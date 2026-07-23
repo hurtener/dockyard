@@ -11,6 +11,17 @@ type Manifest struct {
 	Title string `yaml:"title"`
 	// Version is the app's semantic version (MAJOR.MINOR.PATCH).
 	Version string `yaml:"version"`
+	// Description is a short human-readable summary advertised in the handshake's
+	// serverInfo. Optional.
+	Description string `yaml:"description"`
+	// WebsiteURL is the app's homepage, advertised in serverInfo. Optional; must
+	// be an absolute https:// URL when set.
+	WebsiteURL string `yaml:"website_url"`
+	// Icons are the app's branding icons (SEP-973), advertised in serverInfo so a
+	// host can show the server's logo. Optional. This is the declarative record;
+	// the live server emits from server.Info (the runtime library never reads the
+	// manifest), so keep the two in step — see the branding guide.
+	Icons []Icon `yaml:"icons"`
 	// Runtime declares which deployment modes and UI framework the app supports.
 	Runtime Runtime `yaml:"runtime"`
 	// Tools is the app's MCP tools. At least one is required.
@@ -24,6 +35,20 @@ type Manifest struct {
 	Tasks Tasks `yaml:"tasks"`
 	// Quality holds the quality.* gates dockyard validate enforces (RFC §9.4).
 	Quality Quality `yaml:"quality"`
+}
+
+// Icon is one SEP-973 server branding icon in the manifest. src is required and
+// must be an https:// URL or a data: URI; the rest are optional. It mirrors
+// runtime/server.Icon (the declarative record of what the server advertises).
+type Icon struct {
+	// Src is a URI to the icon: an https:// URL or a data:image/ URI. Required.
+	Src string `yaml:"src"`
+	// MIMEType is the icon's media type (e.g. "image/png"). Optional.
+	MIMEType string `yaml:"mime_type"`
+	// Sizes lists available pixel sizes (e.g. ["48x48"], ["any"]). Optional.
+	Sizes []string `yaml:"sizes"`
+	// Theme is "light" or "dark" (the background the icon suits). Optional.
+	Theme string `yaml:"theme"`
 }
 
 // Tasks is the manifest tasks block: the manifest-tunable MCP Tasks lifecycle

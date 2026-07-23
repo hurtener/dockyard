@@ -7,6 +7,21 @@ name: customer-health
 title: Customer Health
 version: 0.1.0
 
+# Optional branding advertised in the handshake's serverInfo (SEP-973). A host
+# MAY render the icon beside the title; rendering is client-dependent. This is
+# the declarative record — the live server emits from server.Info, so keep the
+# two in step (see the "Server branding" guide).
+description: Customer health scores and account signals.
+website_url: https://dockyard.example/customer-health
+icons:
+  - src: https://dockyard.example/customer-health/logo.png
+    mime_type: image/png
+    sizes: ["48x48", "96x96"]
+    theme: light
+  - src: https://dockyard.example/customer-health/logo-dark.png
+    mime_type: image/png
+    theme: dark
+
 runtime:
   transports: [stdio, http]      # which deployment modes this app supports
   ui:

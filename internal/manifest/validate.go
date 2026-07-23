@@ -84,12 +84,50 @@ func (m *Manifest) validate(source string, pos *positionIndex) error {
 		c.add(at("version"), "version", "%q is not a semantic version (MAJOR.MINOR.PATCH)", m.Version)
 	}
 
+	m.validateBranding(c, pos)
 	m.validateRuntime(c, pos)
 	m.validateTools(c, pos)
 	m.validateApps(c, pos)
 	m.validateTasks(c, pos)
 
 	return c.err()
+}
+
+// validIconSrc reports whether src is an acceptable icon source: an https:// URL
+// or a data:image/ URI, checked on the raw value (surrounding whitespace is
+// rejected) and case-insensitively on the data scheme. It mirrors the runtime's
+// runtime/server.validIconSrc so the manifest and the live server agree.
+func validIconSrc(src string) bool {
+	if strings.HasPrefix(src, "https://") {
+		return true
+	}
+	const dataImg = "data:image/"
+	return len(src) >= len(dataImg) && strings.EqualFold(src[:len(dataImg)], dataImg)
+}
+
+// validateBranding checks the optional serverInfo branding (SEP-973 icons,
+// website, description). Everything is optional; a present value must be
+// well-formed. An icon src must be an https:// URL or a data: URI — an http://
+// or otherwise-schemed src is dropped by most hosts, so it is a manifest
+// mistake, not a silent downgrade.
+func (m *Manifest) validateBranding(c *errCollector, pos *positionIndex) {
+	at := func(field string) int { return pos.line(field) }
+	if m.WebsiteURL != "" && !strings.HasPrefix(m.WebsiteURL, "https://") {
+		c.add(at("website_url"), "website_url", "%q must be an absolute https:// URL", m.WebsiteURL)
+	}
+	for i, icon := range m.Icons {
+		field := fmt.Sprintf("icons[%d]", i)
+		if strings.TrimSpace(icon.Src) == "" {
+			c.add(at(field), field+".src", "required")
+		} else if !validIconSrc(icon.Src) {
+			c.add(at(field+".src"), field+".src", "%q must be an https:// URL or a data:image/ URI", icon.Src)
+		}
+		switch icon.Theme {
+		case "", "light", "dark":
+		default:
+			c.add(at(field+".theme"), field+".theme", "%q must be \"light\" or \"dark\"", icon.Theme)
+		}
+	}
 }
 
 // validateTasks checks the tasks block — the MCP Tasks lifecycle limits

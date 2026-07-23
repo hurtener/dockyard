@@ -155,6 +155,55 @@ func TestValidate_OnHandBuiltManifest(t *testing.T) {
 	}
 }
 
+func TestValidate_Branding(t *testing.T) {
+	base := func() *Manifest {
+		return &Manifest{
+			Name: "brand", Title: "Brand", Version: "1.0.0",
+			Runtime: Runtime{Transports: []Transport{TransportStdio}},
+			Tools:   []Tool{{Name: "t", Description: "A tool.", Input: "internal/contracts.In", Output: "internal/contracts.Out"}},
+		}
+	}
+
+	// Valid branding passes.
+	ok := base()
+	ok.Description = "A branded server"
+	ok.WebsiteURL = "https://brand.example"
+	ok.Icons = []Icon{
+		{Src: "https://brand.example/logo.png", MIMEType: "image/png", Sizes: []string{"48x48"}, Theme: "light"},
+		{Src: "data:image/svg+xml;base64,AAAA", Theme: "dark"},
+	}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("valid branding rejected: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		mutate     func(*Manifest)
+		wantSubstr string
+	}{
+		{"http website", func(m *Manifest) { m.WebsiteURL = "http://brand.example" }, "website_url"},
+		{"empty icon src", func(m *Manifest) { m.Icons = []Icon{{Src: ""}} }, "icons[0].src: required"},
+		{"http icon src", func(m *Manifest) { m.Icons = []Icon{{Src: "http://brand/logo.png"}} }, "https:// URL or a data:image/ URI"},
+		{"data non-image src", func(m *Manifest) { m.Icons = []Icon{{Src: "data:text/html;base64,AAAA"}} }, "https:// URL or a data:image/ URI"},
+		{"bad icon theme", func(m *Manifest) { m.Icons = []Icon{{Src: "https://brand/l.png", Theme: "blue"}} }, `icons[0].theme`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := base()
+			tc.mutate(m)
+			err := m.Validate()
+			if err == nil {
+				t.Fatalf("%s: want error, got nil", tc.name)
+			}
+			if !errors.Is(err, ErrInvalidManifest) {
+				t.Errorf("error does not wrap ErrInvalidManifest: %v", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tc.wantSubstr)
+			}
+		})
+	}
+}
+
 func TestValidate_RuntimeUIPartial(t *testing.T) {
 	m := &Manifest{
 		Name:    "ui-partial",

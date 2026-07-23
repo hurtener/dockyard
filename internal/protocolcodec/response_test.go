@@ -2,6 +2,7 @@ package protocolcodec
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -124,6 +125,67 @@ func TestEncodeServerInfoVersioned(t *testing.T) {
 	}
 	if string(legacy) != `{"value":1}` {
 		t.Fatalf("legacy result mutated: %s", legacy)
+	}
+}
+
+func TestEncodeServerInfoBranding(t *testing.T) {
+	t.Parallel()
+	info := ServerInfo{
+		Name: "acme", Title: "Acme", Version: "1.2.3",
+		Description: "The Acme MCP server",
+		WebsiteURL:  "https://acme.example",
+		Icons: []Icon{
+			{Src: "https://acme.example/logo.png", MIMEType: "image/png", Sizes: []string{"48x48"}, Theme: "light"},
+			{Src: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=", Theme: "dark"},
+		},
+	}
+	modern, err := EncodeServerInfo(VersionMCP20260728, json.RawMessage(`{"supportedVersions":["2026-07-28"]}`), info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Meta struct {
+			ServerInfo struct {
+				Name        string `json:"name"`
+				Title       string `json:"title"`
+				Version     string `json:"version"`
+				Description string `json:"description"`
+				WebsiteURL  string `json:"websiteUrl"`
+				Icons       []Icon `json:"icons"`
+			} `json:"io.modelcontextprotocol/serverInfo"`
+		} `json:"_meta"`
+	}
+	if err := json.Unmarshal(modern, &decoded); err != nil {
+		t.Fatalf("decode %s: %v", modern, err)
+	}
+	si := decoded.Meta.ServerInfo
+	if si.Name != "acme" || si.Version != "1.2.3" || si.Title != "Acme" {
+		t.Fatalf("core serverInfo = %+v", si)
+	}
+	if si.Description != "The Acme MCP server" || si.WebsiteURL != "https://acme.example" {
+		t.Fatalf("branding serverInfo = %+v", si)
+	}
+	if len(si.Icons) != 2 {
+		t.Fatalf("icons = %+v, want 2", si.Icons)
+	}
+	if si.Icons[0].Src != "https://acme.example/logo.png" || si.Icons[0].MIMEType != "image/png" ||
+		si.Icons[0].Theme != "light" || len(si.Icons[0].Sizes) != 1 || si.Icons[0].Sizes[0] != "48x48" {
+		t.Fatalf("icon[0] = %+v", si.Icons[0])
+	}
+	if si.Icons[1].Theme != "dark" || si.Icons[1].MIMEType != "" || si.Icons[1].Sizes != nil {
+		t.Fatalf("icon[1] omitempty not honored: %+v", si.Icons[1])
+	}
+
+	// No branding set ⇒ the optional keys are omitted entirely (no empty icons
+	// array, no empty websiteUrl/description).
+	bare, err := EncodeServerInfo(VersionMCP20260728, json.RawMessage(`{}`), ServerInfo{Name: "n", Version: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"icons"`, `"websiteUrl"`, `"description"`} {
+		if strings.Contains(string(bare), key) {
+			t.Fatalf("bare serverInfo leaked %s: %s", key, bare)
+		}
 	}
 }
 

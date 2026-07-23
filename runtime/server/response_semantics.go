@@ -26,7 +26,14 @@ func (r *encodedResult) MarshalJSON() ([]byte, error) { return r.raw, nil }
 
 func responseSemanticsMiddleware(info Info, opts *Options) mcpsdk.Middleware {
 	listPolicy := resourceListCachePolicy(opts)
-	serverInfo := protocolcodec.ServerInfo{Name: info.Name, Title: info.Title, Version: info.Version}
+	serverInfo := protocolcodec.ServerInfo{
+		Name:        info.Name,
+		Title:       info.Title,
+		Version:     info.Version,
+		Description: info.Description,
+		WebsiteURL:  info.WebsiteURL,
+		Icons:       codecIcons(info.Icons),
+	}
 	return func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
 		return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
 			version := requestProtocolVersion(req)

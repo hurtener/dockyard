@@ -294,6 +294,18 @@ transport Dockyard needs.
 recent version, and **never forks it**. Apps and Tasks are layered on top using the
 SDK's own extension hooks (§5.3).
 
+**Server identity & branding (serverInfo).** `server.Info` carries the server's
+`name`, `title`, `version`, and — optionally — its `description`, `websiteUrl`,
+and `icons` (SEP-973). Dockyard emits these in the handshake's `serverInfo` on
+both lifecycles: onto `mcp.Implementation` for legacy `2025-11-25`, and via the
+`protocolcodec` `_meta` serverInfo encoder for stateless `2026-07-28` (§5.4 — the
+wire shape lives only there, P3). Icons let a host render the server's logo;
+rendering is client-dependent, so an icon is a hint, never a guarantee. The
+`dockyard.app.yaml` manifest carries the same branding declaratively for tooling;
+the runtime library never reads the manifest, so the live server emits from
+`server.Info` and the two are kept in step by convention (D-203). `server.Icon`
+is Dockyard's own type — the SDK's `mcp.Icon` is never exposed to app authors.
+
 ### 5.2 Transports
 
 The SDK provides `StdioTransport`, `StreamableServerTransport` (streamable-HTTP),

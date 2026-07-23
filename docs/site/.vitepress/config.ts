@@ -62,6 +62,7 @@ export default defineConfig({
           text: "Guides",
           items: [
             { text: "Contracts (Design A)", link: "/guides/contracts" },
+            { text: "Server branding (icons)", link: "/guides/server-branding" },
             { text: "UI resources (MCP Apps)", link: "/guides/ui-resources" },
             { text: "Dev loop", link: "/guides/dev-loop" },
             { text: "Validate + test", link: "/guides/validate" },

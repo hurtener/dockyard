@@ -1,6 +1,13 @@
 name: customer-health
 title: Customer Health
 version: 0.1.0
+description: Customer health scores and account signals.
+website_url: https://dockyard.example/customer-health
+icons:
+  - src: https://dockyard.example/logo.png
+    mime_type: image/png
+    sizes: ["48x48"]
+    theme: light
 runtime:
   transports: [stdio, http]
   ui:

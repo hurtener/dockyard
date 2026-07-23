@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -25,10 +26,22 @@ var ErrNoTransport = errors.New("dockyard/runtime/server: nil transport")
 type Info struct {
 	// Name is the programmatic server identifier. Required.
 	Name string
-	// Title is the human-readable display name. Optional.
+	// Title is the human-readable display name. Optional. A host that renders
+	// branding uses Title (falling back to Name) as the label beside any Icons.
 	Title string
 	// Version is the app's semantic version. Required.
 	Version string
+	// Icons are branding icons advertised in the handshake's serverInfo
+	// (SEP-973), letting a host show the server's logo. Optional; a host MAY
+	// render them and MAY ignore them. Provide light/dark variants via
+	// Icon.Theme. See Icon for reachability guidance.
+	Icons []Icon
+	// WebsiteURL is the server's homepage, advertised in serverInfo. Optional;
+	// must be an absolute https:// URL when set.
+	WebsiteURL string
+	// Description is a short human-readable description advertised in
+	// serverInfo. Optional.
+	Description string
 }
 
 func (i Info) validate() error {
@@ -37,6 +50,14 @@ func (i Info) validate() error {
 	}
 	if i.Version == "" {
 		return errors.New("dockyard/runtime/server: Info.Version is required")
+	}
+	for n, icon := range i.Icons {
+		if err := icon.validate(); err != nil {
+			return fmt.Errorf("dockyard/runtime/server: Info.Icons[%d]: %w", n, err)
+		}
+	}
+	if i.WebsiteURL != "" && !strings.HasPrefix(i.WebsiteURL, "https://") {
+		return fmt.Errorf("dockyard/runtime/server: Info.WebsiteURL %q must be an absolute https:// URL", i.WebsiteURL)
 	}
 	return nil
 }
@@ -231,9 +252,12 @@ func New(info Info, opts *Options) (*Server, error) {
 	}
 	sdkOpts := &mcpsdk.ServerOptions{Capabilities: caps}
 	mcpSrv := mcpsdk.NewServer(&mcpsdk.Implementation{
-		Name:    info.Name,
-		Title:   info.Title,
-		Version: info.Version,
+		Name:        info.Name,
+		Title:       info.Title,
+		Version:     info.Version,
+		Description: info.Description,
+		WebsiteURL:  info.WebsiteURL,
+		Icons:       sdkIcons(info.Icons),
 	}, sdkOpts)
 	mcpSrv.AddReceivingMiddleware(createdTaskResultMiddleware())
 	mcpSrv.AddReceivingMiddleware(responseSemanticsMiddleware(info, opts))

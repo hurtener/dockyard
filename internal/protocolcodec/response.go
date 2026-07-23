@@ -74,9 +74,23 @@ const metaKeyServerInfo = "io.modelcontextprotocol/serverInfo"
 // ServerInfo is the protocol-agnostic server identity injected into modern
 // responses per SEP-2575.
 type ServerInfo struct {
-	Name    string
-	Title   string
-	Version string
+	Name        string
+	Title       string
+	Version     string
+	Description string
+	WebsiteURL  string
+	Icons       []Icon
+}
+
+// Icon is the SEP-973 server-icon wire shape carried in the modern-protocol
+// serverInfo. protocolcodec owns this shape because it is the only package
+// permitted to model MCP extension wire formats (RFC §5.4, P3). The JSON tags
+// are the wire contract: src is required, the rest are omitted when empty.
+type Icon struct {
+	Src      string   `json:"src"`
+	MIMEType string   `json:"mimeType,omitempty"`
+	Sizes    []string `json:"sizes,omitempty"`
+	Theme    string   `json:"theme,omitempty"`
 }
 
 // EncodeServerInfo annotates a modern-protocol result's _meta with the server
@@ -106,9 +120,18 @@ func EncodeServerInfo(version ProtocolVersion, raw json.RawMessage, info ServerI
 	if _, present := meta[metaKeyServerInfo]; present {
 		return raw, nil
 	}
-	impl := map[string]string{"name": info.Name, "version": info.Version}
+	impl := map[string]any{"name": info.Name, "version": info.Version}
 	if info.Title != "" {
 		impl["title"] = info.Title
+	}
+	if info.Description != "" {
+		impl["description"] = info.Description
+	}
+	if info.WebsiteURL != "" {
+		impl["websiteUrl"] = info.WebsiteURL
+	}
+	if len(info.Icons) > 0 {
+		impl["icons"] = info.Icons
 	}
 	encodedImpl, err := json.Marshal(impl)
 	if err != nil {

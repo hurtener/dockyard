@@ -198,6 +198,30 @@ a fresh scaffold that ran the post-step, that is a Dockyard bug; file it.
 - **Missing template** — `--template unknown` exits non-zero with the list
   of registered templates; see `dockyard new --help`.
 
+## Branding (logo, homepage, description)
+
+To make a host show the server's logo, set optional branding on `server.Info`
+(emitted in the handshake's `serverInfo`, SEP-973):
+
+```go
+server.Info{
+	Name:        "my-server",
+	Title:       "My Server",
+	Version:     "0.1.0",
+	Description: "What this server does.",
+	WebsiteURL:  "https://example.com/my-server",
+	Icons: []server.Icon{
+		{Src: "https://example.com/logo.png", MIMEType: "image/png", Theme: server.IconThemeLight},
+		{Src: "https://example.com/logo-dark.png", MIMEType: "image/png", Theme: server.IconThemeDark},
+	},
+}
+```
+
+`Icon.Src` must be an `https://` URL or a `data:` URI. Declare the same branding
+in `dockyard.app.yaml` (`icons`/`website_url`/`description`) for the tooling
+record. Rendering is client-dependent — a host MAY show the icon and MAY ignore
+it. See the "Server branding" guide.
+
 ## What to do next
 
 After scaffolding, the next skill depends on your goal:
