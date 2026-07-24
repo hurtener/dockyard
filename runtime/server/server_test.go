@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -68,7 +69,7 @@ func TestNew_Validation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New(%+v): unexpected error: %v", tc.info, err)
 			}
-			if got := s.Info(); got != tc.info {
+			if got := s.Info(); !reflect.DeepEqual(got, tc.info) {
 				t.Fatalf("Info() = %+v, want %+v", got, tc.info)
 			}
 		})

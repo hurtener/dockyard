@@ -7041,3 +7041,61 @@ addition to the allowlist, not a config knob.
    modern stateless lifecycle uses neither verb. Accepted and documented rather
    than fixed by per-session binding, which would break the shared-connection
    model this feature exists to serve.
+
+## D-203 — Server branding (SEP-973 icons, websiteUrl, description) in serverInfo
+
+**Date:** 2026-07-23
+**Status:** Settled (v1.12 wave A). RFC §5.1 amended.
+**Supersedes / changes:** nothing. Additive and opt-in; an unbranded server's
+`serverInfo` is byte-for-byte unchanged.
+**Where it lives:** `runtime/server` (`Info.Icons`/`WebsiteURL`/`Description`,
+the `Icon` type), `internal/protocolcodec` (`ServerInfo` + `Icon` wire shape, the
+modern `EncodeServerInfo` encoder), `internal/manifest` (top-level `icons`,
+`website_url`, `description` + validation), RFC §5.1, and
+`docs/site/guides/server-branding.md`.
+
+**Why.** MCP servers can advertise a logo, homepage, and description in the
+handshake's `serverInfo` (SEP-973 icons; the SDK's `mcp.Implementation` already
+models `Icons`/`WebsiteURL`/`Description`). Dockyard did not surface any of it:
+`server.Info` had only `Name`/`Title`/`Version`, the legacy `Implementation` was
+built from those three fields, and the modern `EncodeServerInfo` codec emitted a
+`map[string]string` that structurally could not carry an icons array. A
+Dockyard-built server therefore could not show its logo — not because a client
+ignored valid icons, but because the server never emitted them.
+
+**The decision.** Add opt-in branding to `server.Info` — `Icons []server.Icon`
+(a Dockyard-owned type, never the raw SDK `mcp.Icon`, per P3/§5.4),
+`WebsiteURL`, and `Description` — emitted in `serverInfo` on **both** lifecycles:
+mapped onto `mcp.Implementation` for legacy `2025-11-25` (the SDK serialises it),
+and encoded into the `_meta` serverInfo for stateless `2026-07-28` via
+`protocolcodec` (the only package that owns the wire shape). The manifest gains
+the same fields declaratively. Invariants, asserted by tests:
+
+- **Default unchanged.** No branding set ⇒ `serverInfo` omits `icons`,
+  `websiteUrl`, and `description` entirely — existing servers are byte-for-byte
+  unaffected.
+- **Validated.** `Icon.Src` is required and must be an `https://` URL or a
+  `data:image/` URI, checked on the raw value (an `http://` src, a non-image
+  `data:` URI, or a whitespace-padded src is rejected — most hosts drop mixed
+  content, an icon is an image, and validation must agree with what is emitted on
+  the wire); `Icon.Theme` is `light`/`dark`; `WebsiteURL` must be absolute
+  `https://`. The identical rule is enforced by `server.New` and by manifest
+  `Validate` / `dockyard validate`.
+- **Both lifecycles.** Legacy via `mcp.Implementation.Icons`; modern via
+  `EncodeServerInfo`, proven by an end-to-end initialize test and a codec test.
+
+**Manifest vs runtime — the source-of-truth boundary.** The `dockyard.app.yaml`
+manifest carries branding declaratively (for tooling, review, and docs), but the
+**runtime library never reads the manifest** — it can't: `internal/manifest` is
+internal to Dockyard's own module and is not importable by a generated user app,
+and `runtime/server` deliberately has no manifest dependency (mirroring how
+`name`/`title`/`version` already live independently in both the manifest and the
+hand-written `server.Info` today). So the live server emits from `server.Info`;
+the manifest is the declarative record; the two are kept in step by convention,
+not by a hidden runtime read. A true manifest→runtime auto-merge would require a
+new **public** manifest-loader API (or a codegen step that generates the branding
+into the user's package); that is deliberately deferred (V2 backlog) rather than
+bolted on here — it is a larger surface than the branding feature itself.
+
+Rendering remains client-dependent: SEP-973 icons are a hint a host MAY render
+and MAY ignore. Dockyard's job ends at emitting a valid, reachable `serverInfo`.

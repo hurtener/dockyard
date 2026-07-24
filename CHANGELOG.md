@@ -23,6 +23,23 @@ deliberately deferred to V2.
 
 (No entries yet — the next release surface will land here.)
 
+## [1.12.0] - 2026-07-23
+
+### Added
+
+- **Server branding — logos, homepage, and description in `serverInfo`
+  (SEP-973).** `server.Info` gains optional `Icons []server.Icon`, `WebsiteURL`,
+  and `Description`, emitted in the MCP handshake's `serverInfo` on both the
+  legacy `2025-11-25` and stateless `2026-07-28` lifecycles, so a host can render
+  your server's logo beside its name. `server.Icon` carries `Src` (an `https://`
+  URL or a `data:` URI, required), `MIMEType`, `Sizes`, and a light/dark `Theme`;
+  it is Dockyard's own type, never the raw SDK struct. The same branding can be
+  declared in `dockyard.app.yaml` (`icons`, `website_url`, `description`) and is
+  checked by `dockyard validate`. Icon rendering is client-dependent — a host MAY
+  show the icon and MAY ignore it — so this makes a logo possible, not
+  guaranteed. Off by default: an unbranded server's `serverInfo` is unchanged.
+  See the server-branding guide.
+
 ## [1.11.0] - 2026-07-22
 
 ### Added

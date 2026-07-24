@@ -846,6 +846,15 @@ the tool's `Builder` and read through `Builder.Flags()`. RFC §6.3. D-045.
 
 ## S
 
+**Server branding** — the optional logo, homepage, and description a Dockyard
+server advertises in the MCP handshake's `serverInfo` (SEP-973):
+`server.Info.Icons` (`[]server.Icon` — `Src` https/data, `MIMEType`, `Sizes`,
+light/dark `Theme`), `WebsiteURL`, and `Description`. Emitted on both lifecycles
+(via `mcp.Implementation` for legacy, `protocolcodec.EncodeServerInfo` for
+modern); also declarable in `dockyard.app.yaml` (`icons`/`website_url`/
+`description`). A host MAY render the icon and MAY ignore it — rendering is
+client-dependent. RFC §5.1. D-203.
+
 **Semver policy** — Dockyard's post-v1.0.0 versioning rule: major =
 breaking (a public runtime API, the manifest schema, a CLI verb, the
 `obs/v1` event shape, a P1–P4 binding property); minor = additive (a

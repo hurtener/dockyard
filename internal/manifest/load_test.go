@@ -24,6 +24,17 @@ func TestLoadFile_ValidFull(t *testing.T) {
 	if m.Version != "0.1.0" {
 		t.Errorf("Version = %q, want 0.1.0", m.Version)
 	}
+	if m.Description != "Customer health scores and account signals." {
+		t.Errorf("Description = %q", m.Description)
+	}
+	if m.WebsiteURL != "https://dockyard.example/customer-health" {
+		t.Errorf("WebsiteURL = %q", m.WebsiteURL)
+	}
+	if len(m.Icons) != 1 || m.Icons[0].Src != "https://dockyard.example/logo.png" ||
+		m.Icons[0].MIMEType != "image/png" || m.Icons[0].Theme != "light" ||
+		len(m.Icons[0].Sizes) != 1 || m.Icons[0].Sizes[0] != "48x48" {
+		t.Errorf("Icons = %+v", m.Icons)
+	}
 	if got := m.Runtime.Transports; len(got) != 2 || got[0] != TransportStdio || got[1] != TransportHTTP {
 		t.Errorf("Runtime.Transports = %v, want [stdio http]", got)
 	}
