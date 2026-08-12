@@ -23,6 +23,38 @@ deliberately deferred to V2.
 
 (No entries yet — the next release surface will land here.)
 
+## [1.13.0] - 2026-08-12
+
+### Added
+
+- **Configurable streamable-HTTP request-body limit —
+  `HTTPOptions.MaxRequestBodyBytes`.** The streamable-HTTP transport has always
+  bounded MCP request bodies at the go-sdk's hard-coded 4 MiB default
+  (`mcp.DefaultMaxRequestBodyBytes`), enforced by Dockyard's own middleware
+  before authorization or protocol decoding — a sound DoS default, but not
+  tunable. It now is, via a new public `server.HTTPOptions.MaxRequestBodyBytes
+  int64`:
+  - **Zero preserves the SDK default (4 MiB).** An unset option behaves exactly
+    as before — same limit, same `exceeds 4 MiB` 413 message — so existing
+    servers are byte-for-byte unaffected.
+  - **A positive value overrides the bound and is enforced twice, in
+    lock-step:** by Dockyard's body-limit middleware (still ahead of
+    authorization and decoding, so an oversized body never triggers auth/JWKS
+    work) and by the SDK handler — the value is forwarded into every lifecycle
+    the shared handler builds, Legacy, the deprecated Stateless+Legacy,
+    Stateless20260728, and both Dual legs — so the outer and SDK bounds can
+    never disagree. A server that legitimately accepts large inputs can raise
+    the limit; a stricter operational requirement can lower it.
+  - **A negative value is a constructor error.** `HTTPHandler` returns an error
+    instead of inheriting the SDK's "negative disables the limit" semantics on a
+    transport exposed to untrusted clients — Dockyard never silently disables
+    the DoS bound.
+  - **An over-limit request is rejected with 413, content-free** — before the
+    body is parsed as protocol content: a fixed-Content-Length POST on the
+    declared size alone (the body is never read), a chunked POST as soon as the
+    bound is crossed — in every lifecycle mode, with a limit-specific message.
+  Off by default; the default 4 MiB behavior is unchanged ([D-204](docs/decisions.md)).
+
 ## [1.12.0] - 2026-07-23
 
 ### Added
@@ -1055,7 +1087,11 @@ Vite, [tygo](https://github.com/gzuidhof/tygo),
 [modernc.org/sqlite](https://gitlab.com/cznic/sqlite), and
 [VitePress](https://vitepress.dev). Apache-2.0 licensed.
 
-[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/hurtener/dockyard/compare/v1.13.0...HEAD
+[1.13.0]: https://github.com/hurtener/dockyard/compare/v1.12.0...v1.13.0
+[1.12.0]: https://github.com/hurtener/dockyard/compare/v1.11.0...v1.12.0
+[1.11.0]: https://github.com/hurtener/dockyard/compare/v1.10.0...v1.11.0
+[1.10.0]: https://github.com/hurtener/dockyard/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/hurtener/dockyard/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/hurtener/dockyard/releases/tag/v1.8.0
 [1.7.3]: https://github.com/hurtener/dockyard/releases/tag/v1.7.3
