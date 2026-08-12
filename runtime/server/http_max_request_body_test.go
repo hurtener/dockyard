@@ -40,26 +40,34 @@ func bigDiscover(t *testing.T, size int) string {
 
 // TestHTTPHandlerMaxRequestBodyBytesZeroPreservesDefaultReject proves the zero
 // option keeps the pre-existing 4 MiB bound (D-204): a >4 MiB body that is a
-// VALID JSON-RPC initialize is rejected with 413 in every lifecycle mode, and
-// the rejection still carries the pre-existing "exceeds 4 MiB" message.
+// VALID JSON-RPC initialize is rejected with 413 in every lifecycle mode — the
+// session-based Legacy lifecycle, the modern Stateless20260728, Dual, and the
+// deprecated Stateless+Legacy lifecycle — and the rejection still carries the
+// pre-existing "exceeds 4 MiB" message.
 func TestHTTPHandlerMaxRequestBodyBytesZeroPreservesDefaultReject(t *testing.T) {
 	t.Parallel()
 	body := bigInitialize(t, (4<<20)+1)
 	for _, tc := range []struct {
-		name    string
-		mode    server.ProtocolMode
-		chunked bool
+		name      string
+		mode      server.ProtocolMode
+		stateless bool
+		chunked   bool
 	}{
-		{"legacy-content-length", server.Legacy, false},
-		{"stateless-content-length", server.Stateless20260728, false},
-		{"stateless-chunked", server.Stateless20260728, true},
-		{"dual-content-length", server.Dual, false},
+		{"legacy-content-length", server.Legacy, false, false},
+		{"stateless-content-length", server.Stateless20260728, false, false},
+		{"stateless-chunked", server.Stateless20260728, false, true},
+		{"dual-content-length", server.Dual, false, false},
+		// The deprecated Stateless+Legacy lifecycle: stateless frames with no
+		// protocol version header, served by the same shared newSDKHandler the
+		// modern modes use, so it must consume the same default limit (D-204).
+		{"deprecated-stateless-legacy-content-length", server.Legacy, true, false},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestServer(t)
 			h, err := s.HTTPHandler(&server.HTTPOptions{
 				ProtocolMode: tc.mode,
+				Stateless:    tc.stateless,
 				Security:     server.DefaultHTTPSecurity(),
 				// MaxRequestBodyBytes left zero: the SDK default 4 MiB applies.
 			})
@@ -90,9 +98,9 @@ func TestHTTPHandlerMaxRequestBodyBytesZeroPreservesDefaultReject(t *testing.T) 
 // TestHTTPHandlerMaxRequestBodyBytesConfiguredAdmitsOversized proves a positive
 // override raises the bound: the same >4 MiB body the default rejects is
 // admitted when MaxRequestBodyBytes is 5 MiB and reaches the SDK — a legacy
-// initialize answers 200 with a session and a modern server/discover answers
-// 200 — through both lifecycle handler stacks the shared newSDKHandler builds
-// (D-204).
+// initialize answers 200 with a session, a modern server/discover answers
+// 200 — through both lifecycle handler stacks the shared newSDKHandler builds,
+// including the deprecated Stateless+Legacy lifecycle (D-204).
 func TestHTTPHandlerMaxRequestBodyBytesConfiguredAdmitsOversized(t *testing.T) {
 	t.Parallel()
 	const limit = int64(5 << 20)
@@ -168,34 +176,79 @@ func TestHTTPHandlerMaxRequestBodyBytesConfiguredAdmitsOversized(t *testing.T) {
 			t.Fatalf("status = %d, want 200 (body reached decode; %s)", resp.StatusCode, raw)
 		}
 	})
+
+	t.Run("deprecated-stateless-legacy-initialize", func(t *testing.T) {
+		s := newTestServer(t)
+		h, err := s.HTTPHandler(&server.HTTPOptions{
+			// The deprecated Stateless+Legacy lifecycle (D-204): stateless
+			// frames with no protocol version header, built by the same shared
+			// newSDKHandler as the modern modes.
+			Stateless:           true,
+			Security:            server.DefaultHTTPSecurity(),
+			MaxRequestBodyBytes: limit,
+		})
+		if err != nil {
+			t.Fatalf("HTTPHandler: %v", err)
+		}
+		ts := httptest.NewServer(h)
+		t.Cleanup(ts.Close)
+
+		body := bigInitialize(t, (4<<20)+1)
+		req, err := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatalf("Do: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		raw, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == http.StatusRequestEntityTooLarge {
+			t.Fatalf("5 MiB limit rejected a %d-byte valid initialize on the deprecated Stateless+Legacy lifecycle with 413: %s", len(body), raw)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body reached decode; %s)", resp.StatusCode, raw)
+		}
+	})
 }
 
 // TestHTTPHandlerMaxRequestBodyBytesConfiguredRejectsOverLimit proves the
 // configured bound is enforced for both a fixed Content-Length POST and a
 // chunked POST (ContentLength -1, the MaxBytesReader path), and does so in the
-// Legacy, Stateless20260728, and Dual handler stacks alike — the shared
-// newSDKHandler forwards the same bound to each (D-204).
+// Legacy, Stateless20260728, Dual, and deprecated Stateless+Legacy handler
+// stacks alike — the shared newSDKHandler forwards the same bound to each
+// (D-204).
 func TestHTTPHandlerMaxRequestBodyBytesConfiguredRejectsOverLimit(t *testing.T) {
 	t.Parallel()
 	const limit = int64(5 << 20)
 	body := bigInitialize(t, int(limit)+1)
 	for _, tc := range []struct {
-		name    string
-		mode    server.ProtocolMode
-		chunked bool
+		name      string
+		mode      server.ProtocolMode
+		stateless bool
+		chunked   bool
 	}{
-		{"legacy-content-length", server.Legacy, false},
-		{"legacy-chunked", server.Legacy, true},
-		{"stateless-content-length", server.Stateless20260728, false},
-		{"stateless-chunked", server.Stateless20260728, true},
-		{"dual-content-length", server.Dual, false},
-		{"dual-chunked", server.Dual, true},
+		{"legacy-content-length", server.Legacy, false, false},
+		{"legacy-chunked", server.Legacy, false, true},
+		{"stateless-content-length", server.Stateless20260728, false, false},
+		{"stateless-chunked", server.Stateless20260728, false, true},
+		{"dual-content-length", server.Dual, false, false},
+		{"dual-chunked", server.Dual, false, true},
+		// The deprecated Stateless+Legacy lifecycle (D-204): stateless frames
+		// with no protocol version header, built by the same shared
+		// newSDKHandler as the modern modes.
+		{"deprecated-stateless-legacy-content-length", server.Legacy, true, false},
+		{"deprecated-stateless-legacy-chunked", server.Legacy, true, true},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestServer(t)
 			h, err := s.HTTPHandler(&server.HTTPOptions{
 				ProtocolMode:        tc.mode,
+				Stateless:           tc.stateless,
 				Security:            server.DefaultHTTPSecurity(),
 				MaxRequestBodyBytes: limit,
 			})

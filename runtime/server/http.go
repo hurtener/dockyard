@@ -28,10 +28,11 @@ const jsonMediaType = "application/json"
 // maxMCPRequestBytes is the default streamable-HTTP request-body bound: 4 MiB,
 // the go-sdk's mcp.DefaultMaxRequestBodyBytes (D-204). It applies when
 // HTTPOptions.MaxRequestBodyBytes is zero — the pre-existing Dockyard limit —
-// and a positive option overrides it. The two constants are kept identical by
-// construction so the Dockyard middleware and the SDK never disagree about the
-// default.
-const maxMCPRequestBytes = 4 << 20
+// and a positive option overrides it. The constant IS the SDK's
+// DefaultMaxRequestBodyBytes, derived from it at compile time rather than a
+// duplicate literal, so the Dockyard middleware and the SDK can never disagree
+// about the default.
+const maxMCPRequestBytes = int64(mcpsdk.DefaultMaxRequestBodyBytes)
 
 const (
 	protocolVersionHeader    = "Mcp-Protocol-Version"
