@@ -62,7 +62,6 @@ func TestHTTPHandlerMaxRequestBodyBytesZeroPreservesDefaultReject(t *testing.T) 
 		// modern modes use, so it must consume the same default limit (D-204).
 		{"deprecated-stateless-legacy-content-length", server.Legacy, true, false},
 	} {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestServer(t)
 			h, err := s.HTTPHandler(&server.HTTPOptions{
@@ -243,7 +242,6 @@ func TestHTTPHandlerMaxRequestBodyBytesConfiguredRejectsOverLimit(t *testing.T) 
 		{"deprecated-stateless-legacy-content-length", server.Legacy, true, false},
 		{"deprecated-stateless-legacy-chunked", server.Legacy, true, true},
 	} {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestServer(t)
 			h, err := s.HTTPHandler(&server.HTTPOptions{
