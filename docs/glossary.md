@@ -819,6 +819,15 @@ values stay shared — the seam is documented read-only; it may carry reserved k
 such as `progressToken`). The read-only sibling of **`RawArguments`**. RFC §5,
 §6.3. D-189.
 
+**Request-body limit** — the maximum byte size of an MCP streamable-HTTP request
+body. `HTTPOptions.MaxRequestBodyBytes` sets it: zero preserves the SDK default
+of 4 MiB, a positive value overrides it, and a negative value is a constructor
+error (the go-sdk would treat negative as "no limit"; Dockyard refuses an
+unbounded body on a transport exposed to untrusted clients). The same effective
+bound is enforced by Dockyard's body-limit middleware before
+authorization/decoding and forwarded to every SDK handler, so all lifecycles
+reject an over-limit body with 413. RFC §5.2. D-204.
+
 **Ring-buffer emitter** — the in-memory, bounded obs/v1 emitter driver
 (`obs.RingBuffer`, registered as `"ringbuffer"`) Phase 15 ships — the source the
 inspector pulls recent event history from. It is non-blocking by construction: a

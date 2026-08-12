@@ -60,7 +60,7 @@ func TestStatelessHTTPDoesNotLeakServerReadGoroutines(t *testing.T) {
 			// which layer owns any retained SDK server reader.
 			incremental := statelessRequestMiddleware(dockyardSDKHandler)
 			run("plus_stateless_request_context", incremental, nil)
-			incremental = mcpRequestBodyLimit(incremental)
+			incremental = mcpRequestBodyLimit(incremental, 0)
 			run("plus_body_limit", incremental, nil)
 			incremental = contentTypeMiddleware(incremental)
 			run("plus_content_type", incremental, nil)

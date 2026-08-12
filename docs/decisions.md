@@ -7099,3 +7099,59 @@ bolted on here — it is a larger surface than the branding feature itself.
 
 Rendering remains client-dependent: SEP-973 icons are a hint a host MAY render
 and MAY ignore. Dockyard's job ends at emitting a valid, reachable `serverInfo`.
+
+## D-204 — Configurable streamable-HTTP request-body limit (`HTTPOptions.MaxRequestBodyBytes`)
+
+**Date:** 2026-08-12
+**Status:** Settled (unreleased).
+**Supersedes / changes:** the hard-coded 4 MiB bound in `mcpRequestBodyLimit`;
+the default behavior is unchanged (zero option ⇒ byte-for-byte the previous
+limit and message). Additive opt-in option.
+**Where it lives:** `runtime/server/http.go` (`HTTPOptions.MaxRequestBodyBytes`,
+`maxRequestBodyBytes()`, `mcpRequestBodyLimit(next, limit)`,
+`bodyLimitMessage`), the go-sdk's `StreamableHTTPOptions.MaxRequestBodyBytes`,
+tests in `runtime/server/http_max_request_body_test.go`, and this entry.
+
+**Why.** The streamable-HTTP transport has always bounded MCP POST bodies at a
+hard-coded 4 MiB (`maxMCPRequestBytes`, enforced by Dockyard's own
+`mcpRequestBodyLimit` middleware *before authorization or protocol decoding* —
+the bounded read the D-202 handshake peek relies on). That is a sound DoS
+default, but it is not tunable: a server that legitimately accepts large inputs
+(embedded file content, big batch payloads) cannot raise it, and a server with a
+stricter operational requirement cannot lower it. The go-sdk exposes
+`StreamableHTTPOptions.MaxRequestBodyBytes` — default
+`mcp.DefaultMaxRequestBodyBytes` (4 MiB), enforced during body read for
+Content-Length, chunked, and HTTP/2 alike — but Dockyard never surfaced it. The
+SDK field alone is not enough: (a) Dockyard's middleware must stay in front of
+authorization so an oversized body never triggers auth/JWKS work or an unbounded
+peek, and (b) the SDK's negative-value semantics ("disable the limit entirely")
+are unacceptable to inherit on a transport exposed to untrusted clients.
+
+**The decision.** Add `HTTPOptions.MaxRequestBodyBytes int64`:
+
+- **Zero preserves the SDK default (4 MiB).** The pre-existing bound is
+  unchanged — same limit, same "exceeds 4 MiB" 413 message — so existing
+  servers are unaffected. `maxMCPRequestBytes` and `mcp.DefaultMaxRequestBodyBytes`
+  are kept identical by construction so the middleware and the SDK never
+  disagree about the default.
+- **A positive value overrides the bound** and is enforced twice: by Dockyard's
+  `mcpRequestBodyLimit` middleware (before authorization/decoding, preserving
+  the D-202 bounded-read invariant), and forwarded as `MaxRequestBodyBytes`
+  into **every** `mcpsdk.StreamableHTTPOptions` built by the shared
+  `newSDKHandler` — Legacy, the deprecated `Stateless`+Legacy,
+  `Stateless20260728`, and both Dual legs — so the SDK enforces the same bound
+  inside every lifecycle handler. The two enforcement points cannot disagree.
+- **A negative value is a constructor error.** `HTTPHandler` returns an error;
+  the SDK-alone interpretation (negative = no limit) is never forwarded.
+  Dockyard refuses to build a handler that silently disables the DoS bound.
+
+Invariants, asserted by the real-handler tests in
+`runtime/server/http_max_request_body_test.go`:
+
+- zero/default rejects a >4 MiB body — a syntactically valid initialize, not a
+  padding blob — with 413 in Legacy, Stateless20260728, and Dual;
+- a 5 MiB limit admits the same >4 MiB initialize (200 + `Mcp-Session-Id`) and
+  a >4 MiB modern `server/discover` (200), proving the body reached decode;
+- limit+1 rejects both fixed-Content-Length and chunked POSTs with 413 across
+  the same modes;
+- negative is a constructor error; zero still constructs.

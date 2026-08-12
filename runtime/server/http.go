@@ -25,6 +25,12 @@ import (
 // other media type.
 const jsonMediaType = "application/json"
 
+// maxMCPRequestBytes is the default streamable-HTTP request-body bound: 4 MiB,
+// the go-sdk's mcp.DefaultMaxRequestBodyBytes (D-204). It applies when
+// HTTPOptions.MaxRequestBodyBytes is zero — the pre-existing Dockyard limit —
+// and a positive option overrides it. The two constants are kept identical by
+// construction so the Dockyard middleware and the SDK never disagree about the
+// default.
 const maxMCPRequestBytes = 4 << 20
 
 const (
@@ -113,6 +119,19 @@ type HTTPOptions struct {
 	// DefaultHTTPSecurity when Security is the zero value, so an app that does
 	// not opt out is secure by default.
 	Security HTTPSecurity
+	// MaxRequestBodyBytes overrides the maximum size of an MCP request body
+	// accepted on the streamable-HTTP transport. The zero value preserves the
+	// SDK default of 4 MiB (mcp.DefaultMaxRequestBodyBytes) — the pre-existing
+	// Dockyard bound (D-204). A positive value is enforced twice: by Dockyard's
+	// own body-limit middleware before authorization or protocol decoding, and
+	// by the SDK handler (Legacy, the deprecated Stateless+Legacy, and
+	// Stateless20260728, including both Dual legs), which receives the value in
+	// every mcpsdk.StreamableHTTPOptions built by HTTPHandler. Every lifecycle
+	// rejects an over-limit body with 413. A negative value is a constructor
+	// error: the SDK alone would treat it as "no limit", and Dockyard never
+	// silently disables the DoS bound on a transport exposed to untrusted
+	// clients.
+	MaxRequestBodyBytes int64
 	// ServerForRequest is the per-request server seam (the SDK's getServer
 	// callback, RFC §5.2): it is invoked once per incoming HTTP request to
 	// select the Server that handles it, enabling per-session or multi-tenant
@@ -140,6 +159,21 @@ func (o *HTTPOptions) security() HTTPSecurity {
 		return DefaultHTTPSecurity()
 	}
 	return o.Security
+}
+
+// maxRequestBodyBytes returns the streamable-HTTP request-body limit HTTPHandler
+// must enforce: 0 preserves the SDK default of 4 MiB and a positive value
+// overrides it. A negative value is an error — the go-sdk would interpret it as
+// "no limit", and HTTPHandler refuses to build a handler with that semantics on
+// a transport exposed to untrusted clients (D-204).
+func (o *HTTPOptions) maxRequestBodyBytes() (int64, error) {
+	if o == nil || o.MaxRequestBodyBytes == 0 {
+		return 0, nil
+	}
+	if o.MaxRequestBodyBytes < 0 {
+		return 0, errors.New("dockyard/runtime/server: HTTPOptions.MaxRequestBodyBytes must be non-negative")
+	}
+	return o.MaxRequestBodyBytes, nil
 }
 
 // HTTPHandler returns an http.Handler that serves the MCP protocol over the
@@ -201,6 +235,14 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The effective request-body bound. 0 preserves the SDK default of 4 MiB; a
+	// positive value is enforced by Dockyard's middleware AND forwarded to every
+	// SDK handler below; a negative value is rejected here as a constructor
+	// error (D-204).
+	maxRequestBodyBytes, err := opts.maxRequestBodyBytes()
+	if err != nil {
+		return nil, err
+	}
 	// Stateless predates ProtocolMode and accepted legacy frames without a
 	// protocol header. Preserve that deprecated behavior; only the explicit
 	// modern mode requires its version header before decoding.
@@ -210,6 +252,12 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 			Stateless:                  stateless,
 			Logger:                     s.log,
 			DisableLocalhostProtection: !sec.DNSRebindingProtection,
+			// Forward the configured request-body bound explicitly (D-204): zero
+			// preserves the SDK default of 4 MiB, a positive value is enforced by
+			// the SDK handler itself. Because every lifecycle handler is built
+			// here, the SDK-side limit covers Legacy, the deprecated
+			// Stateless+Legacy, Stateless20260728, and both Dual legs uniformly.
+			MaxRequestBodyBytes: maxRequestBodyBytes,
 		}))
 		if stateless {
 			// The SDK creates a temporary ServerSession for a modern request so
@@ -292,7 +340,10 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 	// Bound every MCP POST before authorization or protocol decoding. The SDK
 	// reads request bodies eagerly, so this limit must be owned by Dockyard and
 	// shared by both lifecycle handlers rather than delegated to a Tasks shim.
-	h = mcpRequestBodyLimit(h)
+	// The effective bound mirrors HTTPOptions.MaxRequestBodyBytes (zero ⇒ the
+	// 4 MiB SDK default); the same value is forwarded to every SDK handler
+	// above, so the two enforcement points can never disagree (D-204).
+	h = mcpRequestBodyLimit(h, maxRequestBodyBytes)
 	if sec.ContentTypeVerification {
 		// Content-Type verification as Dockyard middleware — set explicitly,
 		// never inherited from an SDK default (AGENTS.md §7, D-112). A
@@ -342,23 +393,32 @@ func (s *Server) HTTPHandler(opts *HTTPOptions) (http.Handler, error) {
 	return h, nil
 }
 
-func mcpRequestBodyLimit(next http.Handler) http.Handler {
+// mcpRequestBodyLimit bounds every MCP POST body at limit bytes, rejecting an
+// over-limit request with 413 before authorization or protocol decoding. A
+// limit <= 0 falls back to the 4 MiB SDK default (maxMCPRequestBytes);
+// HTTPHandler rejects a negative HTTPOptions.MaxRequestBodyBytes at
+// construction, so the only zero/negative value reaching a handler is the
+// explicit "preserve the default" zero (D-204).
+func mcpRequestBodyLimit(next http.Handler, limit int64) http.Handler {
+	if limit <= 0 {
+		limit = maxMCPRequestBytes
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if r.ContentLength > maxMCPRequestBytes {
-			http.Error(w, "MCP request body exceeds 4 MiB", http.StatusRequestEntityTooLarge)
+		if r.ContentLength > limit {
+			http.Error(w, bodyLimitMessage(limit), http.StatusRequestEntityTooLarge)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxMCPRequestBytes)
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		body, err := io.ReadAll(r.Body)
 		_ = r.Body.Close()
 		if err != nil {
 			var tooLarge *http.MaxBytesError
 			if errors.As(err, &tooLarge) {
-				http.Error(w, "MCP request body exceeds 4 MiB", http.StatusRequestEntityTooLarge)
+				http.Error(w, bodyLimitMessage(limit), http.StatusRequestEntityTooLarge)
 				return
 			}
 			http.Error(w, "read MCP request body", http.StatusBadRequest)
@@ -368,6 +428,17 @@ func mcpRequestBodyLimit(next http.Handler) http.Handler {
 		r.ContentLength = int64(len(body))
 		next.ServeHTTP(w, r)
 	})
+}
+
+// bodyLimitMessage renders the 413 rejection body for a request-body limit,
+// preserving the pre-existing "exceeds 4 MiB" wording for the default so the
+// zero option never regresses the message. A whole-MiB limit is reported in
+// MiB; any other limit in bytes (D-204).
+func bodyLimitMessage(limit int64) string {
+	if limit > 0 && limit%(1<<20) == 0 {
+		return fmt.Sprintf("MCP request body exceeds %d MiB", limit>>20)
+	}
+	return fmt.Sprintf("MCP request body exceeds %d bytes", limit)
 }
 
 type httpAuthorization struct {
