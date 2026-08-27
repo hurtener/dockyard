@@ -415,9 +415,10 @@ existing handlers, including unkeyed composite literals, remain source
 compatible. A content handler is deliberately complete-only (not MRTR): it
 returns a non-empty `Text` first, followed by a closed set of standard
 tools/call blocks (`TextContent`, `ImageContent`, `AudioContent`, `ResourceLink`,
-or `EmbeddedResource`). Dockyard rejects nil, sampling-only, and unknown blocks
-before the SDK sees them; `Structured` and `Meta` retain their existing
-destinations.
+or `EmbeddedResource`). When `Text` is non-empty, Dockyard emits it first;
+content-only results are also allowed. Dockyard rejects nil, sampling-only, and
+unknown blocks before the SDK sees them; `Structured` and `Meta` retain their
+existing destinations.
 
 ---
 
