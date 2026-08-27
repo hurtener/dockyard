@@ -40,17 +40,25 @@ type ToolDef struct {
 	Meta map[string]any
 }
 
-// ToolOutput is the result of a contract-first tool handler. It splits the two
-// channels of an MCP CallToolResult (RFC §6.3): Text is model-facing and lands
-// in content[]; Structured is the typed, UI-facing payload and lands in
-// structuredContent; Meta lands in _meta.
+// ToolOutput is the result of a contract-first tool handler. It maps the
+// channels of an MCP CallToolResult (RFC §6.3): Text is model-facing text and
+// lands in content[]; Content carries additional standard MCP content blocks
+// (for example ImageContent, AudioContent, or EmbeddedResource); Structured is
+// the typed, UI-facing payload and lands in structuredContent; Meta lands in
+// _meta.
 //
 // It is the seam the contract-first tool builder (runtime/tool, Phase 04) uses
 // so the builder controls the content/structuredContent routing without
-// reaching past the runtime into the raw SDK result type (P3 — the runtime
-// surface does not expose raw protocol structs).
+// reaching past the runtime into an untyped protocol envelope. Content uses
+// the official SDK's standard Content interface so an app can return a
+// spec-defined block without inventing an extension wire shape.
 type ToolOutput[Out any] struct {
-	Text              string
+	Text string
+	// Content contains additional standard MCP content blocks. Text, when
+	// non-empty, is emitted first; Content follows it in the order supplied.
+	// Callers should use Content for non-text blocks and leave model-facing
+	// prose in Text so the two are not duplicated.
+	Content           []mcpsdk.Content
 	Structured        Out
 	StructuredPresent bool
 	Meta              map[string]any
@@ -340,23 +348,26 @@ func addToolWithSchemasCore[In, Out any](
 			var zero Out
 			return nil, zero, err
 		}
-		// Populate Content explicitly so the model-facing text is the
-		// handler's Text — the SDK only auto-fills Content with the JSON of
-		// the output when Content is left unset (RFC §6.3).
+		// Populate Content explicitly so the model-facing text and any
+		// additional standard MCP content blocks are preserved. The SDK only
+		// auto-fills Content with the JSON of the output when Content is left
+		// unset (RFC §6.3).
 		//
 		// When the handler returns no model-facing text, start with a non-nil
 		// empty Content slice so object output is not duplicated into content[].
 		// The SDK deliberately appends serialized JSON for primitive and array
 		// output, as modern MCP says servers SHOULD provide that fallback. Keep
 		// it: protocol compliance takes precedence over minimizing model context.
-		res := &mcpsdk.CallToolResult{Content: []mcpsdk.Content{}}
+		content := make([]mcpsdk.Content, 0, len(result.Content)+1)
+		if result.Text != "" {
+			content = append(content, &mcpsdk.TextContent{Text: result.Text})
+		}
+		content = append(content, result.Content...)
+		res := &mcpsdk.CallToolResult{Content: content}
 		present, explicitNull := structuredPresence(result.Structured, result.StructuredPresent)
 		setStructuredPresence(ctx, present, explicitNull)
 		if explicitNull {
 			res.StructuredContent = json.RawMessage("null")
-		}
-		if result.Text != "" {
-			res.Content = []mcpsdk.Content{&mcpsdk.TextContent{Text: result.Text}}
 		}
 		if len(result.Meta) > 0 {
 			res.Meta = mcpsdk.Meta(result.Meta)

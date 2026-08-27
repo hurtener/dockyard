@@ -17,9 +17,9 @@
 //		Handler(handleShowRevenue).
 //		Register(srv)
 //
-// The handler returns a Result[Out]: its Text is model-facing (content[]) and
-// its Structured value is the typed, UI-facing payload (structuredContent),
-// per RFC §6.3.
+// The handler returns a Result[Out]: its Text and standard Content blocks are
+// model-facing (content[]), while its Structured value is the typed, UI-facing
+// payload (structuredContent), per RFC §6.3.
 //
 // Note on shape: brief 04's sketch writes app.Tool("x").Input[T]().Output[T]().
 // Go does not permit type parameters on methods, so the contract types are

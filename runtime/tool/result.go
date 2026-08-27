@@ -1,11 +1,17 @@
 package tool
 
-import "github.com/hurtener/dockyard/runtime/tasks"
+import (
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/hurtener/dockyard/runtime/tasks"
+)
 
 // Result is what a Dockyard tool handler returns: a small typed value the
 // runtime maps onto a standard MCP CallToolResult (RFC §6.3).
 //
-//   - Text becomes content[] — model-facing text that enters the LLM context.
+//   - Text becomes the first content[] block — model-facing text that enters the LLM context.
+//   - Content appends standard MCP content blocks such as ImageContent,
+//     AudioContent, and EmbeddedResource.
 //   - Structured becomes structuredContent — the typed, UI-facing payload, kept
 //     out of the model context. Its shape is the tool's generated output schema.
 //   - Meta becomes _meta — extension metadata (for example a viewUUID once the
@@ -17,6 +23,10 @@ import "github.com/hurtener/dockyard/runtime/tasks"
 type Result[Out any] struct {
 	// Text is the model-facing text rendered into content[].
 	Text string
+	// Content contains additional standard MCP content blocks. Text, when
+	// non-empty, is emitted first; Content follows it in the order supplied.
+	// Use Content for non-text blocks and leave model-facing prose in Text.
+	Content []mcpsdk.Content
 	// Structured is the typed, UI-facing output rendered into
 	// structuredContent. Its type is the tool's output contract.
 	Structured Out

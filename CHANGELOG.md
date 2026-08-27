@@ -21,7 +21,10 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-(No entries yet — the next release surface will land here.)
+- **Standard typed tool content.** Contract-first handlers can now return the
+  official MCP `ImageContent`, `AudioContent`, and `EmbeddedResource` blocks
+  alongside model-facing text while preserving `structuredContent` and `_meta`
+  routing ([D-205](docs/decisions.md)).
 
 ## [1.13.0] - 2026-08-12
 

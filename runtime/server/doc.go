@@ -17,8 +17,9 @@
 // provably the generated contract, not whatever the SDK would infer separately.
 // Its handler returns a ToolOutput[Out] (a ToolOutputFunc), which splits the two
 // channels of an MCP CallToolResult (RFC §6.3): Text is model-facing and lands
-// in content[], Structured is the typed UI payload and lands in
-// structuredContent, and Meta lands in _meta.
+// in the first content[] block; Content carries additional standard MCP blocks;
+// Structured is the typed UI payload and lands in structuredContent, and Meta
+// lands in _meta.
 //
 // Phase 07 completes the MCP server core (RFC §5): typed resource registration
 // (AddResource), the streamable-HTTP transport (HTTPHandler) alongside stdio,
