@@ -402,19 +402,22 @@ A Dockyard tool handler therefore returns a small typed result:
 
 ```go
 type Result[Out any] struct {
-    Text       string             // -> first content[] block (model-facing)
-    Content    []mcp.Content      // -> additional standard content[] blocks
-    Structured Out                // -> structuredContent (UI-facing, typed)
-    Meta       map[string]any     // -> _meta (e.g. viewUUID)
+    Text       string         // -> content[]  (model-facing)
+    Structured Out            // -> structuredContent (UI-facing, typed)
+    Meta       map[string]any // -> _meta (e.g. viewUUID)
 }
 ```
 
-`Content` is the official SDK's standard MCP content interface. Dockyard emits
-non-empty `Text` first and then appends `Content` in caller order, preserving
-standard `ImageContent`, `AudioContent`, and `EmbeddedResource` blocks without
-inventing an application envelope. A handler must keep model-facing prose in
-`Text` and use `Content` for non-text blocks; `Structured` remains the typed
-UI payload and is never copied into `content[]`.
+For tools that need to return standard non-text content, the additive
+`runtime/tool.ContentBuilder` path uses `ContentResult[Out]` instead. The
+released `Result[Out]` and `server.ToolOutput[Out]` shapes remain unchanged so
+existing handlers, including unkeyed composite literals, remain source
+compatible. A content handler is deliberately complete-only (not MRTR): it
+returns a non-empty `Text` first, followed by a closed set of standard
+tools/call blocks (`TextContent`, `ImageContent`, `AudioContent`, `ResourceLink`,
+or `EmbeddedResource`). Dockyard rejects nil, sampling-only, and unknown blocks
+before the SDK sees them; `Structured` and `Meta` retain their existing
+destinations.
 
 ---
 

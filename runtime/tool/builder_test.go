@@ -251,45 +251,6 @@ func TestBuilderRoutesContentAndStructured(t *testing.T) {
 	}
 }
 
-// TestBuilderRoutesStandardContent proves the contract-first builder carries
-// standard MCP content blocks through its server seam while retaining the
-// existing text/structured channels.
-func TestBuilderRoutesStandardContent(t *testing.T) {
-	t.Parallel()
-	s := newServer(t)
-	if err := tool.New[revenueInput, revenueOutput]("show_media").
-		Handler(func(context.Context, revenueInput) (tool.Result[revenueOutput], error) {
-			return tool.Result[revenueOutput]{
-				Text: "media ready",
-				Content: []mcpsdk.Content{&mcpsdk.ImageContent{
-					Data:     []byte{1, 2, 3},
-					MIMEType: "image/png",
-				}},
-				Structured: revenueOutput{Headline: "ready"},
-			}, nil
-		}).
-		Register(s); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-
-	res, err := connect(t, s).CallTool(context.Background(), &mcpsdk.CallToolParams{
-		Name:      "show_media",
-		Arguments: revenueInput{Period: "2026-Q1"},
-	})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-	if res.IsError || len(res.Content) != 2 {
-		t.Fatalf("CallTool = error=%v content=%#v, want text and image", res.IsError, res.Content)
-	}
-	if got, ok := res.Content[0].(*mcpsdk.TextContent); !ok || got.Text != "media ready" {
-		t.Fatalf("content[0] = %#v, want text", res.Content[0])
-	}
-	if got, ok := res.Content[1].(*mcpsdk.ImageContent); !ok || got.MIMEType != "image/png" || string(got.Data) != string([]byte{1, 2, 3}) {
-		t.Fatalf("content[1] = %#v, want image/png bytes", res.Content[1])
-	}
-}
-
 func TestBuilderRejectsMisuse(t *testing.T) {
 	t.Parallel()
 	s := newServer(t)

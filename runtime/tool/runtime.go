@@ -119,7 +119,6 @@ func (rt *handlerRuntime[In, Out]) serve(ctx context.Context, call server.ToolCa
 
 	return server.ToolOutput[Out]{
 		Text:              res.Text,
-		Content:           res.Content,
 		Structured:        res.Structured,
 		StructuredPresent: res.StructuredPresent,
 		Meta:              res.Meta,
