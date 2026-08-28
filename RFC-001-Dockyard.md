@@ -412,13 +412,12 @@ For tools that need to return standard non-text content, the additive
 `runtime/tool.ContentBuilder` path uses `ContentResult[Out]` instead. The
 released `Result[Out]` and `server.ToolOutput[Out]` shapes remain unchanged so
 existing handlers, including unkeyed composite literals, remain source
-compatible. A content handler is deliberately complete-only (not MRTR): it
-returns a non-empty `Text` first, followed by a closed set of standard
-tools/call blocks (`TextContent`, `ImageContent`, `AudioContent`, `ResourceLink`,
-or `EmbeddedResource`). When `Text` is non-empty, Dockyard emits it first;
-content-only results are also allowed. Dockyard rejects nil, sampling-only, and
-unknown blocks before the SDK sees them; `Structured` and `Meta` retain their
-existing destinations.
+compatible. A content handler is deliberately complete-only (not MRTR): it may
+return `Text` and, when non-empty, Dockyard emits it first, followed by a closed
+set of standard tools/call blocks (`TextContent`, `ImageContent`, `AudioContent`,
+`ResourceLink`, or `EmbeddedResource`). Content-only results are also allowed.
+Dockyard rejects nil, sampling-only, and unknown blocks before the SDK sees them;
+`Structured` and `Meta` retain their existing destinations.
 
 ---
 

@@ -21,6 +21,10 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-08-27
+
+### Added
+
 - **Standard typed tool content.** Complete-only contract-first handlers can
   return the official MCP `ImageContent`, `AudioContent`, `ResourceLink`, and
   `EmbeddedResource` blocks alongside model-facing text through the additive
