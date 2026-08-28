@@ -7155,3 +7155,40 @@ Invariants, asserted by the real-handler tests in
 - limit+1 rejects both fixed-Content-Length and chunked POSTs with 413 across
   the same modes;
 - negative is a constructor error; zero still constructs.
+
+## D-205 — Complete-only contract-first handlers preserve standard MCP typed content blocks
+
+**Date:** 2026-08-27
+**Status:** Settled (unreleased).
+**Where it lives:** the additive `runtime/tool.ContentResult` /
+`runtime/tool.NewContent` and `runtime/server.ContentToolOutput` /
+`AddContentToolWithSchemas` seams; coverage is in
+`runtime/tool/content_test.go` and `runtime/server/content_tool_test.go`.
+
+**Why.** The contract-first seam previously exposed only one model-facing text
+string plus typed `structuredContent`. That made a standard MCP server unable
+to return a verified image, audio payload, or embedded resource through
+Dockyard without placing bytes in a UI payload or inventing an application
+envelope. Both choices break the MCP content/structuredContent separation and
+prevent hosts from handling the standard content variants.
+
+**The decision.** Keep the released `tool.Result` and `server.ToolOutput`
+structs unchanged, including their field order, so existing handlers and
+unkeyed composite literals remain source-compatible. Add a parallel
+complete-only `ContentResult` / `ContentToolOutput` path. The official Go SDK
+content interface is used directly; Dockyard does not add media-specific
+behavior or Harbor/Pengui semantics. A non-empty `Text` value is emitted as the
+first `content[]` block, then `Content` is appended in the supplied order.
+`Structured` and `Meta` keep their existing destinations and semantics.
+
+The content path accepts only `TextContent`, `ImageContent`, `AudioContent`,
+`ResourceLink`, and `EmbeddedResource`. Nil blocks, sampling-only
+`ToolUseContent`/`ToolResultContent`, and unknown values are rejected as a
+typed tool error before the SDK sees them. It exposes no `InputRequests`,
+`RequestState`, or continuation handler, structurally preventing the SDK's
+invalid content-plus-MRTR combination.
+
+The seam carries caller-provided standard blocks but does not buffer or fetch
+their bytes. Individual applications remain responsible for identity, MIME
+verification, size ceilings, and whether a result is ready before placing
+content in `Content`; Dockyard must not fetch URLs or infer application policy.

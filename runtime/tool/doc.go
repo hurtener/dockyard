@@ -20,6 +20,9 @@
 // The handler returns a Result[Out]: its Text is model-facing (content[]) and
 // its Structured value is the typed, UI-facing payload (structuredContent),
 // per RFC §6.3.
+// A complete-only handler that needs standard non-text blocks can instead use
+// NewContent and ContentResult; that additive path validates content at the
+// server edge and deliberately has no continuation state.
 //
 // Note on shape: brief 04's sketch writes app.Tool("x").Input[T]().Output[T]().
 // Go does not permit type parameters on methods, so the contract types are

@@ -19,6 +19,10 @@
 // channels of an MCP CallToolResult (RFC §6.3): Text is model-facing and lands
 // in content[], Structured is the typed UI payload and lands in
 // structuredContent, and Meta lands in _meta.
+// Tools that need standard non-text content use AddContentToolWithSchemas and
+// ContentToolOutput; that additive path is complete-only, validates the closed
+// tools/call content family, and leaves ToolOutput unchanged for existing
+// handlers and continuations.
 //
 // Phase 07 completes the MCP server core (RFC §5): typed resource registration
 // (AddResource), the streamable-HTTP transport (HTTPHandler) alongside stdio,

@@ -21,7 +21,16 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
-(No entries yet — the next release surface will land here.)
+## [1.14.0] - 2026-08-27
+
+### Added
+
+- **Standard typed tool content.** Complete-only contract-first handlers can
+  return the official MCP `ImageContent`, `AudioContent`, `ResourceLink`, and
+  `EmbeddedResource` blocks alongside model-facing text through the additive
+  `runtime/tool.NewContent` path. The released `tool.Result` and
+  `server.ToolOutput` APIs remain source-compatible, while invalid or
+  sampling-only blocks are rejected before serialization ([D-205](docs/decisions.md)).
 
 ## [1.13.0] - 2026-08-12
 
