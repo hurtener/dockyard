@@ -21,6 +21,8 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-11-09
+
 ### Fixed
 
 - JWT/JWKS validation can retain known verification keys during issuer outages
