@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -25,6 +26,10 @@ import (
 // DriverName is the name this validator driver registers under.
 const DriverName = "jwt-jwks"
 
+// DefaultMaxStale is the recommended stale-if-error window. Set Config.MaxStale
+// explicitly to this value to enable it; a zero MaxStale disables stale keys.
+const DefaultMaxStale = 24 * time.Hour
+
 const (
 	defaultFetchTimeout = 10 * time.Second
 	minResponseBytes    = 1 << 10
@@ -32,6 +37,7 @@ const (
 	maxKeyCount         = 128
 	minCacheTTL         = time.Second
 	maxCacheTTL         = 24 * time.Hour
+	maxStaleWindow      = 7 * 24 * time.Hour
 	minRefreshCooldown  = time.Second
 	maxRefreshCooldown  = 5 * time.Minute
 	maxClockSkew        = 5 * time.Minute
@@ -42,10 +48,11 @@ const (
 var errUnsupportedJWK = errors.New("jwt-jwks: unsupported jwk")
 
 // Config controls bounded discovery and key caching. Zero values receive secure
-// defaults. AllowedAlgorithms must explicitly contain only RS256, RS384, RS512,
+// defaults, except MaxStale, whose zero value disables stale keys.
+// AllowedAlgorithms must explicitly contain only RS256, RS384, RS512,
 // ES256, ES384, or ES512. MaxResponseBytes is constrained to 1 KiB..4 MiB,
 // MaxKeys to 1..128, CacheTTL to 1 second..24 hours, RefreshCooldown to
-// 1 second..5 minutes, and ClockSkew to 0..5 minutes.
+// 1 second..5 minutes, MaxStale to 0..7 days, and ClockSkew to 0..5 minutes.
 type Config struct {
 	// AllowedAlgorithms is mandatory and limits both JWT headers and usable JWKs.
 	AllowedAlgorithms []string     `json:"allowed_algorithms"`
@@ -56,6 +63,10 @@ type Config struct {
 	MaxKeys int `json:"max_keys,omitempty"`
 	// CacheTTL controls successful JWKS retention (default 15 minutes).
 	CacheTTL time.Duration `json:"cache_ttl,omitempty"`
+	// MaxStale allows cached keys after CacheTTL only when refresh fails.
+	// Zero disables fallback; DefaultMaxStale provides a 24-hour window.
+	// Removed keys may remain trusted during this window if the issuer is unavailable.
+	MaxStale time.Duration `json:"max_stale,omitempty"`
 	// RefreshCooldown rate-limits repeated JWKS refresh attempts (default 5 seconds).
 	RefreshCooldown time.Duration `json:"refresh_cooldown,omitempty"`
 	// ClockSkew is JWT time-claim leeway (default zero).
@@ -82,6 +93,7 @@ type Validator struct {
 	maxBytes                  int64
 	maxKeys                   int
 	ttl, cooldown, skew       time.Duration
+	maxStale                  time.Duration
 	now                       func() time.Time
 	mu                        sync.RWMutex
 	refreshMu                 sync.Mutex
@@ -149,6 +161,9 @@ func New(ctx context.Context, issuer, resource string, cfg Config) (*Validator, 
 	if cfg.CacheTTL < minCacheTTL || cfg.CacheTTL > maxCacheTTL {
 		return nil, fmt.Errorf("jwt-jwks: cache TTL must be between %s and %s", minCacheTTL, maxCacheTTL)
 	}
+	if cfg.MaxStale < 0 || cfg.MaxStale > maxStaleWindow {
+		return nil, fmt.Errorf("jwt-jwks: max stale must be between 0s and %s", maxStaleWindow)
+	}
 	if cfg.RefreshCooldown < minRefreshCooldown || cfg.RefreshCooldown > maxRefreshCooldown {
 		return nil, fmt.Errorf("jwt-jwks: refresh cooldown must be between %s and %s", minRefreshCooldown, maxRefreshCooldown)
 	}
@@ -178,7 +193,7 @@ func New(ctx context.Context, issuer, resource string, cfg Config) (*Validator, 
 	if err != nil || jwks.Scheme != "https" || jwks.Host == "" || jwks.User != nil || jwks.Fragment != "" {
 		return nil, errors.New("jwt-jwks: invalid HTTPS jwks_uri")
 	}
-	v := &Validator{issuer: issuer, resource: resource, jwksURI: metadata.JWKSURI, algorithms: append([]string(nil), cfg.AllowedAlgorithms...), client: cfg.HTTPClient, maxBytes: cfg.MaxResponseBytes, maxKeys: cfg.MaxKeys, ttl: cfg.CacheTTL, cooldown: cfg.RefreshCooldown, skew: cfg.ClockSkew, now: cfg.Now}
+	v := &Validator{issuer: issuer, resource: resource, jwksURI: metadata.JWKSURI, algorithms: append([]string(nil), cfg.AllowedAlgorithms...), client: cfg.HTTPClient, maxBytes: cfg.MaxResponseBytes, maxKeys: cfg.MaxKeys, ttl: cfg.CacheTTL, maxStale: cfg.MaxStale, cooldown: cfg.RefreshCooldown, skew: cfg.ClockSkew, now: cfg.Now}
 	if err := v.refresh(ctx, true); err != nil {
 		return nil, err
 	}
@@ -207,15 +222,14 @@ func (v *Validator) Validate(ctx context.Context, token string) (authz.Principal
 	v.mu.RLock()
 	expired := !v.now().Before(v.expires)
 	v.mu.RUnlock()
+	allowStale := false
 	if expired {
-		if err := v.refresh(ctx, false); err != nil {
-			return authz.Principal{}, authz.ErrInvalidToken
-		}
+		allowStale = v.refresh(ctx, false) != nil
 	}
-	parsed, claims, err := v.parse(ctx, token, true)
+	parsed, claims, err := v.parse(ctx, token, true, allowStale)
 	if err != nil && errors.Is(err, jwt.ErrTokenSignatureInvalid) {
 		if refreshErr := v.refresh(ctx, true); refreshErr == nil {
-			parsed, claims, err = v.parse(ctx, token, false)
+			parsed, claims, err = v.parse(ctx, token, false, false)
 		}
 	}
 	if err != nil || !parsed.Valid {
@@ -232,17 +246,17 @@ func (v *Validator) Validate(ctx context.Context, token string) (authz.Principal
 	return authz.Principal{Issuer: v.issuer, Subject: sub, Resource: v.resource, Scopes: scopes}, nil
 }
 
-func (v *Validator) parse(ctx context.Context, token string, refreshUnknown bool) (*jwt.Token, jwt.MapClaims, error) {
+func (v *Validator) parse(ctx context.Context, token string, refreshUnknown, allowStale bool) (*jwt.Token, jwt.MapClaims, error) {
 	claims := jwt.MapClaims{}
 	parsed, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
 		kid, ok := t.Header["kid"].(string)
 		if !ok || kid == "" {
 			return nil, errors.New("missing key id")
 		}
-		key, ok := v.key(kid)
+		key, ok, stale := v.key(kid, allowStale)
 		if !ok && refreshUnknown {
 			if refreshErr := v.refresh(ctx, true); refreshErr == nil {
-				key, ok = v.key(kid)
+				key, ok, stale = v.key(kid, false)
 			}
 		}
 		if !ok {
@@ -250,6 +264,9 @@ func (v *Validator) parse(ctx context.Context, token string, refreshUnknown bool
 		}
 		if err := key.matches(t.Method.Alg()); err != nil {
 			return nil, err
+		}
+		if stale {
+			slog.DebugContext(ctx, "jwt-jwks: using stale verification keys after refresh failure")
 		}
 		return key.key, nil
 	}, jwt.WithValidMethods(v.algorithms), jwt.WithIssuer(v.issuer), jwt.WithAudience(v.resource), jwt.WithExpirationRequired(), jwt.WithLeeway(v.skew), jwt.WithTimeFunc(v.now))
@@ -275,11 +292,16 @@ func parseScopes(claims jwt.MapClaims) ([]string, bool) {
 	return parts, true
 }
 
-func (v *Validator) key(kid string) (verificationKey, bool) {
+func (v *Validator) key(kid string, allowStale bool) (verificationKey, bool, bool) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
+	now := v.now()
+	stale := !now.Before(v.expires)
+	if stale && (!allowStale || v.maxStale == 0 || !now.Before(v.expires.Add(v.maxStale))) {
+		return verificationKey{}, false, false
+	}
 	key, ok := v.keys[kid]
-	return key, ok
+	return key, ok, stale
 }
 
 func (v *Validator) refresh(ctx context.Context, force bool) error {
@@ -337,7 +359,9 @@ func (v *Validator) refresh(ctx context.Context, force bool) error {
 		return errors.New("jwt-jwks: no usable verification keys")
 	}
 	v.mu.Lock()
-	v.keys, v.expires = keys, now.Add(v.ttl)
+	// Retention is measured from the completed successful fetch. Failed or
+	// throttled attempts must never extend this deadline.
+	v.keys, v.expires = keys, v.now().Add(v.ttl)
 	v.mu.Unlock()
 	return nil
 }

@@ -21,6 +21,14 @@ deliberately deferred to V2.
 
 ## [Unreleased]
 
+### Fixed
+
+- JWT/JWKS validation can retain known verification keys during issuer outages
+  with bounded stale-if-error caching. Set `jwtjwks.Config.MaxStale` to
+  `jwtjwks.DefaultMaxStale` for a 24-hour window (maximum 7 days); zero preserves
+  rejection after cache expiry. Unknown keys still require a successful refresh,
+  retries remain rate-limited, and recovery immediately replaces the key set.
+
 ## [1.14.0] - 2026-08-27
 
 ### Added

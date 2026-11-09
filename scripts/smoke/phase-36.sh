@@ -20,6 +20,7 @@ run_focused_test() {
 
 if [ -f runtime/authz/config.go ] && [ -f runtime/authz/jwtjwks/validator.go ]; then ok "authorization packages exist"; else fail "authorization packages missing"; fi
 run_focused_test "JWT/JWKS driver registers" ./runtime/authz/jwtjwks '^TestDriverRegistered$'
+run_focused_test "JWKS stale fallback is bounded, throttled, and rotates on recovery" ./runtime/authz/jwtjwks '^TestStaleIfError'
 run_focused_test "metadata and bearer challenges are standards-shaped" ./runtime/server '^TestHTTPAuthorizationMetadataChallengesAndPrincipal$'
 run_focused_test "modern and legacy requests receive verified context" ./test/integration '^TestPhase36OAuthResourceServerEndToEnd$'
 run_focused_test "Tasks and MRTR continuations reject cross-principal access" ./runtime/server '^(TestAuthenticatedContinuationRejectsCrossPrincipalAndTampering|TestVerifiedTaskIdentityOverridesLegacyCallback)$'

@@ -104,6 +104,16 @@ supported metadata scopes, while `Config.RequiredScopes` is the global scope set
 required on every protected MCP operation; operation-specific callbacks are out of
 scope for this phase.
 
+`jwtjwks.Config.MaxStale time.Duration` (D-206) permits known keys after a
+failed post-expiry refresh until strictly before the last successful fetch plus
+`CacheTTL + MaxStale`. The range is zero to 7 days; zero disables fallback and
+`jwtjwks.DefaultMaxStale` explicitly selects the recommended 24-hour window.
+Failed attempts do not extend retention and remain subject to `RefreshCooldown`.
+Unknown IDs and invalid signatures still require successful refresh and
+verification. Recovery replaces the entire set immediately. Stale-key selection
+emits a content-free `slog` debug message. The package docs, OAuth guide, packaging
+skill, and smoke script document and exercise this public option.
+
 ## Design gate
 
 - Design from the pinned RFC 8414/8707/9728 requirements and the Phase 31
