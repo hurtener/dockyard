@@ -7192,3 +7192,41 @@ The seam carries caller-provided standard blocks but does not buffer or fetch
 their bytes. Individual applications remain responsible for identity, MIME
 verification, size ceilings, and whether a result is ready before placing
 content in `Content`; Dockyard must not fetch URLs or infer application policy.
+
+---
+
+## D-206 — JWT/JWKS stale-if-error caching is explicit and bounded
+
+**Date:** 2026-11-09
+**Status:** Settled (unreleased).
+**Where it lives:** `runtime/authz/jwtjwks`, RFC §19.2,
+`docs/plans/phase-36-oauth-resource-server.md`.
+
+**Why.** Rejecting every token at cache expiry when a trusted issuer briefly
+returns 502 makes resource-server availability depend on issuer deploy timing.
+Keeping keys indefinitely would hide revocations and remove the cache bound.
+
+**The decision.** Add `Config.MaxStale time.Duration`, bounded to zero through
+7 days. Zero disables fallback, preserving existing Go configuration behavior;
+`DefaultMaxStale` supplies the recommended 24-hour window for explicit use.
+A duration cannot distinguish omission from explicit zero, so automatic zero
+value defaulting would prevent the requested zero-disables behavior.
+
+After a transport error, timeout, HTTP 5xx or 429 refreshing an expired set,
+only known keys may be used, strictly before the start of the last successful
+fetch plus `CacheTTL + MaxStale`. Rejected documents and other HTTP statuses
+fail closed, preserving that category through cooldown and in-flight retries.
+Recheck the deadline at key selection, after any network or lock wait. Failed and throttled attempts
+never extend it. Unknown IDs and invalid signatures still require successful
+refresh and verification. Existing claim, algorithm, and scope checks remain.
+Use a non-blocking refresh lock for stale-eligible callers while one fetch is in
+flight; measure cooldown from attempt completion. A successful fetch immediately
+replaces the whole set with retention measured from fetch start. Log entry into
+stale mode once at `slog` Warn and recovery once at Info; keep per-request
+stale-key selection at Debug. All copy is fixed, with no token, claim, key ID,
+or endpoint values.
+
+A removed key can remain trusted during an outage until this deadline. The
+operator selects a window consistent with its revocation requirements. No
+background refresh worker, production client, or new observability protocol is
+introduced.

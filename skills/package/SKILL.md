@@ -72,6 +72,16 @@ For a public OAuth-protected endpoint, configure `server.HTTPOptions.Authorizati
 with a canonical HTTPS resource and trusted issuer as described in
 `docs/site/guides/oauth-protected-resource.md`. `Scopes` advertises all supported
 scopes; `RequiredScopes` is the global set required on every protected operation.
+For issuer outage tolerance, set `jwtjwks.Config.MaxStale` to
+`jwtjwks.DefaultMaxStale` (24 hours), bounded to 7 days; zero disables fallback.
+Only known cached keys can be used on transport errors, timeouts, HTTP 5xx or
+429, strictly within the window after `CacheTTL`, measured from fetch start.
+Rejected documents and other HTTP statuses fail closed. Stale-eligible requests
+use cached keys while one refresh is in flight. Unknown keys still require
+successful refresh, retries respect `RefreshCooldown` from attempt completion,
+and recovery immediately replaces the set. Choose the
+window with key revocation in mind: removed keys can remain trusted during an
+outage until the stale deadline.
 Build and install never acquire,
 embed, forward, or store OAuth tokens; Harbor owns the production client flow.
 

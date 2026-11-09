@@ -42,7 +42,7 @@ func newIssuer(t testing.TB) *issuerFixture {
 			_ = json.NewEncoder(w).Encode(map[string]string{"issuer": f.server.URL + "/tenant", "jwks_uri": f.server.URL + "/keys"})
 		case "/keys":
 			if f.outage.Load() {
-				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				http.Error(w, "unavailable", http.StatusBadGateway)
 				return
 			}
 			f.mu.RLock()
@@ -261,6 +261,8 @@ func TestConfigurationBoundsAndCustomClientTimeout(t *testing.T) {
 		{MaxKeys: maxKeyCount + 1},
 		{CacheTTL: minCacheTTL - time.Nanosecond},
 		{CacheTTL: maxCacheTTL + time.Nanosecond},
+		{MaxStale: -time.Nanosecond},
+		{MaxStale: maxStaleWindow + time.Nanosecond},
 		{RefreshCooldown: minRefreshCooldown - time.Nanosecond},
 		{RefreshCooldown: maxRefreshCooldown + time.Nanosecond},
 		{ClockSkew: maxClockSkew + time.Nanosecond},
