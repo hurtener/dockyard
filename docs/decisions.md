@@ -7212,14 +7212,19 @@ Keeping keys indefinitely would hide revocations and remove the cache bound.
 A duration cannot distinguish omission from explicit zero, so automatic zero
 value defaulting would prevent the requested zero-disables behavior.
 
-After a failed refresh of an expired set, only known keys may be used, strictly
-before the last successful fetch plus `CacheTTL + MaxStale`. Recheck the deadline
-at key selection, after any network or lock wait. Failed and throttled attempts
+After a transport error, timeout, HTTP 5xx or 429 refreshing an expired set,
+only known keys may be used, strictly before the start of the last successful
+fetch plus `CacheTTL + MaxStale`. Rejected documents and other HTTP statuses
+fail closed, preserving that category through cooldown and in-flight retries.
+Recheck the deadline at key selection, after any network or lock wait. Failed and throttled attempts
 never extend it. Unknown IDs and invalid signatures still require successful
 refresh and verification. Existing claim, algorithm, and scope checks remain.
-Reuse the refresh lock and cooldown; a successful fetch immediately replaces the
-whole set and starts a new retention window. Log stale-key selection at `slog`
-debug level with fixed copy and no token, claim, key ID, or endpoint values.
+Use a non-blocking refresh lock for stale-eligible callers while one fetch is in
+flight; measure cooldown from attempt completion. A successful fetch immediately
+replaces the whole set with retention measured from fetch start. Log entry into
+stale mode once at `slog` Warn and recovery once at Info; keep per-request
+stale-key selection at Debug. All copy is fixed, with no token, claim, key ID,
+or endpoint values.
 
 A removed key can remain trusted during an outage until this deadline. The
 operator selects a window consistent with its revocation requirements. No

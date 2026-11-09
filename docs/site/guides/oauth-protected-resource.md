@@ -61,8 +61,10 @@ the wire.
 the configured trusted issuer, requires the discovered issuer to match exactly,
 requires an HTTPS `jwks_uri`, bounds response size and key count, and rate-limits
 key refresh. Redirects for discovery and JWKS retrieval must stay on the original
-HTTPS origin. With `MaxStale` enabled, a failed refresh allows known cached keys
-until strictly before the last successful fetch plus `CacheTTL + MaxStale`.
+HTTPS origin. With `MaxStale` enabled, transport errors, timeouts, HTTP 5xx and
+429 allow known cached keys until strictly before the start of the last successful
+fetch plus `CacheTTL + MaxStale`. Rejected documents (including empty or unusable
+key sets) and other HTTP statuses, including 404/410, fail closed.
 Zero disables this fallback. It validates
 signature, JWT/JWK algorithm and key-type compatibility, exact issuer, exact
 audience, expiry, subject, and scopes. It never retains or logs the bearer token.
@@ -87,13 +89,16 @@ algorithm are ignored. A JWKS document with no usable verification key is
 rejected.
 
 Failed or throttled refreshes never extend the stale deadline. Concurrent stale
-requests share the existing refresh lock and `RefreshCooldown`; the first
+requests use cached keys immediately while one refresh is in flight.
+`RefreshCooldown` runs from completion of the last failed attempt; the first
 post-expiry refresh is still attempted when `CacheTTL` is shorter than the
-cooldown. Unknown key IDs and signature failures still require successful refresh
-and verification. Recovery immediately replaces the old set, including removed
+cooldown. A rejected response disables stale fallback until a usable set arrives.
+Unknown key IDs and signature failures still require successful refresh and
+verification. Recovery immediately replaces the old set, including removed
 keys. During an issuer outage, a removed key may remain trusted for the configured
 window, so choose `MaxStale` to match your key-revocation requirements. A
-content-free `slog` debug message records use of stale verification keys.
+content-free `slog` Warn message marks entry into stale mode and one Info message
+marks recovery. Per-request stale-key details remain at Debug.
 
 ## Metadata and challenges
 

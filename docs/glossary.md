@@ -1175,7 +1175,8 @@ have caught the v1.6.1 handshake bugs (D-179/D-180/D-181). The inspector host is
 held to the same schema. RFC §7.3. D-182.
 
 **Stale-if-error (JWKS)** — bounded use of the last successfully fetched known
-verification keys after cache expiry when refreshing the trusted issuer fails.
+verification keys after cache expiry on issuer transport errors, timeouts, HTTP
+5xx or 429; rejected documents and other HTTP statuses fail closed.
 `jwtjwks.Config.MaxStale` limits the additional lifetime; zero disables fallback.
 Refresh failures never move the deadline, unknown keys still require successful
 refresh, and recovery replaces the set immediately. D-206.

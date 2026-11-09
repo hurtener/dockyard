@@ -45,7 +45,21 @@ const (
 	maxRSAModulusBytes  = 1024
 )
 
-var errUnsupportedJWK = errors.New("jwt-jwks: unsupported jwk")
+var (
+	errUnsupportedJWK   = errors.New("jwt-jwks: unsupported jwk")
+	errRedirectRejected = errors.New("jwt-jwks: redirect rejected")
+)
+
+// availabilityError permits bounded stale fallback only for issuer unavailability.
+// Fixed messages keep transport URLs and other remote values out of errors/logs.
+type availabilityError struct{}
+
+func (*availabilityError) Error() string { return "jwt-jwks: issuer unavailable" }
+
+func isUnavailable(err error) bool {
+	var unavailable *availabilityError
+	return errors.As(err, &unavailable)
+}
 
 // Config controls bounded discovery and key caching. Zero values receive secure
 // defaults, except MaxStale, whose zero value disables stale keys.
@@ -63,7 +77,9 @@ type Config struct {
 	MaxKeys int `json:"max_keys,omitempty"`
 	// CacheTTL controls successful JWKS retention (default 15 minutes).
 	CacheTTL time.Duration `json:"cache_ttl,omitempty"`
-	// MaxStale allows cached keys after CacheTTL only when refresh fails.
+	// MaxStale allows cached keys after CacheTTL during issuer unavailability.
+	// Transport errors, timeouts, HTTP 5xx and 429 permit fallback; rejected
+	// documents and other HTTP statuses fail closed.
 	// Zero disables fallback; DefaultMaxStale provides a 24-hour window.
 	// Removed keys may remain trusted during this window if the issuer is unavailable.
 	MaxStale time.Duration `json:"max_stale,omitempty"`
@@ -99,6 +115,9 @@ type Validator struct {
 	refreshMu                 sync.Mutex
 	keys                      map[string]verificationKey
 	expires, lastAttempt      time.Time
+	lastRefreshErr            error
+	staleMode                 bool
+	staleBlocked              bool
 }
 
 func init() {
@@ -126,13 +145,16 @@ func New(ctx context.Context, issuer, resource string, cfg Config) (*Validator, 
 	callerRedirectPolicy := client.CheckRedirect
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) == 0 || req.URL.Scheme != "https" || !sameOrigin(req.URL, via[0].URL) {
-			return errors.New("jwt-jwks: redirect must remain on the HTTPS origin")
+			return errRedirectRejected
 		}
 		if callerRedirectPolicy != nil {
-			return callerRedirectPolicy(req, via)
+			if err := callerRedirectPolicy(req, via); err != nil {
+				return errRedirectRejected
+			}
+			return nil
 		}
 		if len(via) >= 10 {
-			return errors.New("jwt-jwks: too many redirects")
+			return errRedirectRejected
 		}
 		return nil
 	}
@@ -224,7 +246,7 @@ func (v *Validator) Validate(ctx context.Context, token string) (authz.Principal
 	v.mu.RUnlock()
 	allowStale := false
 	if expired {
-		allowStale = v.refresh(ctx, false) != nil
+		allowStale = isUnavailable(v.refresh(ctx, false))
 	}
 	parsed, claims, err := v.parse(ctx, token, true, allowStale)
 	if err != nil && errors.Is(err, jwt.ErrTokenSignatureInvalid) {
@@ -253,10 +275,10 @@ func (v *Validator) parse(ctx context.Context, token string, refreshUnknown, all
 		if !ok || kid == "" {
 			return nil, errors.New("missing key id")
 		}
-		key, ok, stale := v.key(kid, allowStale)
+		key, ok, stale := v.key(ctx, kid, allowStale)
 		if !ok && refreshUnknown {
 			if refreshErr := v.refresh(ctx, true); refreshErr == nil {
-				key, ok, stale = v.key(kid, false)
+				key, ok, stale = v.key(ctx, kid, false)
 			}
 		}
 		if !ok {
@@ -292,47 +314,77 @@ func parseScopes(claims jwt.MapClaims) ([]string, bool) {
 	return parts, true
 }
 
-func (v *Validator) key(kid string, allowStale bool) (verificationKey, bool, bool) {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
+// staleEligible is called with mu held. A rejected refresh disables fallback
+// through cooldown and subsequent in-flight attempts until a usable set arrives.
+func (v *Validator) staleEligible(now time.Time) bool {
+	return !v.staleBlocked && v.maxStale > 0 && !now.Before(v.expires) && now.Before(v.expires.Add(v.maxStale)) &&
+		(v.lastRefreshErr == nil || isUnavailable(v.lastRefreshErr))
+}
+
+func (v *Validator) key(ctx context.Context, kid string, allowStale bool) (verificationKey, bool, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	now := v.now()
 	stale := !now.Before(v.expires)
-	if stale && (!allowStale || v.maxStale == 0 || !now.Before(v.expires.Add(v.maxStale))) {
+	if stale && (!allowStale || !v.staleEligible(now)) {
 		return verificationKey{}, false, false
 	}
 	key, ok := v.keys[kid]
+	if ok && stale && !v.staleMode {
+		v.staleMode = true
+		slog.WarnContext(ctx, "jwt-jwks: entering stale verification mode")
+	}
 	return key, ok, stale
 }
 
-func (v *Validator) refresh(ctx context.Context, force bool) error {
-	v.refreshMu.Lock()
+func (v *Validator) refresh(ctx context.Context, force bool) (err error) {
+	if !v.refreshMu.TryLock() {
+		v.mu.RLock()
+		eligible := v.staleEligible(v.now())
+		v.mu.RUnlock()
+		if eligible {
+			// One caller owns the bounded fetch. Other eligible callers may use
+			// the cached set immediately while its availability is unresolved.
+			return &availabilityError{}
+		}
+		v.refreshMu.Lock()
+	}
 	defer v.refreshMu.Unlock()
-	now := v.now()
+	started := v.now()
 	v.mu.RLock()
-	fresh := now.Before(v.expires)
-	hasAttempted := !v.lastAttempt.IsZero()
-	cooldown := now.Sub(v.lastAttempt) < v.cooldown
-	attemptedSinceExpiry := !v.lastAttempt.Before(v.expires)
+	fresh := started.Before(v.expires)
+	cooldown := !v.lastAttempt.IsZero() && started.Sub(v.lastAttempt) < v.cooldown
+	lastErr := v.lastRefreshErr
 	v.mu.RUnlock()
-	if hasAttempted && cooldown {
+	if cooldown {
 		if fresh {
 			return nil
 		}
-		// The successful fill that produced this expiry must not prevent the
-		// first refresh after expiration when CacheTTL is shorter than the
-		// cooldown. Once a post-expiry attempt fails, keep throttling retries.
-		if attemptedSinceExpiry {
-			return errors.New("jwt-jwks: key refresh throttled")
+		// A successful fill must not suppress the first post-expiry attempt
+		// when CacheTTL is shorter than the cooldown. Preserve failure type.
+		if lastErr != nil {
+			return lastErr
 		}
 	}
 	if !force && fresh {
 		return nil
 	}
-	v.mu.Lock()
-	v.lastAttempt = now
-	v.mu.Unlock()
+	defer func() {
+		v.mu.Lock()
+		// Retry cooldown starts when an attempt finishes, even after a hang.
+		v.lastAttempt, v.lastRefreshErr = v.now(), err
+		if err == nil {
+			v.staleBlocked = false
+		} else if !isUnavailable(err) {
+			v.staleBlocked = true
+		}
+		v.mu.Unlock()
+	}()
 	var doc jwksDocument
 	if err := fetchJSON(ctx, v.client, v.jwksURI, v.maxBytes, &doc); err != nil {
+		if isUnavailable(err) {
+			return &availabilityError{}
+		}
 		return errors.New("jwt-jwks: key refresh failed")
 	}
 	if len(doc.Keys) == 0 || len(doc.Keys) > v.maxKeys {
@@ -359,9 +411,13 @@ func (v *Validator) refresh(ctx context.Context, force bool) error {
 		return errors.New("jwt-jwks: no usable verification keys")
 	}
 	v.mu.Lock()
-	// Retention is measured from the completed successful fetch. Failed or
-	// throttled attempts must never extend this deadline.
-	v.keys, v.expires = keys, v.now().Add(v.ttl)
+	// Retention starts before network I/O, conservatively bounding revocation.
+	// Failed and throttled attempts never extend this deadline.
+	v.keys, v.expires = keys, started.Add(v.ttl)
+	if v.staleMode {
+		v.staleMode = false
+		slog.InfoContext(ctx, "jwt-jwks: verification key refresh recovered")
+	}
 	v.mu.Unlock()
 	return nil
 }
@@ -374,15 +430,24 @@ func fetchJSON(ctx context.Context, client *http.Client, endpoint string, limit 
 	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, errRedirectRejected) {
+			return &availabilityError{}
+		}
 		return err
 	}
 	defer func() { err = errors.Join(err, resp.Body.Close()) }()
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 && resp.StatusCode <= 599 {
+			return &availabilityError{}
+		}
 		return fmt.Errorf("unexpected HTTP status %d", resp.StatusCode)
 	}
 	reader := io.LimitReader(resp.Body, limit+1)
 	data, err := io.ReadAll(reader)
 	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			return &availabilityError{}
+		}
 		return err
 	}
 	if int64(len(data)) > limit {

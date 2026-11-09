@@ -105,14 +105,17 @@ required on every protected MCP operation; operation-specific callbacks are out 
 scope for this phase.
 
 `jwtjwks.Config.MaxStale time.Duration` (D-206) permits known keys after a
-failed post-expiry refresh until strictly before the last successful fetch plus
-`CacheTTL + MaxStale`. The range is zero to 7 days; zero disables fallback and
+post-expiry transport error, timeout, HTTP 5xx or 429 until strictly before the
+start of the last successful fetch plus `CacheTTL + MaxStale`. The range is zero to 7 days; zero disables fallback and
 `jwtjwks.DefaultMaxStale` explicitly selects the recommended 24-hour window.
-Failed attempts do not extend retention and remain subject to `RefreshCooldown`.
+Rejected documents and other HTTP statuses fail closed, including during cooldown.
+Failed attempts do not extend retention; `RefreshCooldown` starts on completion.
+Stale-eligible requests use cached keys while one refresh is in flight.
 Unknown IDs and invalid signatures still require successful refresh and
-verification. Recovery replaces the entire set immediately. Stale-key selection
-emits a content-free `slog` debug message. The package docs, OAuth guide, packaging
-skill, and smoke script document and exercise this public option.
+verification. Recovery replaces the entire set immediately. Content-free `slog`
+Warn/Info messages mark stale mode and recovery; per-request detail is Debug.
+The package docs, OAuth guide, packaging skill, and smoke script document and
+exercise this public option.
 
 ## Design gate
 
